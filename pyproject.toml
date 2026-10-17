@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "layerforge-l1"
+version = "0.1.0"
+description = "LayerForge V3 L-1 physical layer-sheet feasibility proof"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "cadquery==2.6.1",
+  "matplotlib==3.9.0",
+  "numpy==2.2.6",
+  "opencv-python==4.10.0.84",
+  "Pillow==10.3.0",
+  "scipy==1.14.0",
+  "shapely==2.0.6",
+  "trimesh==4.8.3",
+]
+
+[project.optional-dependencies]
+test = ["pytest==8.3.5"]
+
+[project.scripts]
+layerforge-l1 = "layerforge_l1.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+

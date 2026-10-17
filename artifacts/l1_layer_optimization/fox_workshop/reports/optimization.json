@@ -1,0 +1,570 @@
+{
+  "case_id": "fox_workshop",
+  "status": "READY_FOR_USER_TEST",
+  "scope": "2D layer-stack optimization only; no CAD, STL, STEP, frame, or frontend",
+  "source_sha256": "d383b48e0cffbfa3c9d901042989d429e5f2d0f32c9d9922a6d026eff39efc3a",
+  "before": {
+    "layer_count": 21,
+    "total_retained_interior_pixel_layers": 4742117,
+    "unnecessary_hidden_interior_pixel_layers": 4479973,
+    "near_full_layer_count": 11,
+    "near_full_threshold_fraction": 0.95,
+    "tiny_visible_layer_count": 4,
+    "tiny_visible_threshold_fraction": 0.0005,
+    "minimum_visible_contribution_pixels": 1,
+    "minimum_visible_contribution_fraction": 3.814697265625e-06,
+    "geometry_pixel_accuracy_against_printable_target": 1.0,
+    "mean_absolute_rgb_error_against_original_0_255": 12.675092061360678,
+    "unsupported_thin_detail_count": 148
+  },
+  "optimized": {
+    "layer_count": 17,
+    "total_retained_interior_pixel_layers": 3526431,
+    "unnecessary_hidden_interior_pixel_layers": 3264287,
+    "near_full_layer_count": 3,
+    "near_full_threshold_fraction": 0.95,
+    "tiny_visible_layer_count": 0,
+    "tiny_visible_threshold_fraction": 0.0005,
+    "minimum_visible_contribution_pixels": 624,
+    "minimum_visible_contribution_fraction": 0.00238037109375,
+    "geometry_pixel_accuracy_against_printable_target": 1.0,
+    "mean_absolute_rgb_error_against_original_0_255": 12.675092061360678,
+    "unsupported_thin_detail_count": 148
+  },
+  "changes": {
+    "layers_removed": 4,
+    "retained_pixel_layers_reduction": 1215686,
+    "retained_pixel_layers_reduction_fraction": 0.2563593433059539,
+    "near_full_layers_removed": 8,
+    "tiny_visible_layers_removed": 4
+  },
+  "optimization_algorithm": {
+    "method": "bounded_region_graph_beam_search",
+    "global_minimum_proven": false,
+    "max_states_per_depth": 65536,
+    "explored_candidate_states": 1198986,
+    "pruned_candidate_states": 575784,
+    "frontier_widths": [
+      {
+        "depth": 1,
+        "candidate_states": 1,
+        "kept_states": 1
+      },
+      {
+        "depth": 2,
+        "candidate_states": 5,
+        "kept_states": 5
+      },
+      {
+        "depth": 3,
+        "candidate_states": 19,
+        "kept_states": 19
+      },
+      {
+        "depth": 4,
+        "candidate_states": 91,
+        "kept_states": 91
+      },
+      {
+        "depth": 5,
+        "candidate_states": 450,
+        "kept_states": 450
+      },
+      {
+        "depth": 6,
+        "candidate_states": 2041,
+        "kept_states": 2041
+      },
+      {
+        "depth": 7,
+        "candidate_states": 8282,
+        "kept_states": 8282
+      },
+      {
+        "depth": 8,
+        "candidate_states": 29715,
+        "kept_states": 29715
+      },
+      {
+        "depth": 9,
+        "candidate_states": 93914,
+        "kept_states": 65536
+      },
+      {
+        "depth": 10,
+        "candidate_states": 202375,
+        "kept_states": 65536
+      },
+      {
+        "depth": 11,
+        "candidate_states": 202455,
+        "kept_states": 65536
+      },
+      {
+        "depth": 12,
+        "candidate_states": 179100,
+        "kept_states": 65536
+      },
+      {
+        "depth": 13,
+        "candidate_states": 147681,
+        "kept_states": 65536
+      },
+      {
+        "depth": 14,
+        "candidate_states": 116287,
+        "kept_states": 65536
+      },
+      {
+        "depth": 15,
+        "candidate_states": 88280,
+        "kept_states": 65536
+      },
+      {
+        "depth": 16,
+        "candidate_states": 69980,
+        "kept_states": 65536
+      },
+      {
+        "depth": 17,
+        "candidate_states": 58310,
+        "kept_states": 58310
+      }
+    ],
+    "objective": [
+      "minimum completed layer count",
+      "minimum tiny-visible-contribution layer count",
+      "minimum cumulative retained interior pixel-layers",
+      "deterministic palette-index tie break"
+    ],
+    "winning_tiny_layer_count": 0,
+    "winning_retained_pixel_layers": 3526431
+  },
+  "layer_count_optimality": {
+    "palette_color_lower_bound": 9,
+    "optimized_layer_count": 17,
+    "global_minimum_proven": false,
+    "note": "The bounded search found the reported plan, but does not prove that no smaller repeated-color plan exists."
+  },
+  "one_layer_per_palette_color_audit": {
+    "feasible": false,
+    "tested_color_subsets": 511,
+    "reachable_valid_subsets": 0,
+    "maximum_distinct_colors_reached": 0,
+    "example_order_front_to_back": null,
+    "conclusion": "No ordering that uses each palette color exactly once keeps every cumulative retained mask connected to the perimeter. At least one repeated-color depth is required for exact reconstruction."
+  },
+  "repeated_color_layer_audit": [
+    {
+      "palette_index": 0,
+      "color": "#FBF1D6",
+      "occurrence_count": 3,
+      "front_to_back_occurrences": [
+        0,
+        3,
+        15
+      ],
+      "pairwise_merge_attempts": 6,
+      "feasible_pairwise_merges": 0,
+      "locally_necessary_in_selected_order": true,
+      "attempts": [
+        {
+          "occurrences": [
+            0,
+            3
+          ],
+          "moved_to_occurrence": 0,
+          "feasible": false,
+          "first_failure": {
+            "front_to_back_depth": 0,
+            "component_count": 18,
+            "border_connected_component_count": 1
+          }
+        },
+        {
+          "occurrences": [
+            0,
+            3
+          ],
+          "moved_to_occurrence": 3,
+          "feasible": false,
+          "first_failure": {
+            "front_to_back_depth": 0,
+            "component_count": 2,
+            "border_connected_component_count": 0
+          }
+        },
+        {
+          "occurrences": [
+            0,
+            15
+          ],
+          "moved_to_occurrence": 0,
+          "feasible": false,
+          "first_failure": {
+            "front_to_back_depth": 0,
+            "component_count": 8,
+            "border_connected_component_count": 1
+          }
+        },
+        {
+          "occurrences": [
+            0,
+            15
+          ],
+          "moved_to_occurrence": 15,
+          "feasible": false,
+          "first_failure": {
+            "front_to_back_depth": 0,
+            "component_count": 2,
+            "border_connected_component_count": 0
+          }
+        },
+        {
+          "occurrences": [
+            3,
+            15
+          ],
+          "moved_to_occurrence": 3,
+          "feasible": false,
+          "first_failure": {
+            "front_to_back_depth": 3,
+            "component_count": 8,
+            "border_connected_component_count": 1
+          }
+        },
+        {
+          "occurrences": [
+            3,
+            15
+          ],
+          "moved_to_occurrence": 15,
+          "feasible": false,
+          "first_failure": {
+            "front_to_back_depth": 4,
+            "component_count": 3,
+            "border_connected_component_count": 1
+          }
+        }
+      ]
+    },
+    {
+      "palette_index": 2,
+      "color": "#1A202C",
+      "occurrence_count": 3,
+      "front_to_back_occurrences": [
+        1,
+        5,
+        10
+      ],
+      "pairwise_merge_attempts": 6,
+      "feasible_pairwise_merges": 0,
+      "locally_necessary_in_selected_order": true,
+      "attempts": [
+        {
+          "occurrences": [
+            1,
+            5
+          ],
+          "moved_to_occurrence": 1,
+          "feasible": false,
+          "first_failure": {
+            "front_to_back_depth": 1,
+            "component_count": 12,
+            "border_connected_component_count": 1
+          }
+        },
+        {
+          "occurrences": [
+            1,
+            5
+          ],
+          "moved_to_occurrence": 5,
+          "feasible": false,
+          "first_failure": {
+            "front_to_back_depth": 1,
+            "component_count": 22,
+            "border_connected_component_count": 1
+          }
+        },
+        {
+          "occurrences": [
+            1,
+            10
+          ],
+          "moved_to_occurrence": 1,
+          "feasible": false,
+          "first_failure": {
+            "front_to_back_depth": 1,
+            "component_count": 11,
+            "border_connected_component_count": 1
+          }
+        },
+        {
+          "occurrences": [
+            1,
+            10
+          ],
+          "moved_to_occurrence": 10,
+          "feasible": false,
+          "first_failure": {
+            "front_to_back_depth": 1,
+            "component_count": 22,
+            "border_connected_component_count": 1
+          }
+        },
+        {
+          "occurrences": [
+            5,
+            10
+          ],
+          "moved_to_occurrence": 5,
+          "feasible": false,
+          "first_failure": {
+            "front_to_back_depth": 5,
+            "component_count": 11,
+            "border_connected_component_count": 1
+          }
+        },
+        {
+          "occurrences": [
+            5,
+            10
+          ],
+          "moved_to_occurrence": 10,
+          "feasible": false,
+          "first_failure": {
+            "front_to_back_depth": 5,
+            "component_count": 2,
+            "border_connected_component_count": 1
+          }
+        }
+      ]
+    },
+    {
+      "palette_index": 3,
+      "color": "#F88122",
+      "occurrence_count": 2,
+      "front_to_back_occurrences": [
+        9,
+        11
+      ],
+      "pairwise_merge_attempts": 2,
+      "feasible_pairwise_merges": 0,
+      "locally_necessary_in_selected_order": true,
+      "attempts": [
+        {
+          "occurrences": [
+            9,
+            11
+          ],
+          "moved_to_occurrence": 9,
+          "feasible": false,
+          "first_failure": {
+            "front_to_back_depth": 9,
+            "component_count": 3,
+            "border_connected_component_count": 1
+          }
+        },
+        {
+          "occurrences": [
+            9,
+            11
+          ],
+          "moved_to_occurrence": 11,
+          "feasible": false,
+          "first_failure": {
+            "front_to_back_depth": 9,
+            "component_count": 7,
+            "border_connected_component_count": 1
+          }
+        }
+      ]
+    },
+    {
+      "palette_index": 4,
+      "color": "#457D45",
+      "occurrence_count": 2,
+      "front_to_back_occurrences": [
+        7,
+        13
+      ],
+      "pairwise_merge_attempts": 2,
+      "feasible_pairwise_merges": 0,
+      "locally_necessary_in_selected_order": true,
+      "attempts": [
+        {
+          "occurrences": [
+            7,
+            13
+          ],
+          "moved_to_occurrence": 7,
+          "feasible": false,
+          "first_failure": {
+            "front_to_back_depth": 7,
+            "component_count": 4,
+            "border_connected_component_count": 1
+          }
+        },
+        {
+          "occurrences": [
+            7,
+            13
+          ],
+          "moved_to_occurrence": 13,
+          "feasible": false,
+          "first_failure": {
+            "front_to_back_depth": 9,
+            "component_count": 3,
+            "border_connected_component_count": 1
+          }
+        }
+      ]
+    },
+    {
+      "palette_index": 5,
+      "color": "#A66940",
+      "occurrence_count": 2,
+      "front_to_back_occurrences": [
+        4,
+        12
+      ],
+      "pairwise_merge_attempts": 2,
+      "feasible_pairwise_merges": 0,
+      "locally_necessary_in_selected_order": true,
+      "attempts": [
+        {
+          "occurrences": [
+            4,
+            12
+          ],
+          "moved_to_occurrence": 4,
+          "feasible": false,
+          "first_failure": {
+            "front_to_back_depth": 4,
+            "component_count": 4,
+            "border_connected_component_count": 1
+          }
+        },
+        {
+          "occurrences": [
+            4,
+            12
+          ],
+          "moved_to_occurrence": 12,
+          "feasible": false,
+          "first_failure": {
+            "front_to_back_depth": 4,
+            "component_count": 6,
+            "border_connected_component_count": 1
+          }
+        }
+      ]
+    },
+    {
+      "palette_index": 8,
+      "color": "#78B4B2",
+      "occurrence_count": 2,
+      "front_to_back_occurrences": [
+        2,
+        16
+      ],
+      "pairwise_merge_attempts": 2,
+      "feasible_pairwise_merges": 0,
+      "locally_necessary_in_selected_order": true,
+      "attempts": [
+        {
+          "occurrences": [
+            2,
+            16
+          ],
+          "moved_to_occurrence": 2,
+          "feasible": false,
+          "first_failure": {
+            "front_to_back_depth": 2,
+            "component_count": 7,
+            "border_connected_component_count": 1
+          }
+        },
+        {
+          "occurrences": [
+            2,
+            16
+          ],
+          "moved_to_occurrence": 16,
+          "feasible": false,
+          "first_failure": {
+            "front_to_back_depth": 2,
+            "component_count": 2,
+            "border_connected_component_count": 1
+          }
+        }
+      ]
+    }
+  ],
+  "critical_detail_retention": {
+    "policy": "Every connected region in the quantized target is retained; no size-based deletion is allowed during optimization.",
+    "source_regions": 290,
+    "regions_retained_exactly": 290,
+    "retention_fraction": 1.0,
+    "by_palette_color": [
+      {
+        "palette_index": 0,
+        "source_regions": 25,
+        "regions_retained_exactly": 25
+      },
+      {
+        "palette_index": 1,
+        "source_regions": 55,
+        "regions_retained_exactly": 55
+      },
+      {
+        "palette_index": 2,
+        "source_regions": 23,
+        "regions_retained_exactly": 23
+      },
+      {
+        "palette_index": 3,
+        "source_regions": 17,
+        "regions_retained_exactly": 17
+      },
+      {
+        "palette_index": 4,
+        "source_regions": 15,
+        "regions_retained_exactly": 15
+      },
+      {
+        "palette_index": 5,
+        "source_regions": 32,
+        "regions_retained_exactly": 32
+      },
+      {
+        "palette_index": 6,
+        "source_regions": 68,
+        "regions_retained_exactly": 68
+      },
+      {
+        "palette_index": 7,
+        "source_regions": 26,
+        "regions_retained_exactly": 26
+      },
+      {
+        "palette_index": 8,
+        "source_regions": 29,
+        "regions_retained_exactly": 29
+      }
+    ]
+  },
+  "fidelity_tradeoff": {
+    "pixels_changed_from_printable_target": 0,
+    "details_removed_for_optimization": 0,
+    "visible_connector_pixels": 0
+  },
+  "remaining_fabrication_constraints": {
+    "unsupported_thin_detail_count": 148,
+    "minimum_feature_mm_assumption": 1.2,
+    "cad_validation_performed": false,
+    "requires_user_resolution_before_fabrication": true
+  },
+  "manual_corrections_applied": 0
+}

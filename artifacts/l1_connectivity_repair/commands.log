@@ -1,0 +1,8 @@
+$env:PYTHONPATH='src'
+.\.venv\Scripts\python.exe -m layerforge_l1 repair-connectivity2d --input fixtures\l1_subtractive_poc\bear_face.png --case-id bear_face --failed-plan artifacts\l1_layer_optimization\bear_face\optimized --output artifacts\l1_connectivity_repair\bear_face
+.\.venv\Scripts\python.exe -m layerforge_l1 repair-connectivity2d --input fixtures\l1_auto\development_fox_workshop.png --case-id fox_workshop --failed-plan artifacts\l1_layer_optimization\fox_workshop\optimized --output artifacts\l1_connectivity_repair\fox_workshop
+.\.venv\Scripts\python.exe -m pytest tests\test_connectivity_repair.py tests\test_layer_optimization.py tests\test_subtractive_poc.py -q --junitxml=artifacts\l1_connectivity_repair\pytest.xml
+.\.venv\Scripts\python.exe -m pytest --junitxml=artifacts\l1_connectivity_repair\pytest_full.xml
+
+Focused connectivity result after replacing legacy structural checks: 27 passed, 0 failed, 0 skipped in 0.61 seconds.
+Full regression result after final structural-check update: 51 passed, 0 failed, 0 skipped, 29 dependency deprecation warnings in 191.81 seconds.

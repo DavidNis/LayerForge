@@ -1,0 +1,399 @@
+{
+  "status": "PASS",
+  "composite_source": "actual planned physical layer masks in declared back-to-front order",
+  "geometry_pixel_accuracy_against_quantized_target": 1.0,
+  "geometry_mismatched_pixels": 0,
+  "mean_absolute_rgb_error_against_original_0_255": 1.3493448893229167,
+  "maximum_rgb_error_against_original_0_255": 199,
+  "visible_automatic_connector_pixels": 0,
+  "exposed_hidden_material_pixels": 0,
+  "all_physical_sheets_connected": true,
+  "all_shared_perimeters_complete": true,
+  "unsupported_thin_detail_count": 0,
+  "unsupported_thin_details": [],
+  "manual_corrections_required": false,
+  "manual_corrections_applied": 0,
+  "order_back_to_front": [
+    6,
+    5,
+    4,
+    3,
+    2,
+    1,
+    0
+  ],
+  "layers": [
+    {
+      "depth": 0,
+      "palette_index": 5,
+      "provider_index": 6,
+      "provider_role": "exterior_to_interior_topology_batch",
+      "color": "#FB5144",
+      "connected_components": 1,
+      "missing_perimeter_pixels": 0,
+      "cutout_components": 0,
+      "visible_pixels": 2408,
+      "hidden_material_pixels": 259736
+    },
+    {
+      "depth": 1,
+      "palette_index": 2,
+      "provider_index": 5,
+      "provider_role": "exterior_to_interior_topology_batch",
+      "color": "#10274E",
+      "connected_components": 1,
+      "missing_perimeter_pixels": 0,
+      "cutout_components": 1,
+      "visible_pixels": 7398,
+      "hidden_material_pixels": 252338
+    },
+    {
+      "depth": 2,
+      "palette_index": 3,
+      "provider_index": 4,
+      "provider_role": "exterior_to_interior_topology_batch",
+      "color": "#FE98B8",
+      "connected_components": 1,
+      "missing_perimeter_pixels": 0,
+      "cutout_components": 5,
+      "visible_pixels": 11799,
+      "hidden_material_pixels": 240539
+    },
+    {
+      "depth": 3,
+      "palette_index": 6,
+      "provider_index": 3,
+      "provider_role": "exterior_to_interior_topology_batch",
+      "color": "#FBEDCF",
+      "connected_components": 1,
+      "missing_perimeter_pixels": 0,
+      "cutout_components": 7,
+      "visible_pixels": 16982,
+      "hidden_material_pixels": 223557
+    },
+    {
+      "depth": 4,
+      "palette_index": 4,
+      "provider_index": 2,
+      "provider_role": "exterior_to_interior_topology_batch",
+      "color": "#10B0A5",
+      "connected_components": 1,
+      "missing_perimeter_pixels": 0,
+      "cutout_components": 6,
+      "visible_pixels": 18355,
+      "hidden_material_pixels": 205202
+    },
+    {
+      "depth": 5,
+      "palette_index": 1,
+      "provider_index": 1,
+      "provider_role": "exterior_to_interior_topology_batch",
+      "color": "#FDCD25",
+      "connected_components": 1,
+      "missing_perimeter_pixels": 0,
+      "cutout_components": 6,
+      "visible_pixels": 82861,
+      "hidden_material_pixels": 122341
+    },
+    {
+      "depth": 6,
+      "palette_index": 0,
+      "provider_index": 0,
+      "provider_role": "exterior_to_interior_topology_batch",
+      "color": "#97D9FD",
+      "connected_components": 1,
+      "missing_perimeter_pixels": 0,
+      "cutout_components": 1,
+      "visible_pixels": 122341,
+      "hidden_material_pixels": 0
+    }
+  ],
+  "case_id": "bear_face",
+  "automatic_proposal_preserved": true,
+  "cad_generated": false,
+  "layer_count": 7,
+  "layer_files": [
+    {
+      "id": "layer_00_fb5144",
+      "depth_back_to_front": 0,
+      "palette_index": 5,
+      "provider_index": 6,
+      "provider_role": "exterior_to_interior_topology_batch",
+      "color": "#FB5144",
+      "retained_material_mask": "automatic/layers/layer_00_fb5144/retained_material_mask.png",
+      "through_cutouts_mask": "automatic/layers/layer_00_fb5144/through_cutouts_mask.png",
+      "source_visible_region_mask": "automatic/layers/layer_00_fb5144/source_visible_region_mask.png",
+      "hidden_retained_material_mask": "automatic/layers/layer_00_fb5144/hidden_retained_material_mask.png",
+      "physical_sheet_preview": "automatic/layers/layer_00_fb5144/physical_sheet_preview.png"
+    },
+    {
+      "id": "layer_01_10274e",
+      "depth_back_to_front": 1,
+      "palette_index": 2,
+      "provider_index": 5,
+      "provider_role": "exterior_to_interior_topology_batch",
+      "color": "#10274E",
+      "retained_material_mask": "automatic/layers/layer_01_10274e/retained_material_mask.png",
+      "through_cutouts_mask": "automatic/layers/layer_01_10274e/through_cutouts_mask.png",
+      "source_visible_region_mask": "automatic/layers/layer_01_10274e/source_visible_region_mask.png",
+      "hidden_retained_material_mask": "automatic/layers/layer_01_10274e/hidden_retained_material_mask.png",
+      "physical_sheet_preview": "automatic/layers/layer_01_10274e/physical_sheet_preview.png"
+    },
+    {
+      "id": "layer_02_fe98b8",
+      "depth_back_to_front": 2,
+      "palette_index": 3,
+      "provider_index": 4,
+      "provider_role": "exterior_to_interior_topology_batch",
+      "color": "#FE98B8",
+      "retained_material_mask": "automatic/layers/layer_02_fe98b8/retained_material_mask.png",
+      "through_cutouts_mask": "automatic/layers/layer_02_fe98b8/through_cutouts_mask.png",
+      "source_visible_region_mask": "automatic/layers/layer_02_fe98b8/source_visible_region_mask.png",
+      "hidden_retained_material_mask": "automatic/layers/layer_02_fe98b8/hidden_retained_material_mask.png",
+      "physical_sheet_preview": "automatic/layers/layer_02_fe98b8/physical_sheet_preview.png"
+    },
+    {
+      "id": "layer_03_fbedcf",
+      "depth_back_to_front": 3,
+      "palette_index": 6,
+      "provider_index": 3,
+      "provider_role": "exterior_to_interior_topology_batch",
+      "color": "#FBEDCF",
+      "retained_material_mask": "automatic/layers/layer_03_fbedcf/retained_material_mask.png",
+      "through_cutouts_mask": "automatic/layers/layer_03_fbedcf/through_cutouts_mask.png",
+      "source_visible_region_mask": "automatic/layers/layer_03_fbedcf/source_visible_region_mask.png",
+      "hidden_retained_material_mask": "automatic/layers/layer_03_fbedcf/hidden_retained_material_mask.png",
+      "physical_sheet_preview": "automatic/layers/layer_03_fbedcf/physical_sheet_preview.png"
+    },
+    {
+      "id": "layer_04_10b0a5",
+      "depth_back_to_front": 4,
+      "palette_index": 4,
+      "provider_index": 2,
+      "provider_role": "exterior_to_interior_topology_batch",
+      "color": "#10B0A5",
+      "retained_material_mask": "automatic/layers/layer_04_10b0a5/retained_material_mask.png",
+      "through_cutouts_mask": "automatic/layers/layer_04_10b0a5/through_cutouts_mask.png",
+      "source_visible_region_mask": "automatic/layers/layer_04_10b0a5/source_visible_region_mask.png",
+      "hidden_retained_material_mask": "automatic/layers/layer_04_10b0a5/hidden_retained_material_mask.png",
+      "physical_sheet_preview": "automatic/layers/layer_04_10b0a5/physical_sheet_preview.png"
+    },
+    {
+      "id": "layer_05_fdcd25",
+      "depth_back_to_front": 5,
+      "palette_index": 1,
+      "provider_index": 1,
+      "provider_role": "exterior_to_interior_topology_batch",
+      "color": "#FDCD25",
+      "retained_material_mask": "automatic/layers/layer_05_fdcd25/retained_material_mask.png",
+      "through_cutouts_mask": "automatic/layers/layer_05_fdcd25/through_cutouts_mask.png",
+      "source_visible_region_mask": "automatic/layers/layer_05_fdcd25/source_visible_region_mask.png",
+      "hidden_retained_material_mask": "automatic/layers/layer_05_fdcd25/hidden_retained_material_mask.png",
+      "physical_sheet_preview": "automatic/layers/layer_05_fdcd25/physical_sheet_preview.png"
+    },
+    {
+      "id": "layer_06_97d9fd",
+      "depth_back_to_front": 6,
+      "palette_index": 0,
+      "provider_index": 0,
+      "provider_role": "exterior_to_interior_topology_batch",
+      "color": "#97D9FD",
+      "retained_material_mask": "automatic/layers/layer_06_97d9fd/retained_material_mask.png",
+      "through_cutouts_mask": "automatic/layers/layer_06_97d9fd/through_cutouts_mask.png",
+      "source_visible_region_mask": "automatic/layers/layer_06_97d9fd/source_visible_region_mask.png",
+      "hidden_retained_material_mask": "automatic/layers/layer_06_97d9fd/hidden_retained_material_mask.png",
+      "physical_sheet_preview": "automatic/layers/layer_06_97d9fd/physical_sheet_preview.png"
+    }
+  ],
+  "reveal_relationships": [
+    {
+      "lower_depth": 0,
+      "lower_color": "#FB5144",
+      "upper_depth": 1,
+      "upper_color": "#10274E",
+      "lower_visible_pixels": 2408,
+      "pixels_open_in_upper_layer": 2408,
+      "fully_revealed_through_upper_cutout": true
+    },
+    {
+      "lower_depth": 0,
+      "lower_color": "#FB5144",
+      "upper_depth": 2,
+      "upper_color": "#FE98B8",
+      "lower_visible_pixels": 2408,
+      "pixels_open_in_upper_layer": 2408,
+      "fully_revealed_through_upper_cutout": true
+    },
+    {
+      "lower_depth": 0,
+      "lower_color": "#FB5144",
+      "upper_depth": 3,
+      "upper_color": "#FBEDCF",
+      "lower_visible_pixels": 2408,
+      "pixels_open_in_upper_layer": 2408,
+      "fully_revealed_through_upper_cutout": true
+    },
+    {
+      "lower_depth": 0,
+      "lower_color": "#FB5144",
+      "upper_depth": 4,
+      "upper_color": "#10B0A5",
+      "lower_visible_pixels": 2408,
+      "pixels_open_in_upper_layer": 2408,
+      "fully_revealed_through_upper_cutout": true
+    },
+    {
+      "lower_depth": 0,
+      "lower_color": "#FB5144",
+      "upper_depth": 5,
+      "upper_color": "#FDCD25",
+      "lower_visible_pixels": 2408,
+      "pixels_open_in_upper_layer": 2408,
+      "fully_revealed_through_upper_cutout": true
+    },
+    {
+      "lower_depth": 0,
+      "lower_color": "#FB5144",
+      "upper_depth": 6,
+      "upper_color": "#97D9FD",
+      "lower_visible_pixels": 2408,
+      "pixels_open_in_upper_layer": 2408,
+      "fully_revealed_through_upper_cutout": true
+    },
+    {
+      "lower_depth": 1,
+      "lower_color": "#10274E",
+      "upper_depth": 2,
+      "upper_color": "#FE98B8",
+      "lower_visible_pixels": 7398,
+      "pixels_open_in_upper_layer": 7398,
+      "fully_revealed_through_upper_cutout": true
+    },
+    {
+      "lower_depth": 1,
+      "lower_color": "#10274E",
+      "upper_depth": 3,
+      "upper_color": "#FBEDCF",
+      "lower_visible_pixels": 7398,
+      "pixels_open_in_upper_layer": 7398,
+      "fully_revealed_through_upper_cutout": true
+    },
+    {
+      "lower_depth": 1,
+      "lower_color": "#10274E",
+      "upper_depth": 4,
+      "upper_color": "#10B0A5",
+      "lower_visible_pixels": 7398,
+      "pixels_open_in_upper_layer": 7398,
+      "fully_revealed_through_upper_cutout": true
+    },
+    {
+      "lower_depth": 1,
+      "lower_color": "#10274E",
+      "upper_depth": 5,
+      "upper_color": "#FDCD25",
+      "lower_visible_pixels": 7398,
+      "pixels_open_in_upper_layer": 7398,
+      "fully_revealed_through_upper_cutout": true
+    },
+    {
+      "lower_depth": 1,
+      "lower_color": "#10274E",
+      "upper_depth": 6,
+      "upper_color": "#97D9FD",
+      "lower_visible_pixels": 7398,
+      "pixels_open_in_upper_layer": 7398,
+      "fully_revealed_through_upper_cutout": true
+    },
+    {
+      "lower_depth": 2,
+      "lower_color": "#FE98B8",
+      "upper_depth": 3,
+      "upper_color": "#FBEDCF",
+      "lower_visible_pixels": 11799,
+      "pixels_open_in_upper_layer": 11799,
+      "fully_revealed_through_upper_cutout": true
+    },
+    {
+      "lower_depth": 2,
+      "lower_color": "#FE98B8",
+      "upper_depth": 4,
+      "upper_color": "#10B0A5",
+      "lower_visible_pixels": 11799,
+      "pixels_open_in_upper_layer": 11799,
+      "fully_revealed_through_upper_cutout": true
+    },
+    {
+      "lower_depth": 2,
+      "lower_color": "#FE98B8",
+      "upper_depth": 5,
+      "upper_color": "#FDCD25",
+      "lower_visible_pixels": 11799,
+      "pixels_open_in_upper_layer": 11799,
+      "fully_revealed_through_upper_cutout": true
+    },
+    {
+      "lower_depth": 2,
+      "lower_color": "#FE98B8",
+      "upper_depth": 6,
+      "upper_color": "#97D9FD",
+      "lower_visible_pixels": 11799,
+      "pixels_open_in_upper_layer": 11799,
+      "fully_revealed_through_upper_cutout": true
+    },
+    {
+      "lower_depth": 3,
+      "lower_color": "#FBEDCF",
+      "upper_depth": 4,
+      "upper_color": "#10B0A5",
+      "lower_visible_pixels": 16982,
+      "pixels_open_in_upper_layer": 16982,
+      "fully_revealed_through_upper_cutout": true
+    },
+    {
+      "lower_depth": 3,
+      "lower_color": "#FBEDCF",
+      "upper_depth": 5,
+      "upper_color": "#FDCD25",
+      "lower_visible_pixels": 16982,
+      "pixels_open_in_upper_layer": 16982,
+      "fully_revealed_through_upper_cutout": true
+    },
+    {
+      "lower_depth": 3,
+      "lower_color": "#FBEDCF",
+      "upper_depth": 6,
+      "upper_color": "#97D9FD",
+      "lower_visible_pixels": 16982,
+      "pixels_open_in_upper_layer": 16982,
+      "fully_revealed_through_upper_cutout": true
+    },
+    {
+      "lower_depth": 4,
+      "lower_color": "#10B0A5",
+      "upper_depth": 5,
+      "upper_color": "#FDCD25",
+      "lower_visible_pixels": 18355,
+      "pixels_open_in_upper_layer": 18355,
+      "fully_revealed_through_upper_cutout": true
+    },
+    {
+      "lower_depth": 4,
+      "lower_color": "#10B0A5",
+      "upper_depth": 6,
+      "upper_color": "#97D9FD",
+      "lower_visible_pixels": 18355,
+      "pixels_open_in_upper_layer": 18355,
+      "fully_revealed_through_upper_cutout": true
+    },
+    {
+      "lower_depth": 5,
+      "lower_color": "#FDCD25",
+      "upper_depth": 6,
+      "upper_color": "#97D9FD",
+      "lower_visible_pixels": 82861,
+      "pixels_open_in_upper_layer": 82861,
+      "fully_revealed_through_upper_cutout": true
+    }
+  ]
+}

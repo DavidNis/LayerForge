@@ -1,0 +1,212 @@
+{
+  "case_id": "fox_workshop",
+  "review_state": "READY_FOR_USER_TEST",
+  "validation_status": "CONFLICT_REQUIRES_USER_DECISION",
+  "root_cause": "The previous implementation extracted same-color regions and validated physical masks with 8-neighbour connected components. Diagonally touching pixels were therefore labeled as one component even though they share no edge and have zero structural width.",
+  "failed_plan": {
+    "layer_count": 17,
+    "four_neighbor_failed_layers": 11,
+    "four_neighbor_orphan_components": 113,
+    "four_neighbor_orphan_pixels": 2653
+  },
+  "repaired_plan": {
+    "layer_count": 18,
+    "four_neighbor_failed_layers": 0,
+    "four_neighbor_orphan_components": 0,
+    "geometry_pixel_accuracy": 1.0,
+    "changed_composite_pixels": 0,
+    "visible_connector_pixels": 0
+  },
+  "connection_width": {
+    "sheet_size_mm": 100.0,
+    "outer_pixels": 576,
+    "mm_per_pixel": 0.1736111111111111,
+    "nominal_connection_width_mm": 0.8,
+    "vectorization_safety_mm": 0.2,
+    "cad_conversion_safety_mm": 0.2,
+    "enforced_connection_width_mm": 1.2,
+    "enforced_connection_width_pixels": 7,
+    "erosion_radius_pixels": 4,
+    "method": "4-neighbour connectivity plus elliptical erosion of the physical mask; every surviving structural-core component must connect to the common perimeter, and every visible region must touch the perimeter-connected core after radius restoration",
+    "status": "CONFLICT_REQUIRES_USER_DECISION",
+    "conflicting_layers": 15,
+    "orphan_structural_core_components": 137,
+    "unsupported_visible_components": 57
+  },
+  "strict_width_search": {
+    "status": "CONFLICT_REQUIRES_USER_DECISION",
+    "reason": "no perimeter-connected subtractive layer sequence was found",
+    "sequence_front_to_back": null,
+    "edge_connected_fallback": {
+      "status": "FEASIBLE",
+      "sequence_front_to_back": [
+        0,
+        2,
+        8,
+        2,
+        4,
+        0,
+        5,
+        2,
+        4,
+        8,
+        7,
+        3,
+        6,
+        0,
+        1,
+        2,
+        3,
+        5
+      ],
+      "search": {
+        "method": "bounded_region_graph_beam_search",
+        "global_minimum_proven": false,
+        "max_states_per_depth": 65536,
+        "explored_candidate_states": 1504212,
+        "pruned_candidate_states": 802404,
+        "frontier_widths": [
+          {
+            "depth": 1,
+            "candidate_states": 1,
+            "kept_states": 1
+          },
+          {
+            "depth": 2,
+            "candidate_states": 5,
+            "kept_states": 5
+          },
+          {
+            "depth": 3,
+            "candidate_states": 19,
+            "kept_states": 19
+          },
+          {
+            "depth": 4,
+            "candidate_states": 92,
+            "kept_states": 92
+          },
+          {
+            "depth": 5,
+            "candidate_states": 468,
+            "kept_states": 468
+          },
+          {
+            "depth": 6,
+            "candidate_states": 2207,
+            "kept_states": 2207
+          },
+          {
+            "depth": 7,
+            "candidate_states": 9423,
+            "kept_states": 9423
+          },
+          {
+            "depth": 8,
+            "candidate_states": 36101,
+            "kept_states": 36101
+          },
+          {
+            "depth": 9,
+            "candidate_states": 123718,
+            "kept_states": 65536
+          },
+          {
+            "depth": 10,
+            "candidate_states": 233599,
+            "kept_states": 65536
+          },
+          {
+            "depth": 11,
+            "candidate_states": 232641,
+            "kept_states": 65536
+          },
+          {
+            "depth": 12,
+            "candidate_states": 205558,
+            "kept_states": 65536
+          },
+          {
+            "depth": 13,
+            "candidate_states": 172163,
+            "kept_states": 65536
+          },
+          {
+            "depth": 14,
+            "candidate_states": 152095,
+            "kept_states": 65536
+          },
+          {
+            "depth": 15,
+            "candidate_states": 109703,
+            "kept_states": 65536
+          },
+          {
+            "depth": 16,
+            "candidate_states": 90562,
+            "kept_states": 65536
+          },
+          {
+            "depth": 17,
+            "candidate_states": 72189,
+            "kept_states": 65536
+          },
+          {
+            "depth": 18,
+            "candidate_states": 63668,
+            "kept_states": 63668
+          }
+        ],
+        "objective": [
+          "minimum completed layer count",
+          "minimum tiny-visible-contribution layer count",
+          "minimum cumulative retained interior pixel-layers",
+          "deterministic palette-index tie break"
+        ],
+        "winning_tiny_layer_count": 1,
+        "winning_retained_pixel_layers": 3650133
+      },
+      "minimum_contact_pixels": 1
+    }
+  },
+  "hidden_repair_policy": {
+    "method": "Replan provider depths with a 4-neighbour region graph, then use the maximal cumulative mask of current and more-front providers as hidden retained material.",
+    "visible_bridge_fallback": false,
+    "visible_artwork_changes": 0,
+    "fixed_plan_additional_hidden_pixels_available": 0,
+    "explanation": "Each retained mask already contains every pixel that a more-front layer hides. Adding beyond that maximal allowed mask would occlude a lower visible color and change the approved composite."
+  },
+  "order_change": {
+    "necessary": true,
+    "old_layers": 17,
+    "new_layers": 18,
+    "new_front_to_back_colors": [
+      "#FBF1D6",
+      "#1A202C",
+      "#78B4B2",
+      "#1A202C",
+      "#457D45",
+      "#FBF1D6",
+      "#A66940",
+      "#1A202C",
+      "#457D45",
+      "#78B4B2",
+      "#4479A5",
+      "#F88122",
+      "#2A3949",
+      "#FBF1D6",
+      "#6C4730",
+      "#1A202C",
+      "#F88122",
+      "#A66940"
+    ]
+  },
+  "user_decision_options_if_width_conflict_remains": [
+    "Approve a smaller nominal structural width or smaller safety allowance.",
+    "Approve visible geometry widening for the specifically reported regions.",
+    "Approve omission/merging of specifically reported sub-resolution details.",
+    "Allow separately printable components for named conflicting regions."
+  ],
+  "manual_corrections_applied": 0,
+  "cad_generated": false
+}

@@ -1,0 +1,668 @@
+{
+  "report_version": "1.0.0-l1",
+  "generated_date": "2026-10-16",
+  "fixture_id": "orbit_bloom_v1",
+  "status": "READY_FOR_USER_TEST",
+  "physical_test": "PENDING",
+  "user_approval": false,
+  "environment": {
+    "os": "Windows-11-10.0.26200-SP0",
+    "python": "3.12.1",
+    "python_executable": "C:\\Users\\davni\\.vscode\\LayerForge\\.venv\\Scripts\\python.exe",
+    "cadquery": "2.6.1",
+    "cadquery-ocp": "7.8.1.1.post1",
+    "shapely": "2.0.6",
+    "numpy": "2.2.6",
+    "opencv-python": "4.10.0.84",
+    "trimesh": "4.8.3",
+    "matplotlib": "3.9.0",
+    "Pillow": "10.3.0",
+    "pytest": "8.3.5",
+    "scipy": "1.14.0"
+  },
+  "automated_tests": {
+    "status": "PASS",
+    "tests": 14,
+    "passed": 14,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "path": "reports/pytest.xml"
+  },
+  "plan_provenance": "manual_reviewed; no automatic image-to-layer generation",
+  "planned_physical_layers": 6,
+  "exported_printable_components": 6,
+  "counts_are_independently_measured": true,
+  "layers": [
+    {
+      "id": "layer_00_navy_backdrop",
+      "status": "PASS",
+      "planned_components": 1,
+      "exported_mesh_components": 1,
+      "planned_holes": 0,
+      "mesh_footprint_holes": 0,
+      "cad_valid_before_export": true,
+      "step_reopened": true,
+      "step_valid": true,
+      "step_solid_count": 1,
+      "step_volume_mm3": 7509.507102354822,
+      "step_xy_bounds_mm": [
+        5.0,
+        5.0,
+        95.0,
+        75.0
+      ],
+      "step_outer_bounds_max_delta_mm": 0.0,
+      "stl_reopened": true,
+      "stl_watertight": true,
+      "stl_winding_consistent": true,
+      "stl_volume_mm3": 7509.507392282161,
+      "bounds_mm": [
+        [
+          5.0,
+          5.0,
+          0.0
+        ],
+        [
+          95.0,
+          75.0,
+          1.2000000476837158
+        ]
+      ],
+      "footprint_area_mm2": 6257.922578234301,
+      "plan_mesh_symmetric_difference_mm2": 4.2339283382773304e-05,
+      "minimum_feature_morphology_check": true,
+      "print_bounds_after_rotation_mm": [
+        90.0,
+        70.0
+      ],
+      "fits_220x220_mm_bed": true,
+      "shared_sheet": {
+        "connected_component_count": 1,
+        "outer_bounds_mm": [
+          5.0,
+          5.0,
+          95.0,
+          75.0
+        ],
+        "expected_outer_bounds_mm": [
+          5.0,
+          5.0,
+          95.0,
+          75.0
+        ],
+        "outer_bounds_max_delta_mm": 0.0,
+        "outer_outline_hausdorff_mm": 0.0,
+        "missing_shared_perimeter_area_mm2": 0.0,
+        "area_outside_shared_outline_mm2": 0.0,
+        "shared_perimeter_width_mm": 4.0,
+        "pass": true
+      },
+      "exported_shared_sheet": {
+        "connected_component_count": 1,
+        "outer_bounds_mm": [
+          5.0,
+          5.0,
+          95.0,
+          75.0
+        ],
+        "expected_outer_bounds_mm": [
+          5.0,
+          5.0,
+          95.0,
+          75.0
+        ],
+        "outer_bounds_max_delta_mm": 0.0,
+        "outer_outline_hausdorff_mm": 4.0943871586191204e-06,
+        "missing_shared_perimeter_area_mm2": 2.4700344810584315e-05,
+        "area_outside_shared_outline_mm2": 1.763893857220876e-05,
+        "shared_perimeter_width_mm": 4.0,
+        "pass": true
+      },
+      "step": "layers/layer_00_navy_backdrop/layer_00_navy_backdrop_body.step",
+      "stl": "layers/layer_00_navy_backdrop/layer_00_navy_backdrop_body.stl"
+    },
+    {
+      "id": "layer_01_teal_orbit",
+      "status": "PASS",
+      "planned_components": 1,
+      "exported_mesh_components": 1,
+      "planned_holes": 1,
+      "mesh_footprint_holes": 1,
+      "cad_valid_before_export": true,
+      "step_reopened": true,
+      "step_valid": true,
+      "step_solid_count": 1,
+      "step_volume_mm3": 4735.600413224471,
+      "step_xy_bounds_mm": [
+        5.0,
+        5.0,
+        95.0,
+        75.0
+      ],
+      "step_outer_bounds_max_delta_mm": 0.0,
+      "stl_reopened": true,
+      "stl_watertight": true,
+      "stl_winding_consistent": true,
+      "stl_volume_mm3": 4735.600621115583,
+      "bounds_mm": [
+        [
+          5.0,
+          5.0,
+          0.0
+        ],
+        [
+          95.0,
+          75.0,
+          1.2000000476837158
+        ]
+      ],
+      "footprint_area_mm2": 3946.3336941164425,
+      "plan_mesh_symmetric_difference_mm2": 0.00018158206217168253,
+      "minimum_feature_morphology_check": true,
+      "print_bounds_after_rotation_mm": [
+        90.0,
+        70.0
+      ],
+      "fits_220x220_mm_bed": true,
+      "shared_sheet": {
+        "connected_component_count": 1,
+        "outer_bounds_mm": [
+          5.0,
+          5.0,
+          95.0,
+          75.0
+        ],
+        "expected_outer_bounds_mm": [
+          5.0,
+          5.0,
+          95.0,
+          75.0
+        ],
+        "outer_bounds_max_delta_mm": 0.0,
+        "outer_outline_hausdorff_mm": 0.0,
+        "missing_shared_perimeter_area_mm2": 0.0,
+        "area_outside_shared_outline_mm2": 0.0,
+        "shared_perimeter_width_mm": 4.0,
+        "pass": true
+      },
+      "exported_shared_sheet": {
+        "connected_component_count": 1,
+        "outer_bounds_mm": [
+          5.0,
+          5.0,
+          95.0,
+          75.0
+        ],
+        "expected_outer_bounds_mm": [
+          5.0,
+          5.0,
+          95.0,
+          75.0
+        ],
+        "outer_bounds_max_delta_mm": 0.0,
+        "outer_outline_hausdorff_mm": 4.0943871586191204e-06,
+        "missing_shared_perimeter_area_mm2": 3.364411192995164e-05,
+        "area_outside_shared_outline_mm2": 1.763893857220876e-05,
+        "shared_perimeter_width_mm": 4.0,
+        "pass": true
+      },
+      "step": "layers/layer_01_teal_orbit/layer_01_teal_orbit_body.step",
+      "stl": "layers/layer_01_teal_orbit/layer_01_teal_orbit_body.stl"
+    },
+    {
+      "id": "layer_02_gold_regions",
+      "status": "PASS",
+      "planned_components": 1,
+      "exported_mesh_components": 1,
+      "planned_holes": 1,
+      "mesh_footprint_holes": 1,
+      "cad_valid_before_export": true,
+      "step_reopened": true,
+      "step_valid": true,
+      "step_solid_count": 1,
+      "step_volume_mm3": 2592.8573715520074,
+      "step_xy_bounds_mm": [
+        5.0,
+        5.0,
+        95.0,
+        75.0
+      ],
+      "step_outer_bounds_max_delta_mm": 0.0,
+      "stl_reopened": true,
+      "stl_watertight": true,
+      "stl_winding_consistent": true,
+      "stl_volume_mm3": 2592.8574674670654,
+      "bounds_mm": [
+        [
+          5.0,
+          5.0,
+          0.0
+        ],
+        [
+          95.0,
+          75.0,
+          1.2000000476837158
+        ]
+      ],
+      "footprint_area_mm2": 2160.7144703634767,
+      "plan_mesh_symmetric_difference_mm2": 0.00017175206160929677,
+      "minimum_feature_morphology_check": true,
+      "print_bounds_after_rotation_mm": [
+        90.0,
+        70.0
+      ],
+      "fits_220x220_mm_bed": true,
+      "shared_sheet": {
+        "connected_component_count": 1,
+        "outer_bounds_mm": [
+          5.0,
+          5.0,
+          95.0,
+          75.0
+        ],
+        "expected_outer_bounds_mm": [
+          5.0,
+          5.0,
+          95.0,
+          75.0
+        ],
+        "outer_bounds_max_delta_mm": 0.0,
+        "outer_outline_hausdorff_mm": 0.0,
+        "missing_shared_perimeter_area_mm2": 0.0,
+        "area_outside_shared_outline_mm2": 0.0,
+        "shared_perimeter_width_mm": 4.0,
+        "pass": true
+      },
+      "exported_shared_sheet": {
+        "connected_component_count": 1,
+        "outer_bounds_mm": [
+          5.0,
+          5.0,
+          95.0,
+          75.0
+        ],
+        "expected_outer_bounds_mm": [
+          5.0,
+          5.0,
+          95.0,
+          75.0
+        ],
+        "outer_bounds_max_delta_mm": 0.0,
+        "outer_outline_hausdorff_mm": 4.0943871586191204e-06,
+        "missing_shared_perimeter_area_mm2": 3.364411192995164e-05,
+        "area_outside_shared_outline_mm2": 1.763893857220876e-05,
+        "shared_perimeter_width_mm": 4.0,
+        "pass": true
+      },
+      "step": "layers/layer_02_gold_regions/layer_02_gold_regions_body.step",
+      "stl": "layers/layer_02_gold_regions/layer_02_gold_regions_body.stl"
+    },
+    {
+      "id": "layer_03_coral_window",
+      "status": "PASS",
+      "planned_components": 1,
+      "exported_mesh_components": 1,
+      "planned_holes": 2,
+      "mesh_footprint_holes": 2,
+      "cad_valid_before_export": true,
+      "step_reopened": true,
+      "step_valid": true,
+      "step_solid_count": 1,
+      "step_volume_mm3": 3050.282619940991,
+      "step_xy_bounds_mm": [
+        5.0,
+        5.0,
+        95.0,
+        75.0
+      ],
+      "step_outer_bounds_max_delta_mm": 0.0,
+      "stl_reopened": true,
+      "stl_watertight": true,
+      "stl_winding_consistent": true,
+      "stl_volume_mm3": 3050.282709945845,
+      "bounds_mm": [
+        [
+          5.0,
+          5.0,
+          0.0
+        ],
+        [
+          95.0,
+          75.0,
+          1.2000000476837158
+        ]
+      ],
+      "footprint_area_mm2": 2541.9021572820875,
+      "plan_mesh_symmetric_difference_mm2": 0.00021415703286682908,
+      "minimum_feature_morphology_check": true,
+      "print_bounds_after_rotation_mm": [
+        70.0,
+        90.0
+      ],
+      "fits_220x220_mm_bed": true,
+      "shared_sheet": {
+        "connected_component_count": 1,
+        "outer_bounds_mm": [
+          5.0,
+          5.0,
+          95.0,
+          75.0
+        ],
+        "expected_outer_bounds_mm": [
+          5.0,
+          5.0,
+          95.0,
+          75.0
+        ],
+        "outer_bounds_max_delta_mm": 0.0,
+        "outer_outline_hausdorff_mm": 0.0,
+        "missing_shared_perimeter_area_mm2": 0.0,
+        "area_outside_shared_outline_mm2": 0.0,
+        "shared_perimeter_width_mm": 4.0,
+        "pass": true
+      },
+      "exported_shared_sheet": {
+        "connected_component_count": 1,
+        "outer_bounds_mm": [
+          5.0,
+          5.0,
+          95.0,
+          75.0
+        ],
+        "expected_outer_bounds_mm": [
+          5.0,
+          5.0,
+          95.0,
+          75.0
+        ],
+        "outer_bounds_max_delta_mm": 0.0,
+        "outer_outline_hausdorff_mm": 4.0943871586191204e-06,
+        "missing_shared_perimeter_area_mm2": 3.364411192995164e-05,
+        "area_outside_shared_outline_mm2": 1.7638938572208946e-05,
+        "shared_perimeter_width_mm": 4.0,
+        "pass": true
+      },
+      "step": "layers/layer_03_coral_window/layer_03_coral_window_body.step",
+      "stl": "layers/layer_03_coral_window/layer_03_coral_window_body.stl"
+    },
+    {
+      "id": "layer_04_teal_foreground",
+      "status": "PASS",
+      "planned_components": 1,
+      "exported_mesh_components": 1,
+      "planned_holes": 1,
+      "mesh_footprint_holes": 1,
+      "cad_valid_before_export": true,
+      "step_reopened": true,
+      "step_valid": true,
+      "step_solid_count": 1,
+      "step_volume_mm3": 2415.5881558353126,
+      "step_xy_bounds_mm": [
+        5.0,
+        5.0,
+        95.0,
+        75.0
+      ],
+      "step_outer_bounds_max_delta_mm": 0.0,
+      "stl_reopened": true,
+      "stl_watertight": true,
+      "stl_winding_consistent": true,
+      "stl_volume_mm3": 2415.5882546069606,
+      "bounds_mm": [
+        [
+          5.0,
+          5.0,
+          0.0
+        ],
+        [
+          95.0,
+          75.0,
+          1.2000000476837158
+        ]
+      ],
+      "footprint_area_mm2": 2012.9901321834268,
+      "plan_mesh_symmetric_difference_mm2": 7.278773834203438e-05,
+      "minimum_feature_morphology_check": true,
+      "print_bounds_after_rotation_mm": [
+        90.0,
+        70.0
+      ],
+      "fits_220x220_mm_bed": true,
+      "shared_sheet": {
+        "connected_component_count": 1,
+        "outer_bounds_mm": [
+          5.0,
+          5.0,
+          95.0,
+          75.0
+        ],
+        "expected_outer_bounds_mm": [
+          5.0,
+          5.0,
+          95.0,
+          75.0
+        ],
+        "outer_bounds_max_delta_mm": 0.0,
+        "outer_outline_hausdorff_mm": 0.0,
+        "missing_shared_perimeter_area_mm2": 0.0,
+        "area_outside_shared_outline_mm2": 0.0,
+        "shared_perimeter_width_mm": 4.0,
+        "pass": true
+      },
+      "exported_shared_sheet": {
+        "connected_component_count": 1,
+        "outer_bounds_mm": [
+          5.0,
+          5.0,
+          95.0,
+          75.0
+        ],
+        "expected_outer_bounds_mm": [
+          5.0,
+          5.0,
+          95.0,
+          75.0
+        ],
+        "outer_bounds_max_delta_mm": 0.0,
+        "outer_outline_hausdorff_mm": 4.0943871586191204e-06,
+        "missing_shared_perimeter_area_mm2": 3.364411192995164e-05,
+        "area_outside_shared_outline_mm2": 1.763893857220876e-05,
+        "shared_perimeter_width_mm": 4.0,
+        "pass": true
+      },
+      "step": "layers/layer_04_teal_foreground/layer_04_teal_foreground_body.step",
+      "stl": "layers/layer_04_teal_foreground/layer_04_teal_foreground_body.stl"
+    },
+    {
+      "id": "layer_05_cream_highlight_rim",
+      "status": "PASS",
+      "planned_components": 1,
+      "exported_mesh_components": 1,
+      "planned_holes": 1,
+      "mesh_footprint_holes": 1,
+      "cad_valid_before_export": true,
+      "step_reopened": true,
+      "step_valid": true,
+      "step_solid_count": 1,
+      "step_volume_mm3": 1610.1054337788921,
+      "step_xy_bounds_mm": [
+        5.0,
+        5.0,
+        95.0,
+        75.0
+      ],
+      "step_outer_bounds_max_delta_mm": 0.0,
+      "stl_reopened": true,
+      "stl_watertight": true,
+      "stl_winding_consistent": true,
+      "stl_volume_mm3": 1610.1054806027553,
+      "bounds_mm": [
+        [
+          5.0,
+          5.0,
+          0.0
+        ],
+        [
+          95.0,
+          75.0,
+          1.2000000476837158
+        ]
+      ],
+      "footprint_area_mm2": 1341.7545138524292,
+      "plan_mesh_symmetric_difference_mm2": 7.110465337974509e-05,
+      "minimum_feature_morphology_check": true,
+      "print_bounds_after_rotation_mm": [
+        70.0,
+        90.0
+      ],
+      "fits_220x220_mm_bed": true,
+      "shared_sheet": {
+        "connected_component_count": 1,
+        "outer_bounds_mm": [
+          5.0,
+          5.0,
+          95.0,
+          75.0
+        ],
+        "expected_outer_bounds_mm": [
+          5.0,
+          5.0,
+          95.0,
+          75.0
+        ],
+        "outer_bounds_max_delta_mm": 0.0,
+        "outer_outline_hausdorff_mm": 0.0,
+        "missing_shared_perimeter_area_mm2": 0.0,
+        "area_outside_shared_outline_mm2": 0.0,
+        "shared_perimeter_width_mm": 4.0,
+        "pass": true
+      },
+      "exported_shared_sheet": {
+        "connected_component_count": 1,
+        "outer_bounds_mm": [
+          5.0,
+          5.0,
+          95.0,
+          75.0
+        ],
+        "expected_outer_bounds_mm": [
+          5.0,
+          5.0,
+          95.0,
+          75.0
+        ],
+        "outer_bounds_max_delta_mm": 0.0,
+        "outer_outline_hausdorff_mm": 4.0943871586191204e-06,
+        "missing_shared_perimeter_area_mm2": 3.364411192995164e-05,
+        "area_outside_shared_outline_mm2": 1.7638938572207536e-05,
+        "shared_perimeter_width_mm": 4.0,
+        "pass": true
+      },
+      "step": "layers/layer_05_cream_highlight_rim/layer_05_cream_highlight_rim_body.step",
+      "stl": "layers/layer_05_cream_highlight_rim/layer_05_cream_highlight_rim_body.stl"
+    }
+  ],
+  "visual_metrics": {
+    "resolution_px": [
+      500,
+      400
+    ],
+    "source": "actual source/source.png; nearest-palette classification",
+    "cad_projection": "ordered projection of reopened exported STL footprints",
+    "silhouette_iou": 0.9950332915731301,
+    "mismatched_pixels": 2672,
+    "total_pixels": 200000,
+    "per_color": {
+      "#19324D": {
+        "source_pixels": 42404,
+        "cad_pixels": 43144,
+        "iou": 0.9802319390754843,
+        "coverage": 0.9986557871898878
+      },
+      "#2A9D8F": {
+        "source_pixels": 38443,
+        "cad_pixels": 38668,
+        "iou": 0.969679940739227,
+        "coverage": 0.987487969201155
+      },
+      "#F4C542": {
+        "source_pixels": 12023,
+        "cad_pixels": 12038,
+        "iou": 0.977237242172734,
+        "coverage": 0.9891042169175747
+      },
+      "#E76F51": {
+        "source_pixels": 30080,
+        "cad_pixels": 29944,
+        "iou": 0.9804018608334159,
+        "coverage": 0.9878656914893617
+      },
+      "#F4F1DE": {
+        "source_pixels": 33534,
+        "cad_pixels": 33435,
+        "iou": 0.9518799183911396,
+        "coverage": 0.9739070793821196
+      }
+    }
+  },
+  "critical_detail_checks": {
+    "gold_reveal_window": "PASS",
+    "shared_outer_outline": "PASS: all six sheets have the same 90 x 70 mm rounded exterior",
+    "continuous_outer_perimeter": "PASS: all sheets contain the complete 4 mm perimeter",
+    "connected_retained_regions": "PASS: all planned and exported layers are one connected component",
+    "repeated_teal_depths": "PASS in manifest and assembled projection"
+  },
+  "warnings": [
+    "Assembly gaps are proposed view spacing and are not self-maintained without temporary user support.",
+    "Filament appearance, warping, adhesion, stiffness, translucency and shadow quality are unverified.",
+    "Controlled source and reviewed plan share manual designer vectors; this does not test segmentation or generalization."
+  ],
+  "visible_mismatch": {
+    "summary": "Tessellation/raster-edge differences are quantified; no missing annotated feature detected in software.",
+    "mismatched_pixels": 2672,
+    "missing_occlusion_detail": "none detected in controlled projection; physical shadow/spacing remains unknown"
+  },
+  "gates": {
+    "L-G01": {
+      "status": "PASS",
+      "evidence": "original CC0 source SHA-256 582ec14e603f6e5e7d68d67c01612ce1cd7d0f209e8652f79494aca8ade0fc36"
+    },
+    "L-G02": {
+      "status": "PASS",
+      "evidence": "six reviewed same-outline physical sheets; manifest plans and reopened STL footprints retain the identical continuous outer perimeter and connected internal geometry"
+    },
+    "L-G03": {
+      "status": "PASS",
+      "evidence": "coral STEP/STL footprint has a through-hole; source center and CAD stack expose lower gold"
+    },
+    "L-G04": {
+      "status": "PASS",
+      "evidence": "explicit unique back-to-front Z values; one filament per layer; teal repeats on layers 01 and 04"
+    },
+    "L-G05": {
+      "status": "PASS",
+      "evidence": "per-layer STEP and STL read-back, validity, volume, component, holes and bounds reported"
+    },
+    "L-G06": {
+      "status": "PASS",
+      "evidence": "all previews use reopened STL projections; IDs and colors come from output layer_stack.json"
+    },
+    "L-G07": {
+      "status": "PASS",
+      "evidence": "fixed-resolution source-vs-STL silhouette IoU=0.995033; mismatch logged"
+    },
+    "L-G08": {
+      "status": "PASS",
+      "evidence": "all sheets share a validated 90 x 70 mm slot-compatible outer outline, fit the configured bed, and need no generated frame"
+    },
+    "L-G09": {
+      "status": "PASS",
+      "evidence": "manual provenance, pinned environment, commands, checksums, schema and annotations included"
+    },
+    "L-G10": {
+      "status": "PENDING",
+      "evidence": "requires user slicer inspection, physical printing/temporary stacking, photographs and explicit approval"
+    }
+  }
+}

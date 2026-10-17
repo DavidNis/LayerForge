@@ -37,6 +37,25 @@ Write-Host 'OK: all required files exist.'
 - `specs/EXPORT_AND_PREVIEW.md` and `specs/LAYER_FEASIBILITY_GATE.md`: required artifacts and the go/no-go gate.
 - `MILESTONES.md`: L-1 proof first, later auto-proposal and editing.
 
+## Reproduce the current L-1 feasibility build
+
+From the repository root in PowerShell, using Windows Python 3.12:
+
+```powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install --upgrade pip
+.\.venv\Scripts\python.exe -m pip install -r requirements-lock.txt
+$env:PYTHONPATH='src'
+.\.venv\Scripts\python.exe -m layerforge_l1 build
+.\.venv\Scripts\python.exe -m pytest --junitxml=artifacts\layer_feasibility\orbit_bloom_v1\reports\pytest.xml
+.\.venv\Scripts\python.exe -m layerforge_l1 build
+.\.venv\Scripts\python.exe -m layerforge_l1 verify
+```
+
+The second build incorporates the test XML into the validation report and
+artifact checksums. Current software status is `AWAITING_PHYSICAL_TEST`; it is
+not user-approved and does not demonstrate automatic image-to-layer generation.
+
 ## Truth and boundaries
 
 - These files specify the project but **do not contain a working app or completed CAD engine**.

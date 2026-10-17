@@ -1,0 +1,673 @@
+{
+  "report_version": "1.0.0-l1-auto",
+  "fixture_id": "heldout_octopus_submarine",
+  "status": "READY_FOR_USER_TEST",
+  "milestone": "L1_AUTOMATIC_PROPOSAL",
+  "physical_test": "NOT_REQUIRED_AT_THIS_DEVELOPMENT_STAGE",
+  "source_sha256": "6dbb25250462cd421a395fec025d27bfa7aaba640a10d1d384f4d70f16eb9f9d",
+  "manual_annotations_used": false,
+  "manual_corrections_count": 0,
+  "automatic_proposal_preserved": true,
+  "geometry_source": "automatic image analysis; no fixture-specific geometry",
+  "preview_source": "reopened exported STL footprints",
+  "environment": {
+    "os": "Windows-11-10.0.26200-SP0",
+    "python": "3.12.1",
+    "python_executable": "C:\\Users\\davni\\.vscode\\LayerForge\\.venv\\Scripts\\python.exe",
+    "cadquery": "2.6.1",
+    "cadquery-ocp": "7.8.1.1.post1",
+    "shapely": "2.0.6",
+    "numpy": "2.2.6",
+    "opencv-python": "4.10.0.84",
+    "trimesh": "4.8.3",
+    "matplotlib": "3.9.0",
+    "Pillow": "10.3.0",
+    "pytest": "8.3.5",
+    "scipy": "1.14.0"
+  },
+  "layer_count": 8,
+  "layers": [
+    {
+      "id": "layer_00_7ae0e4",
+      "status": "PASS",
+      "color": "#7AE0E4",
+      "step": "layers/layer_00_7ae0e4/layer_00_7ae0e4_body.step",
+      "stl": "layers/layer_00_7ae0e4/layer_00_7ae0e4_body.stl",
+      "planned_shared_sheet": {
+        "connected_component_count": 1,
+        "outer_bounds_mm": [
+          5.0,
+          5.0,
+          105.0,
+          105.0
+        ],
+        "expected_outer_bounds_mm": [
+          5.0,
+          5.0,
+          105.0,
+          105.0
+        ],
+        "outer_bounds_max_delta_mm": 0.0,
+        "outer_outline_hausdorff_mm": 0.0,
+        "missing_shared_perimeter_area_mm2": 0.0,
+        "area_outside_shared_outline_mm2": 0.0,
+        "shared_perimeter_width_mm": 4.0,
+        "pass": true
+      },
+      "stl_shared_sheet": {
+        "connected_component_count": 1,
+        "outer_bounds_mm": [
+          5.0,
+          5.0,
+          105.0,
+          105.0
+        ],
+        "expected_outer_bounds_mm": [
+          5.0,
+          5.0,
+          105.0,
+          105.0
+        ],
+        "outer_bounds_max_delta_mm": 0.0,
+        "outer_outline_hausdorff_mm": 4.0943871586191204e-06,
+        "missing_shared_perimeter_area_mm2": 2.4700344810584315e-05,
+        "area_outside_shared_outline_mm2": 1.7638938572184205e-05,
+        "shared_perimeter_width_mm": 4.0,
+        "pass": true
+      },
+      "planned_components": 1,
+      "stl_components": 1,
+      "step_solids": 1,
+      "step_valid": true,
+      "stl_watertight": true,
+      "planned_holes": 0,
+      "stl_footprint_holes": 0,
+      "step_xy_bounds_mm": [
+        5.0,
+        5.0,
+        105.0,
+        105.0
+      ],
+      "step_outer_bounds_max_delta_mm": 0.0,
+      "step_volume_mm3": 11949.507102354166,
+      "stl_volume_mm3": 11949.50756871191,
+      "minimum_feature_morphology_check": true,
+      "fits_220x220_mm_bed": true
+    },
+    {
+      "id": "layer_01_9667bf",
+      "status": "PASS",
+      "color": "#9667BF",
+      "step": "layers/layer_01_9667bf/layer_01_9667bf_body.step",
+      "stl": "layers/layer_01_9667bf/layer_01_9667bf_body.stl",
+      "planned_shared_sheet": {
+        "connected_component_count": 1,
+        "outer_bounds_mm": [
+          5.0,
+          5.0,
+          105.0,
+          105.0
+        ],
+        "expected_outer_bounds_mm": [
+          5.0,
+          5.0,
+          105.0,
+          105.0
+        ],
+        "outer_bounds_max_delta_mm": 0.0,
+        "outer_outline_hausdorff_mm": 0.0,
+        "missing_shared_perimeter_area_mm2": 0.0,
+        "area_outside_shared_outline_mm2": 0.0,
+        "shared_perimeter_width_mm": 4.0,
+        "pass": true
+      },
+      "stl_shared_sheet": {
+        "connected_component_count": 1,
+        "outer_bounds_mm": [
+          5.0,
+          5.0,
+          105.0,
+          105.0
+        ],
+        "expected_outer_bounds_mm": [
+          5.0,
+          5.0,
+          105.0,
+          105.0
+        ],
+        "outer_bounds_max_delta_mm": 0.0,
+        "outer_outline_hausdorff_mm": 4.0943871586191204e-06,
+        "missing_shared_perimeter_area_mm2": 2.4700344810584315e-05,
+        "area_outside_shared_outline_mm2": 1.763893857220721e-05,
+        "shared_perimeter_width_mm": 4.0,
+        "pass": true
+      },
+      "planned_components": 1,
+      "stl_components": 1,
+      "step_solids": 1,
+      "step_valid": true,
+      "stl_watertight": true,
+      "planned_holes": 17,
+      "stl_footprint_holes": 17,
+      "step_xy_bounds_mm": [
+        5.0,
+        5.0,
+        105.0,
+        105.0
+      ],
+      "step_outer_bounds_max_delta_mm": 0.0,
+      "step_volume_mm3": 2359.4690802421737,
+      "stl_volume_mm3": 2359.468626511089,
+      "minimum_feature_morphology_check": false,
+      "fits_220x220_mm_bed": true
+    },
+    {
+      "id": "layer_02_a14830",
+      "status": "PASS",
+      "color": "#A14830",
+      "step": "layers/layer_02_a14830/layer_02_a14830_body.step",
+      "stl": "layers/layer_02_a14830/layer_02_a14830_body.stl",
+      "planned_shared_sheet": {
+        "connected_component_count": 1,
+        "outer_bounds_mm": [
+          5.0,
+          5.0,
+          105.0,
+          105.0
+        ],
+        "expected_outer_bounds_mm": [
+          5.0,
+          5.0,
+          105.0,
+          105.0
+        ],
+        "outer_bounds_max_delta_mm": 0.0,
+        "outer_outline_hausdorff_mm": 0.0,
+        "missing_shared_perimeter_area_mm2": 0.0,
+        "area_outside_shared_outline_mm2": 0.0,
+        "shared_perimeter_width_mm": 4.0,
+        "pass": true
+      },
+      "stl_shared_sheet": {
+        "connected_component_count": 1,
+        "outer_bounds_mm": [
+          5.0,
+          5.0,
+          105.0,
+          105.0
+        ],
+        "expected_outer_bounds_mm": [
+          5.0,
+          5.0,
+          105.0,
+          105.0
+        ],
+        "outer_bounds_max_delta_mm": 0.0,
+        "outer_outline_hausdorff_mm": 4.0943871586191204e-06,
+        "missing_shared_perimeter_area_mm2": 2.4700344810584315e-05,
+        "area_outside_shared_outline_mm2": 1.7638938572208946e-05,
+        "shared_perimeter_width_mm": 4.0,
+        "pass": true
+      },
+      "planned_components": 1,
+      "stl_components": 1,
+      "step_solids": 1,
+      "step_valid": true,
+      "stl_watertight": true,
+      "planned_holes": 11,
+      "stl_footprint_holes": 11,
+      "step_xy_bounds_mm": [
+        5.0,
+        5.0,
+        105.0,
+        105.0
+      ],
+      "step_outer_bounds_max_delta_mm": 0.0,
+      "step_volume_mm3": 2825.057365542172,
+      "stl_volume_mm3": 2825.056816936963,
+      "minimum_feature_morphology_check": false,
+      "fits_220x220_mm_bed": true
+    },
+    {
+      "id": "layer_03_e78659",
+      "status": "PASS",
+      "color": "#E78659",
+      "step": "layers/layer_03_e78659/layer_03_e78659_body.step",
+      "stl": "layers/layer_03_e78659/layer_03_e78659_body.stl",
+      "planned_shared_sheet": {
+        "connected_component_count": 1,
+        "outer_bounds_mm": [
+          5.0,
+          5.0,
+          105.0,
+          105.0
+        ],
+        "expected_outer_bounds_mm": [
+          5.0,
+          5.0,
+          105.0,
+          105.0
+        ],
+        "outer_bounds_max_delta_mm": 0.0,
+        "outer_outline_hausdorff_mm": 0.0,
+        "missing_shared_perimeter_area_mm2": 0.0,
+        "area_outside_shared_outline_mm2": 0.0,
+        "shared_perimeter_width_mm": 4.0,
+        "pass": true
+      },
+      "stl_shared_sheet": {
+        "connected_component_count": 1,
+        "outer_bounds_mm": [
+          5.0,
+          5.0,
+          105.0,
+          105.0
+        ],
+        "expected_outer_bounds_mm": [
+          5.0,
+          5.0,
+          105.0,
+          105.0
+        ],
+        "outer_bounds_max_delta_mm": 0.0,
+        "outer_outline_hausdorff_mm": 4.0943871586191204e-06,
+        "missing_shared_perimeter_area_mm2": 2.4700344810584315e-05,
+        "area_outside_shared_outline_mm2": 1.763893857220876e-05,
+        "shared_perimeter_width_mm": 4.0,
+        "pass": true
+      },
+      "planned_components": 1,
+      "stl_components": 1,
+      "step_solids": 1,
+      "step_valid": true,
+      "stl_watertight": true,
+      "planned_holes": 19,
+      "stl_footprint_holes": 19,
+      "step_xy_bounds_mm": [
+        5.0,
+        5.0,
+        105.0,
+        105.0
+      ],
+      "step_outer_bounds_max_delta_mm": 0.0,
+      "step_volume_mm3": 3025.434626382165,
+      "stl_volume_mm3": 3025.4342962425503,
+      "minimum_feature_morphology_check": false,
+      "fits_220x220_mm_bed": true
+    },
+    {
+      "id": "layer_04_385d7b",
+      "status": "PASS",
+      "color": "#385D7B",
+      "step": "layers/layer_04_385d7b/layer_04_385d7b_body.step",
+      "stl": "layers/layer_04_385d7b/layer_04_385d7b_body.stl",
+      "planned_shared_sheet": {
+        "connected_component_count": 1,
+        "outer_bounds_mm": [
+          5.0,
+          5.0,
+          105.0,
+          105.0
+        ],
+        "expected_outer_bounds_mm": [
+          5.0,
+          5.0,
+          105.0,
+          105.0
+        ],
+        "outer_bounds_max_delta_mm": 0.0,
+        "outer_outline_hausdorff_mm": 0.0,
+        "missing_shared_perimeter_area_mm2": 0.0,
+        "area_outside_shared_outline_mm2": 0.0,
+        "shared_perimeter_width_mm": 4.0,
+        "pass": true
+      },
+      "stl_shared_sheet": {
+        "connected_component_count": 1,
+        "outer_bounds_mm": [
+          5.0,
+          5.0,
+          105.0,
+          105.0
+        ],
+        "expected_outer_bounds_mm": [
+          5.0,
+          5.0,
+          105.0,
+          105.0
+        ],
+        "outer_bounds_max_delta_mm": 0.0,
+        "outer_outline_hausdorff_mm": 4.0943871586191204e-06,
+        "missing_shared_perimeter_area_mm2": 2.4700344810584315e-05,
+        "area_outside_shared_outline_mm2": 1.7638938572198083e-05,
+        "shared_perimeter_width_mm": 4.0,
+        "pass": true
+      },
+      "planned_components": 1,
+      "stl_components": 1,
+      "step_solids": 1,
+      "step_valid": true,
+      "stl_watertight": true,
+      "planned_holes": 48,
+      "stl_footprint_holes": 48,
+      "step_xy_bounds_mm": [
+        5.0,
+        5.0,
+        105.0,
+        105.0
+      ],
+      "step_outer_bounds_max_delta_mm": 0.0,
+      "step_volume_mm3": 3989.4739126201694,
+      "stl_volume_mm3": 3989.4736304536814,
+      "minimum_feature_morphology_check": false,
+      "fits_220x220_mm_bed": true
+    },
+    {
+      "id": "layer_05_44998c",
+      "status": "PASS",
+      "color": "#44998C",
+      "step": "layers/layer_05_44998c/layer_05_44998c_body.step",
+      "stl": "layers/layer_05_44998c/layer_05_44998c_body.stl",
+      "planned_shared_sheet": {
+        "connected_component_count": 1,
+        "outer_bounds_mm": [
+          5.0,
+          5.0,
+          105.0,
+          105.0
+        ],
+        "expected_outer_bounds_mm": [
+          5.0,
+          5.0,
+          105.0,
+          105.0
+        ],
+        "outer_bounds_max_delta_mm": 0.0,
+        "outer_outline_hausdorff_mm": 0.0,
+        "missing_shared_perimeter_area_mm2": 0.0,
+        "area_outside_shared_outline_mm2": 0.0,
+        "shared_perimeter_width_mm": 4.0,
+        "pass": true
+      },
+      "stl_shared_sheet": {
+        "connected_component_count": 1,
+        "outer_bounds_mm": [
+          5.0,
+          5.0,
+          105.0,
+          105.0
+        ],
+        "expected_outer_bounds_mm": [
+          5.0,
+          5.0,
+          105.0,
+          105.0
+        ],
+        "outer_bounds_max_delta_mm": 0.0,
+        "outer_outline_hausdorff_mm": 4.0943871586191204e-06,
+        "missing_shared_perimeter_area_mm2": 2.4700344810584315e-05,
+        "area_outside_shared_outline_mm2": 1.763893857220876e-05,
+        "shared_perimeter_width_mm": 4.0,
+        "pass": true
+      },
+      "planned_components": 1,
+      "stl_components": 1,
+      "step_solids": 1,
+      "step_valid": true,
+      "stl_watertight": true,
+      "planned_holes": 54,
+      "stl_footprint_holes": 54,
+      "step_xy_bounds_mm": [
+        5.0,
+        5.0,
+        105.0,
+        105.0
+      ],
+      "step_outer_bounds_max_delta_mm": 0.0,
+      "step_volume_mm3": 3782.750689248165,
+      "stl_volume_mm3": 3782.7503290035825,
+      "minimum_feature_morphology_check": false,
+      "fits_220x220_mm_bed": true
+    },
+    {
+      "id": "layer_06_f8d257",
+      "status": "PASS",
+      "color": "#F8D257",
+      "step": "layers/layer_06_f8d257/layer_06_f8d257_body.step",
+      "stl": "layers/layer_06_f8d257/layer_06_f8d257_body.stl",
+      "planned_shared_sheet": {
+        "connected_component_count": 1,
+        "outer_bounds_mm": [
+          5.0,
+          5.0,
+          105.0,
+          105.0
+        ],
+        "expected_outer_bounds_mm": [
+          5.0,
+          5.0,
+          105.0,
+          105.0
+        ],
+        "outer_bounds_max_delta_mm": 0.0,
+        "outer_outline_hausdorff_mm": 0.0,
+        "missing_shared_perimeter_area_mm2": 0.0,
+        "area_outside_shared_outline_mm2": 0.0,
+        "shared_perimeter_width_mm": 4.0,
+        "pass": true
+      },
+      "stl_shared_sheet": {
+        "connected_component_count": 1,
+        "outer_bounds_mm": [
+          5.0,
+          5.0,
+          105.0,
+          105.0
+        ],
+        "expected_outer_bounds_mm": [
+          5.0,
+          5.0,
+          105.0,
+          105.0
+        ],
+        "outer_bounds_max_delta_mm": 0.0,
+        "outer_outline_hausdorff_mm": 4.0943871586191204e-06,
+        "missing_shared_perimeter_area_mm2": 2.4700344810584315e-05,
+        "area_outside_shared_outline_mm2": 1.7638938572220635e-05,
+        "shared_perimeter_width_mm": 4.0,
+        "pass": true
+      },
+      "planned_components": 1,
+      "stl_components": 1,
+      "step_solids": 1,
+      "step_valid": true,
+      "stl_watertight": true,
+      "planned_holes": 45,
+      "stl_footprint_holes": 45,
+      "step_xy_bounds_mm": [
+        5.0,
+        5.0,
+        105.0,
+        105.0
+      ],
+      "step_outer_bounds_max_delta_mm": 0.0,
+      "step_volume_mm3": 4111.787369712176,
+      "stl_volume_mm3": 4111.786949610105,
+      "minimum_feature_morphology_check": false,
+      "fits_220x220_mm_bed": true
+    },
+    {
+      "id": "layer_07_232a39",
+      "status": "PASS",
+      "color": "#232A39",
+      "step": "layers/layer_07_232a39/layer_07_232a39_body.step",
+      "stl": "layers/layer_07_232a39/layer_07_232a39_body.stl",
+      "planned_shared_sheet": {
+        "connected_component_count": 1,
+        "outer_bounds_mm": [
+          5.0,
+          5.0,
+          105.0,
+          105.0
+        ],
+        "expected_outer_bounds_mm": [
+          5.0,
+          5.0,
+          105.0,
+          105.0
+        ],
+        "outer_bounds_max_delta_mm": 0.0,
+        "outer_outline_hausdorff_mm": 0.0,
+        "missing_shared_perimeter_area_mm2": 0.0,
+        "area_outside_shared_outline_mm2": 0.0,
+        "shared_perimeter_width_mm": 4.0,
+        "pass": true
+      },
+      "stl_shared_sheet": {
+        "connected_component_count": 1,
+        "outer_bounds_mm": [
+          5.0,
+          5.0,
+          105.0,
+          105.0
+        ],
+        "expected_outer_bounds_mm": [
+          5.0,
+          5.0,
+          105.0,
+          105.0
+        ],
+        "outer_bounds_max_delta_mm": 0.0,
+        "outer_outline_hausdorff_mm": 4.0943871586191204e-06,
+        "missing_shared_perimeter_area_mm2": 2.4700344810584315e-05,
+        "area_outside_shared_outline_mm2": 1.763893857220876e-05,
+        "shared_perimeter_width_mm": 4.0,
+        "pass": true
+      },
+      "planned_components": 1,
+      "stl_components": 1,
+      "step_solids": 1,
+      "step_valid": true,
+      "stl_watertight": true,
+      "planned_holes": 83,
+      "stl_footprint_holes": 83,
+      "step_xy_bounds_mm": [
+        5.0,
+        5.0,
+        105.0,
+        105.0
+      ],
+      "step_outer_bounds_max_delta_mm": 0.0,
+      "step_volume_mm3": 3869.8398365821613,
+      "stl_volume_mm3": 3869.839585802818,
+      "minimum_feature_morphology_check": false,
+      "fits_220x220_mm_bed": true
+    }
+  ],
+  "printability": {
+    "common_outer_dimensions_pass": true,
+    "structural_connector_width_mm": 1.6,
+    "connector_width_at_least_three_nozzle_widths": true,
+    "conservative_full_sheet_erosion_pass_count": 1,
+    "conservative_full_sheet_erosion_warning_count": 7,
+    "warning": "A failed full-sheet erosion check flags narrow decorative source detail for slicer review; it does not negate watertightness, single-sheet connectivity, or the explicit connector width check."
+  },
+  "evaluation": {
+    "comparison_basis": "ordered front projection rasterized only from reopened exported STL footprints",
+    "analysis_resolution_px": [
+      192,
+      192
+    ],
+    "mismatched_pixels": 15665,
+    "pixel_accuracy": 0.5750596788194444,
+    "mean_absolute_rgb_error_0_255": 52.703152126736114,
+    "foreground_silhouette_iou": 0.7216845501087032,
+    "source_components_at_or_above_threshold": 179,
+    "retained_components_at_or_above_threshold": 69,
+    "small_detail_component_recall": 0.3854748603351955,
+    "visible_connector_artifact_pixels": 10676,
+    "visible_connector_artifact_fraction": 0.2896050347222222,
+    "missing_detail_pixels": 4989,
+    "wrong_nonbackground_color_pixels": 7728,
+    "ordering_ambiguity": {
+      "selected_automatic_order": [
+        3,
+        4,
+        5,
+        6,
+        1,
+        2,
+        7,
+        0
+      ],
+      "best_candidate_mismatch_pixels": 7219,
+      "runner_up_mismatch_pixels": 7643,
+      "ground_truth_depth_order_available": false
+    },
+    "layer_order_back_to_front": [
+      "layer_00_7ae0e4",
+      "layer_01_9667bf",
+      "layer_02_a14830",
+      "layer_03_e78659",
+      "layer_04_385d7b",
+      "layer_05_44998c",
+      "layer_06_f8d257",
+      "layer_07_232a39"
+    ],
+    "per_color": {
+      "#232A39": {
+        "source_pixels": 4154,
+        "stl_pixels": 4336,
+        "iou": 0.1909103661102539,
+        "coverage": 0.3276360134809822
+      },
+      "#385D7B": {
+        "source_pixels": 4048,
+        "stl_pixels": 4164,
+        "iou": 0.29608585858585856,
+        "coverage": 0.4634387351778656
+      },
+      "#44998C": {
+        "source_pixels": 4913,
+        "stl_pixels": 4390,
+        "iou": 0.38231797919762256,
+        "coverage": 0.5237125992265418
+      },
+      "#7AE0E4": {
+        "source_pixels": 11294,
+        "stl_pixels": 13335,
+        "iou": 0.5125591107289812,
+        "coverage": 0.7389764476713299
+      },
+      "#9667BF": {
+        "source_pixels": 1231,
+        "stl_pixels": 929,
+        "iou": 0.5168539325842697,
+        "coverage": 0.5978878960194963
+      },
+      "#A14830": {
+        "source_pixels": 1485,
+        "stl_pixels": 1527,
+        "iou": 0.3772290809327846,
+        "coverage": 0.5555555555555556
+      },
+      "#E78659": {
+        "source_pixels": 2494,
+        "stl_pixels": 1916,
+        "iou": 0.2571265678449259,
+        "coverage": 0.3616680032076985
+      },
+      "#F8D257": {
+        "source_pixels": 7245,
+        "stl_pixels": 6267,
+        "iou": 0.5127630989699955,
+        "coverage": 0.63216011042098
+      }
+    }
+  },
+  "limitations": [
+    "Palette reduction maps the source to one filament color per physical sheet.",
+    "Visible connector artifacts and lost antialiased/shaded detail are measured, not hidden.",
+    "Automated software checks do not establish real filament appearance, warping, or handling strength."
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "new_fixture": {
+    "id": "bear_face",
+    "generator": "OpenAI built-in image generation tool",
+    "third_party_assets": false,
+    "workspace_path": "fixtures/l1_subtractive_poc/bear_face.png",
+    "artifact_path": "artifacts/l1_subtractive_poc/bear_face/original/source.png",
+    "sha256": "345c7fae7e1c19e1595743ef026044cc505815a6988bf8d9f87fed235c1f2975",
+    "prompt": "Use case: illustration-story. Asset type: LayerForge subtractive-layer 2D proof fixture. Create an original simple flat cartoon portrait of a cheerful golden-yellow bear face with two separate dark navy oval eyes, one separate dark navy smiling mouth, a coral-red heart-shaped forehead mark fully enclosed inside the face, pink inner ears, a teal bow tie overlapping the bottom of the face, and an optional cream muzzle. Use a solid pale sky-blue background extending to every edge, clean vector-like flat-color shapes, centered square composition, and crisp closed boundaries. No text, letters, numbers, watermark, branding, gradients, shading, highlights, shadows, texture, or 3D rendering."
+  },
+  "existing_fixture": {
+    "id": "fox_workshop",
+    "workspace_path": "fixtures/l1_auto/development_fox_workshop.png",
+    "artifact_path": "artifacts/l1_subtractive_poc/fox_workshop/original/source.png",
+    "sha256": "d383b48e0cffbfa3c9d901042989d429e5f2d0f32c9d9922a6d026eff39efc3a",
+    "note": "Reused unchanged as requested for the complex-image regression."
+  }
+}

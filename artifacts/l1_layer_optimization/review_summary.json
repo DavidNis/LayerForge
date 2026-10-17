@@ -1,0 +1,67 @@
+{
+  "task": "Layer Stack Optimization focused 2D proof",
+  "status": "READY_FOR_USER_TEST",
+  "scope": "2D subtractive masks only; no STL, STEP, CAD integration, frontend, frame, stand, or specification edits",
+  "algorithm": {
+    "name": "bounded region-graph beam search",
+    "search_width": 65536,
+    "hard_constraints": [
+      "exact quantized-target reconstruction",
+      "one color per physical layer",
+      "identical 576 x 576 outer sheet outline",
+      "continuous 32-pixel perimeter",
+      "one connected physical sheet",
+      "no visible connector fallback",
+      "no source-region deletion"
+    ],
+    "lexicographic_objective": [
+      "fewest completed physical layers found",
+      "fewest layers below 0.05 percent visible contribution",
+      "least cumulative retained aperture material",
+      "deterministic palette-index tie break"
+    ],
+    "global_optimality": "The bear reaches the seven-color lower bound and is proven layer-count minimal. The fox result is the best plan found by the bounded search, not a proof that 17 is globally minimal."
+  },
+  "bear_face": {
+    "layers_before": 7,
+    "layers_optimized": 7,
+    "retained_pixel_layers_before": 1565857,
+    "retained_pixel_layers_optimized": 1416690,
+    "retained_material_reduction_fraction": 0.09526221104481447,
+    "near_full_layers_before": 3,
+    "near_full_layers_optimized": 2,
+    "minimum_visible_pixels_before": 2408,
+    "minimum_visible_pixels_optimized": 2408,
+    "palette_regions_retained": "11/11",
+    "geometry_pixel_accuracy": 1.0,
+    "visible_connector_pixels": 0,
+    "unsupported_thin_details": 0,
+    "manual_corrections": 0
+  },
+  "fox_workshop": {
+    "layers_before": 21,
+    "layers_optimized": 17,
+    "retained_pixel_layers_before": 4742117,
+    "retained_pixel_layers_optimized": 3526431,
+    "retained_material_reduction_fraction": 0.2563593433059539,
+    "near_full_layers_before": 11,
+    "near_full_layers_optimized": 3,
+    "tiny_visible_layers_before": 4,
+    "tiny_visible_layers_optimized": 0,
+    "minimum_visible_pixels_before": 1,
+    "minimum_visible_pixels_optimized": 624,
+    "palette_regions_retained": "290/290",
+    "geometry_pixel_accuracy": 1.0,
+    "visible_connector_pixels": 0,
+    "unsupported_thin_details": 148,
+    "manual_corrections": 0,
+    "one_layer_per_color_feasible": false,
+    "repeated_colors": ["#FBF1D6", "#1A202C", "#F88122", "#457D45", "#A66940", "#78B4B2"],
+    "repeated_color_merge_audit": "20 directional pairwise merge attempts; zero retained exact connectivity"
+  },
+  "tests": {
+    "focused_final": {"passed": 18, "failed": 0, "skipped": 0, "duration_seconds": 0.55},
+    "full_regression": {"passed": 42, "failed": 0, "skipped": 0, "warnings": 29, "duration_seconds": 437.38}
+  },
+  "approval": "Not approved by the system; awaiting user visual review"
+}

@@ -1,0 +1,51 @@
+{
+  "milestone": "L1 automatic image-to-layer proposal",
+  "status": "READY_FOR_USER_TEST",
+  "physical_printing_required": false,
+  "algorithm_frozen_before_heldout_fixture": true,
+  "manual_annotations_used": false,
+  "manual_corrections_applied": 0,
+  "shared_rules": {
+    "physical_layers_per_case": 8,
+    "outer_dimensions_mm": [100.0, 100.0],
+    "continuous_outer_perimeter_width_mm": 4.0,
+    "structural_connector_width_mm": 1.6,
+    "one_color_per_physical_layer": true,
+    "external_frame_included": false
+  },
+  "cases": [
+    {
+      "id": "development_fox_workshop",
+      "role": "complex development illustration",
+      "source_sha256": "d383b48e0cffbfa3c9d901042989d429e5f2d0f32c9d9922a6d026eff39efc3a",
+      "pixel_accuracy": 0.6137152777777778,
+      "foreground_silhouette_iou": 0.7043392504930966,
+      "mean_absolute_rgb_error_0_255": 49.311704282407405,
+      "small_detail_component_recall": 0.41333333333333333,
+      "visible_connector_artifact_pixels": 10673,
+      "missing_detail_pixels": 3567,
+      "result": "GEOMETRY_EXPORT_PASS_VISUAL_QUALITY_NEEDS_REVIEW"
+    },
+    {
+      "id": "heldout_octopus_submarine",
+      "role": "held-out complex illustration generated after algorithm freeze",
+      "source_sha256": "6dbb25250462cd421a395fec025d27bfa7aaba640a10d1d384f4d70f16eb9f9d",
+      "pixel_accuracy": 0.5750596788194444,
+      "foreground_silhouette_iou": 0.7216845501087032,
+      "mean_absolute_rgb_error_0_255": 52.703152126736114,
+      "small_detail_component_recall": 0.3854748603351955,
+      "visible_connector_artifact_pixels": 10676,
+      "missing_detail_pixels": 4989,
+      "result": "GEOMETRY_EXPORT_PASS_VISUAL_QUALITY_NEEDS_REVIEW"
+    }
+  ],
+  "automated_tests": {
+    "command": "$env:PYTHONPATH='src'; .\\.venv\\Scripts\\python.exe -m pytest --junitxml=artifacts\\l1_auto\\pytest.xml",
+    "passed": 24,
+    "failed": 0,
+    "skipped": 0,
+    "warnings": 29,
+    "duration_seconds": 217.78
+  },
+  "review_conclusion": "The generic pipeline demonstrates automatic segmentation, physical sheet construction, true STEP/STL export, and CAD-derived comparison on two detailed images. It does not yet demonstrate acceptable visual fidelity for detailed art; visible connector artifacts and missing small details remain substantial."
+}

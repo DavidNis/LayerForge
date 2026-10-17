@@ -46,6 +46,44 @@ Every view is produced from the same layer solids as STEP and STL. An AI mockup 
 
 The coding agent should **not block the controlled L-1 experiment** on these choices. It should expose them as parameters, use transparent experiment-only defaults for L-1, and request clarification before fixing a final product policy.
 
+## D-V3-007 | 2026-10-16 | Controlled L-1 fixture and experiment-only dimensions
+
+**Status:** VERIFIED FEASIBILITY DECISION; not a final product default.
+
+`orbit_bloom_v1` uses a 100 x 80 mm common canvas, six physical layers, 1.2 mm
+nominal bases, 0.4 mm proposed display gaps, and a 220 x 220 mm software bed
+envelope. The source is original project artwork under CC0-1.0. These values were
+selected to exercise the gate and remain user-configurable policy questions.
+
+## D-V3-008 | 2026-10-16 | Reviewed hidden web for the multi-region sheet
+
+**Status:** VERIFIED FIXTURE-SPECIFIC DESIGN CHOICE.
+
+The two intended visible regions on `layer_02_gold_regions` are one connected
+physical sheet through a deliberately authored 4 mm web. The higher coral ring
+occludes most of that web. Read-back confirms one watertight component. This is
+not an automatic default for future disconnected regions; unresolved islands
+must still fail or receive explicit review.
+
+## D-V3-009 | 2026-10-16 | Exported STL read-back is the preview projection source
+
+**Status:** VERIFIED IMPLEMENTATION DECISION FOR L-1.
+
+CadQuery/OCP generates the BRep solids and true STEP/STL exports. Individual,
+assembled-front, side and exploded views project the reopened exported STL
+triangles, while STEP is independently reopened and validated. This provides
+evidence that visible previews correspond to the exported CAD geometry rather
+than to a separate decorative rendering pipeline.
+
+## D-V3-010 | 2026-10-16 | Software pass does not complete L-1
+
+**Status:** ACCEPTED GATE APPLICATION.
+
+L-G01 through L-G09 pass for the controlled fixture. L-G10 remains PENDING for
+real slicing, printing, temporary registration, shadow/appearance inspection and
+explicit user approval. State is `AWAITING_PHYSICAL_TEST`; later milestones stay
+blocked.
+
 ## Decision log protocol
 
 Append immutable decisions with: ID, date, question, chosen option, evidence vs assumption, impact, status. Do not silently replace historical entries or turn open questions into requirements.

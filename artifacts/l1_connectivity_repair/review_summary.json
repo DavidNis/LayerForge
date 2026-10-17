@@ -1,0 +1,57 @@
+{
+  "task": "L1 subtractive-mask connectivity audit and repair",
+  "review_state": "READY_FOR_USER_TEST",
+  "scope": "2D masks and diagnostics only; no CAD, STL, STEP, frontend, external frame, or specification edits",
+  "root_cause": "The previous region extraction and sheet checks used 8-neighbour component labeling. Pixels touching only at a diagonal corner were therefore treated as connected even though their shared-edge width is zero.",
+  "connectivity_policy": {
+    "visual_diagnostic_only": "8-neighbour",
+    "required_sheet_connectivity": "4-neighbour edge connectivity",
+    "nominal_connection_width_mm": 0.8,
+    "vectorization_safety_mm": 0.2,
+    "cad_conversion_safety_mm": 0.2,
+    "enforced_connection_width_mm": 1.2,
+    "enforced_connection_width_pixels": 7,
+    "width_method": "Elliptically erode each physical mask by a conservative four-pixel radius, require every surviving core component to reach the common perimeter, then confirm every visible component touches the restored supported core."
+  },
+  "bear_face": {
+    "validation_status": "PASS",
+    "layers_before": 7,
+    "layers_repaired": 7,
+    "failed_four_neighbor_layers_before": 0,
+    "orphan_components_before": 0,
+    "orphan_components_repaired": 0,
+    "width_conflict_layers": 0,
+    "geometry_pixel_accuracy": 1.0,
+    "changed_composite_pixels": 0,
+    "visible_connector_pixels": 0
+  },
+  "fox_workshop": {
+    "validation_status": "CONFLICT_REQUIRES_USER_DECISION",
+    "layers_before": 17,
+    "layers_repaired": 18,
+    "failed_four_neighbor_layers_before": 11,
+    "orphan_components_before": 113,
+    "orphan_pixels_before": 2653,
+    "orphan_components_repaired": 0,
+    "width_conflict_layers": 15,
+    "orphan_structural_core_components": 137,
+    "unsupported_visible_components": 57,
+    "strict_width_search": "No exact perimeter-connected sequence was found at the enforced seven-pixel contact threshold.",
+    "geometry_pixel_accuracy": 1.0,
+    "changed_composite_pixels": 0,
+    "visible_connector_pixels": 0,
+    "unsupported_thin_details": 148
+  },
+  "repair_policy": {
+    "hidden_material_only": true,
+    "visible_artwork_changes": 0,
+    "visible_bridge_fallback": false,
+    "fixed_order_additional_hidden_pixels_available": 0,
+    "reason_for_order_change": "The prior 17-layer order contains edge-disconnected sheets even though all pixels hidden by upper layers are already retained. A 4-neighbour region-graph replan is therefore necessary and yields 18 edge-connected sheets."
+  },
+  "tests": {
+    "connectivity_focused": {"passed": 27, "failed": 0, "skipped": 0, "duration_seconds": 0.61},
+    "full_regression": {"passed": 51, "failed": 0, "skipped": 0, "warnings": 29, "duration_seconds": 191.81}
+  },
+  "approval": "L1 remains unapproved. Fox edge connectivity is repaired, but the configured width gate remains an explicit conflict requiring user direction."
+}

@@ -1,0 +1,228 @@
+{
+  "case_id": "bear_face",
+  "strict_all_region_7px_search": {
+    "status": "CANDIDATE_FOUND",
+    "same_sequence_as_current": true,
+    "search": {
+      "method": "bounded_region_graph_beam_search",
+      "global_minimum_proven": false,
+      "max_states_per_depth": 65536,
+      "explored_candidate_states": 55,
+      "pruned_candidate_states": 0,
+      "frontier_widths": [
+        {
+          "depth": 1,
+          "candidate_states": 1,
+          "kept_states": 1
+        },
+        {
+          "depth": 2,
+          "candidate_states": 2,
+          "kept_states": 2
+        },
+        {
+          "depth": 3,
+          "candidate_states": 6,
+          "kept_states": 6
+        },
+        {
+          "depth": 4,
+          "candidate_states": 12,
+          "kept_states": 12
+        },
+        {
+          "depth": 5,
+          "candidate_states": 15,
+          "kept_states": 15
+        },
+        {
+          "depth": 6,
+          "candidate_states": 13,
+          "kept_states": 13
+        },
+        {
+          "depth": 7,
+          "candidate_states": 6,
+          "kept_states": 6
+        }
+      ],
+      "objective": [
+        "minimum completed layer count",
+        "minimum tiny-visible-contribution layer count",
+        "minimum cumulative retained interior pixel-layers",
+        "deterministic palette-index tie break"
+      ],
+      "winning_tiny_layer_count": 0,
+      "winning_retained_pixel_layers": 1416690,
+      "minimum_contact_pixels": 7,
+      "thin_decorative_exemption": false,
+      "thin_decorative_region_count": 0
+    },
+    "evaluation": {
+      "sequence_front_to_back": [
+        0,
+        4,
+        6,
+        1,
+        5,
+        2,
+        3
+      ],
+      "layer_count": 7,
+      "exact_composite_changed_pixels": 0,
+      "width_summary": {
+        "layer_count": 7,
+        "conflicting_layer_count": 0,
+        "orphan_structural_core_components": 0,
+        "structural_bottleneck_visible_components": 0,
+        "thin_decorative_visible_components": 0,
+        "visible_components_outside_restored_support": 0
+      }
+    },
+    "global_infeasibility_proven": false
+  },
+  "thin_decoration_exempt_7px_search": {
+    "status": "CANDIDATE_FOUND",
+    "same_sequence_as_current": true,
+    "search": {
+      "method": "bounded_region_graph_beam_search",
+      "global_minimum_proven": false,
+      "max_states_per_depth": 65536,
+      "explored_candidate_states": 55,
+      "pruned_candidate_states": 0,
+      "frontier_widths": [
+        {
+          "depth": 1,
+          "candidate_states": 1,
+          "kept_states": 1
+        },
+        {
+          "depth": 2,
+          "candidate_states": 2,
+          "kept_states": 2
+        },
+        {
+          "depth": 3,
+          "candidate_states": 6,
+          "kept_states": 6
+        },
+        {
+          "depth": 4,
+          "candidate_states": 12,
+          "kept_states": 12
+        },
+        {
+          "depth": 5,
+          "candidate_states": 15,
+          "kept_states": 15
+        },
+        {
+          "depth": 6,
+          "candidate_states": 13,
+          "kept_states": 13
+        },
+        {
+          "depth": 7,
+          "candidate_states": 6,
+          "kept_states": 6
+        }
+      ],
+      "objective": [
+        "minimum completed layer count",
+        "minimum tiny-visible-contribution layer count",
+        "minimum cumulative retained interior pixel-layers",
+        "deterministic palette-index tie break"
+      ],
+      "winning_tiny_layer_count": 0,
+      "winning_retained_pixel_layers": 1416690,
+      "minimum_contact_pixels": 7,
+      "thin_decorative_exemption": true,
+      "thin_decorative_region_count": 0
+    },
+    "evaluation": {
+      "sequence_front_to_back": [
+        0,
+        4,
+        6,
+        1,
+        5,
+        2,
+        3
+      ],
+      "layer_count": 7,
+      "exact_composite_changed_pixels": 0,
+      "width_summary": {
+        "layer_count": 7,
+        "conflicting_layer_count": 0,
+        "orphan_structural_core_components": 0,
+        "structural_bottleneck_visible_components": 0,
+        "thin_decorative_visible_components": 0,
+        "visible_components_outside_restored_support": 0
+      }
+    },
+    "global_infeasibility_proven": false
+  },
+  "current_sequence_front_to_back": [
+    0,
+    4,
+    6,
+    1,
+    5,
+    2,
+    3
+  ],
+  "repeated_color_layers": [],
+  "fixed_order_hidden_support": {
+    "method": "union of material in all sheets in front minus current retained material",
+    "safe_hidden_pixels_available": 0,
+    "layers": [
+      {
+        "id": "layer_00_fe98b8",
+        "depth_back_to_front": 0,
+        "safe_hidden_pixels_available_without_reordering": 0
+      },
+      {
+        "id": "layer_01_10274e",
+        "depth_back_to_front": 1,
+        "safe_hidden_pixels_available_without_reordering": 0
+      },
+      {
+        "id": "layer_02_fb5144",
+        "depth_back_to_front": 2,
+        "safe_hidden_pixels_available_without_reordering": 0
+      },
+      {
+        "id": "layer_03_fdcd25",
+        "depth_back_to_front": 3,
+        "safe_hidden_pixels_available_without_reordering": 0
+      },
+      {
+        "id": "layer_04_fbedcf",
+        "depth_back_to_front": 4,
+        "safe_hidden_pixels_available_without_reordering": 0
+      },
+      {
+        "id": "layer_05_10b0a5",
+        "depth_back_to_front": 5,
+        "safe_hidden_pixels_available_without_reordering": 0
+      },
+      {
+        "id": "layer_06_97d9fd",
+        "depth_back_to_front": 6,
+        "safe_hidden_pixels_available_without_reordering": 0
+      }
+    ],
+    "conclusion": "The current nested masks already retain every region hidden by a front sheet; fixed-order hidden fill cannot widen the remaining necks."
+  },
+  "infeasibility_claim": {
+    "globally_proven": false,
+    "proven_only": "the reported masks contain the enumerated 7x7 orphan cores, and the current nested order has no additional front-occluded pixels available for hidden fill",
+    "not_proven": "that no alternate ordering, repeated-color repartition, or exact mask-level global search can satisfy the design"
+  },
+  "proposed_resolution": {
+    "planner_change": "search exact cumulative mask morphology at each prefix instead of using interface-contact length as a sufficient proxy",
+    "ordering": "optimize color order and provider-region grouping jointly against orphan-core count and retained area",
+    "repeated_colors": "permit another occurrence only when it removes a measured bottleneck while preserving every source pixel",
+    "acceptance": "zero 7x7 orphan structural cores, zero changed composite pixels, unchanged shared perimeter, and no visible connector bridge"
+  }
+}

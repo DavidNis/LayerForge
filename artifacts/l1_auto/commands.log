@@ -1,0 +1,9 @@
+# Commands executed from C:\Users\davni\.vscode\LayerForge
+$env:PYTHONPATH='src'; .\.venv\Scripts\python.exe -m layerforge_l1 auto --input fixtures\l1_auto\development_fox_workshop.png --case-id development_fox_workshop --output artifacts\l1_auto\development_fox_workshop
+$env:PYTHONPATH='src'; .\.venv\Scripts\python.exe -m layerforge_l1 auto --input fixtures\l1_auto\heldout_octopus_submarine.png --case-id heldout_octopus_submarine --output artifacts\l1_auto\heldout_octopus_submarine
+$env:PYTHONPATH='src'; .\.venv\Scripts\python.exe -m pytest --junitxml=artifacts\l1_auto\pytest.xml
+
+# Observed final result
+# development_fox_workshop: READY_FOR_USER_TEST; 8 STEP + 8 STL; 8/8 geometry rows PASS.
+# heldout_octopus_submarine: READY_FOR_USER_TEST; 8 STEP + 8 STL; 8/8 geometry rows PASS.
+# pytest: 24 PASS, 0 FAIL, 0 SKIP, 29 dependency deprecation warnings.

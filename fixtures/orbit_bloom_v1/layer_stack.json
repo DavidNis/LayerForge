@@ -1,0 +1,160 @@
+{
+  "schema_version": "3.0.0-l1",
+  "fixture_id": "orbit_bloom_v1",
+  "plan_provenance": "manual_reviewed",
+  "artwork": {
+    "title": "Orbit Bloom",
+    "image": "source/source.png",
+    "sha256": "582ec14e603f6e5e7d68d67c01612ce1cd7d0f209e8652f79494aca8ade0fc36",
+    "pixel_size": [1000, 800],
+    "canvas_mm": [100.0, 80.0],
+    "image_origin": "upper-left",
+    "model_origin": "lower-left",
+    "source_to_model": {
+      "x_mm_per_pixel": 0.1,
+      "y_mm_per_pixel": 0.1,
+      "y_axis_inverted_once": true
+    },
+    "rights": {
+      "author": "LayerForge project fixture, authored for this repository",
+      "license": "CC0-1.0",
+      "third_party_assets": false
+    }
+  },
+  "construction": {
+    "method": "registered_layer_sheets",
+    "one_filament_per_layer": true,
+    "housing_required": false,
+    "assembled_z_axis": "front-positive",
+    "preview_camera": "orthographic from positive Z",
+    "physical_alignment": "identical 90 x 70 mm rounded outer outlines for insertion into a user-supplied slotted frame; frame not included",
+    "shared_sheet": {
+      "outer_outline": {"type": "rounded_rectangle", "bounds_mm": [5.0, 5.0, 95.0, 75.0], "radius_mm": 7.0},
+      "outer_perimeter": {"type": "rounded_rectangle_ring", "bounds_mm": [5.0, 5.0, 95.0, 75.0], "radius_mm": 7.0, "width_mm": 4.0},
+      "external_dimensions_mm": [90.0, 70.0],
+      "nominal_slot_thickness_mm": 1.2,
+      "validation_tolerance_mm": 0.00001
+    }
+  },
+  "manufacturing": {
+    "printer_bed_mm": [220.0, 220.0, 250.0],
+    "nozzle_diameter_mm": 0.4,
+    "minimum_feature_mm": 1.2,
+    "mesh_linear_tolerance_mm": 0.05,
+    "mesh_angular_tolerance_rad": 0.1
+  },
+  "layers": [
+    {
+      "id": "layer_00_navy_backdrop",
+      "order_back_to_front": 0,
+      "color": {"name": "navy", "hex": "#19324D", "filament": "user-selected matte navy PLA"},
+      "nominal_thickness_mm": 1.2,
+      "assembly_transform": {"translate_xyz_mm": [0.0, 0.0, 0.0], "rotate_xyz_deg": [0.0, 0.0, 0.0]},
+      "print_transform": {"translate_xyz_mm": [10.0, 10.0, 0.0], "rotate_xyz_deg": [0.0, 0.0, 0.0]},
+      "geometry": {
+        "connectivity_policy": "require_single_component",
+        "additive_regions": [
+          {"id": "shared_outer_perimeter", "role": "shared_outer_perimeter", "shape": {"type": "rounded_rectangle_ring", "bounds_mm": [5.0, 5.0, 95.0, 75.0], "radius_mm": 7.0, "width_mm": 4.0}},
+          {"id": "backdrop_interior", "role": "visible_art", "shape": {"type": "rounded_rectangle", "bounds_mm": [9.0, 9.0, 91.0, 71.0], "radius_mm": 3.0}}
+        ],
+        "cutout_regions": [],
+        "rim": {"enabled": false}
+      }
+    },
+    {
+      "id": "layer_01_teal_orbit",
+      "order_back_to_front": 1,
+      "color": {"name": "teal", "hex": "#2A9D8F", "filament": "user-selected teal PLA"},
+      "nominal_thickness_mm": 1.2,
+      "assembly_transform": {"translate_xyz_mm": [0.0, 0.0, 1.6], "rotate_xyz_deg": [0.0, 0.0, 0.0]},
+      "print_transform": {"translate_xyz_mm": [110.0, 10.0, 0.0], "rotate_xyz_deg": [0.0, 0.0, 180.0]},
+      "geometry": {
+        "connectivity_policy": "require_single_component",
+        "additive_regions": [
+          {"id": "shared_outer_perimeter", "role": "shared_outer_perimeter", "shape": {"type": "rounded_rectangle_ring", "bounds_mm": [5.0, 5.0, 95.0, 75.0], "radius_mm": 7.0, "width_mm": 4.0}},
+          {"id": "orbit_field", "role": "visible_art", "shape": {"type": "ellipse", "center_mm": [50.0, 38.0], "radii_mm": [35.0, 25.0]}},
+          {"id": "orbit_to_perimeter_web", "role": "connectivity_web", "shape": {"type": "rounded_rectangle", "bounds_mm": [48.0, 7.0, 52.0, 15.0], "radius_mm": 2.0}}
+        ],
+        "cutout_regions": [],
+        "rim": {"enabled": false}
+      }
+    },
+    {
+      "id": "layer_02_gold_regions",
+      "order_back_to_front": 2,
+      "color": {"name": "gold", "hex": "#F4C542", "filament": "user-selected gold/yellow PLA"},
+      "nominal_thickness_mm": 1.2,
+      "assembly_transform": {"translate_xyz_mm": [0.0, 0.0, 3.2], "rotate_xyz_deg": [0.0, 0.0, 0.0]},
+      "print_transform": {"translate_xyz_mm": [10.0, 95.0, 0.0], "rotate_xyz_deg": [0.0, 0.0, 0.0]},
+      "geometry": {
+        "connectivity_policy": "require_single_component",
+        "reviewed_connectivity_note": "The central disc and satellite are each connected by reviewed 4 mm webs to the shared outer perimeter, producing one self-contained sheet.",
+        "additive_regions": [
+          {"id": "shared_outer_perimeter", "role": "shared_outer_perimeter", "shape": {"type": "rounded_rectangle_ring", "bounds_mm": [5.0, 5.0, 95.0, 75.0], "radius_mm": 7.0, "width_mm": 4.0}},
+          {"id": "central_gold_disc", "role": "visible_region_1", "shape": {"type": "circle", "center_mm": [50.0, 38.0], "radius_mm": 16.0}},
+          {"id": "central_disc_to_perimeter_web", "role": "connectivity_web", "shape": {"type": "rounded_rectangle", "bounds_mm": [48.0, 52.0, 52.0, 72.0], "radius_mm": 2.0}},
+          {"id": "gold_satellite", "role": "visible_region_2", "shape": {"type": "circle", "center_mm": [79.0, 41.0], "radius_mm": 5.0}},
+          {"id": "satellite_to_perimeter_web", "role": "connectivity_web", "shape": {"type": "rounded_rectangle", "bounds_mm": [82.0, 39.0, 92.0, 43.0], "radius_mm": 2.0}}
+        ],
+        "cutout_regions": [],
+        "rim": {"enabled": false}
+      }
+    },
+    {
+      "id": "layer_03_coral_window",
+      "order_back_to_front": 3,
+      "color": {"name": "coral", "hex": "#E76F51", "filament": "user-selected coral PLA"},
+      "nominal_thickness_mm": 1.2,
+      "assembly_transform": {"translate_xyz_mm": [0.0, 0.0, 4.8], "rotate_xyz_deg": [0.0, 0.0, 0.0]},
+      "print_transform": {"translate_xyz_mm": [110.0, 95.0, 0.0], "rotate_xyz_deg": [0.0, 0.0, 90.0]},
+      "geometry": {
+        "connectivity_policy": "require_single_component",
+        "additive_regions": [
+          {"id": "shared_outer_perimeter", "role": "shared_outer_perimeter", "shape": {"type": "rounded_rectangle_ring", "bounds_mm": [5.0, 5.0, 95.0, 75.0], "radius_mm": 7.0, "width_mm": 4.0}},
+          {"id": "coral_outer", "role": "visible_art", "shape": {"type": "ellipse", "center_mm": [50.0, 38.0], "radii_mm": [27.0, 20.0]}},
+          {"id": "coral_to_perimeter_web", "role": "connectivity_web", "shape": {"type": "rounded_rectangle", "bounds_mm": [48.0, 56.0, 52.0, 72.0], "radius_mm": 2.0}}
+        ],
+        "cutout_regions": [
+          {"id": "gold_reveal_window", "role": "through_cutout_reveals_layer_02", "shape": {"type": "ellipse", "center_mm": [50.0, 38.0], "radii_mm": [13.0, 9.5]}}
+        ],
+        "rim": {"enabled": false}
+      }
+    },
+    {
+      "id": "layer_04_teal_foreground",
+      "order_back_to_front": 4,
+      "color": {"name": "teal", "hex": "#2A9D8F", "filament": "same teal assignment as layer_01; separate print depth"},
+      "nominal_thickness_mm": 1.2,
+      "assembly_transform": {"translate_xyz_mm": [0.0, 0.0, 6.4], "rotate_xyz_deg": [0.0, 0.0, 0.0]},
+      "print_transform": {"translate_xyz_mm": [10.0, 145.0, 0.0], "rotate_xyz_deg": [0.0, 0.0, 180.0]},
+      "geometry": {
+        "connectivity_policy": "require_single_component",
+        "additive_regions": [
+          {"id": "shared_outer_perimeter", "role": "shared_outer_perimeter", "shape": {"type": "rounded_rectangle_ring", "bounds_mm": [5.0, 5.0, 95.0, 75.0], "radius_mm": 7.0, "width_mm": 4.0}},
+          {"id": "foreground_wave", "role": "visible_art", "shape": {"type": "polygon", "points_mm": [[15.0, 7.0], [85.0, 7.0], [84.0, 19.0], [77.0, 24.0], [64.0, 19.0], [50.0, 23.0], [36.0, 18.0], [24.0, 24.0], [16.0, 19.0]]}}
+        ],
+        "cutout_regions": [],
+        "rim": {"enabled": false}
+      }
+    },
+    {
+      "id": "layer_05_cream_highlight_rim",
+      "order_back_to_front": 5,
+      "color": {"name": "cream", "hex": "#F4F1DE", "filament": "user-selected cream PLA"},
+      "nominal_thickness_mm": 1.2,
+      "assembly_transform": {"translate_xyz_mm": [0.0, 0.0, 8.0], "rotate_xyz_deg": [0.0, 0.0, 0.0]},
+      "print_transform": {"translate_xyz_mm": [110.0, 155.0, 0.0], "rotate_xyz_deg": [0.0, 0.0, 90.0]},
+      "geometry": {
+        "connectivity_policy": "require_single_component",
+        "additive_regions": [
+          {"id": "shared_outer_perimeter", "role": "shared_outer_perimeter", "shape": {"type": "rounded_rectangle_ring", "bounds_mm": [5.0, 5.0, 95.0, 75.0], "radius_mm": 7.0, "width_mm": 4.0}},
+          {"id": "cream_highlight", "role": "visible_art", "shape": {"type": "rounded_rectangle", "bounds_mm": [31.0, 50.0, 49.0, 56.0], "radius_mm": 3.0}},
+          {"id": "highlight_to_perimeter_web", "role": "connectivity_web", "shape": {"type": "rounded_rectangle", "bounds_mm": [38.0, 54.0, 42.0, 72.0], "radius_mm": 2.0}}
+        ],
+        "cutout_regions": [],
+        "rim": {"enabled": false}
+      }
+    }
+  ]
+}
+

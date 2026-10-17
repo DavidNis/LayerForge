@@ -1,0 +1,52 @@
+{
+  "milestone": "L1 focused layer-first subtractive 2D proof",
+  "status": "READY_FOR_USER_TEST",
+  "scope": "2D masks only; no STL, STEP, CAD, frontend, frame, stand, or mounting system",
+  "planner": {
+    "method": "exterior-to-interior topology peeling with nested cumulative retained masks",
+    "analysis_resolution_px": [512, 512],
+    "common_sheet_mask_px": [576, 576],
+    "continuous_perimeter_px": 32,
+    "one_color_per_physical_layer": true,
+    "visible_connector_fallback": false,
+    "manual_annotations_used": false,
+    "manual_corrections_applied": 0
+  },
+  "cases": [
+    {
+      "id": "bear_face",
+      "source_sha256": "345c7fae7e1c19e1595743ef026044cc505815a6988bf8d9f87fed235c1f2975",
+      "palette_colors": 7,
+      "physical_layers": 7,
+      "order_back_to_front": ["#FB5144", "#10274E", "#FE98B8", "#FBEDCF", "#10B0A5", "#FDCD25", "#97D9FD"],
+      "geometry_pixel_accuracy_against_printable_target": 1.0,
+      "mean_absolute_rgb_error_against_original_0_255": 1.3493448893229167,
+      "visible_connector_pixels": 0,
+      "exposed_hidden_material_pixels": 0,
+      "unsupported_thin_details": 0,
+      "reveal_checks_passed": 21,
+      "reveal_checks_failed": 0,
+      "manual_corrections_required": false
+    },
+    {
+      "id": "fox_workshop",
+      "source_sha256": "d383b48e0cffbfa3c9d901042989d429e5f2d0f32c9d9922a6d026eff39efc3a",
+      "palette_colors": 9,
+      "physical_layers": 21,
+      "repeated_color_depths": true,
+      "geometry_pixel_accuracy_against_printable_target": 1.0,
+      "mean_absolute_rgb_error_against_original_0_255": 12.675092061360678,
+      "visible_connector_pixels": 0,
+      "exposed_hidden_material_pixels": 0,
+      "unsupported_thin_details": 148,
+      "reveal_checks_passed": 210,
+      "reveal_checks_failed": 0,
+      "manual_corrections_required": true,
+      "manual_correction_reason": "The topology is representable without visible bridges, but 148 quantized source components are below the provisional 1.2 mm feature criterion. No geometry was silently enlarged, merged, or removed."
+    }
+  ],
+  "tests": {
+    "focused": {"passed": 9, "failed": 0, "skipped": 0, "duration_seconds": 0.33},
+    "full_regression": {"passed": 33, "failed": 0, "skipped": 0, "warnings": 29, "duration_seconds": 211.96}
+  }
+}

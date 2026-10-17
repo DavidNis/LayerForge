@@ -4,19 +4,21 @@
 
 ## L-1: physical layer-stack feasibility (FIRST)
 
-Status: `NOT_STARTED`.
+Status: `AWAITING_PHYSICAL_TEST` (software gates L-G01 through L-G09 PASS;
+L-G10 user print/approval PENDING).
 
 Goal: prove one original, controlled flat-color artwork can become **aligned, ordered, independently printable layer sheets** with accurate cutouts and image reproduction.
 
-- [ ] Inspect fresh repo and required V3 docs; set up Python 3.12 env and pinned dependencies. Document actual versions.
-- [ ] Make an original rights-cleared illustration with 4–8 planned sheet layers, overlapping colored regions, one genuine through-cutout, same hue repeated on separate depth levels, and a multiple-region layer. These counts are POC targets, not universal product constraints.
-- [ ] Declare source masks and exact manual-versus-automatic work; use a reviewed plan/annotation at this stage, not a fictitious one-click converter.
-- [ ] Build a versioned `LayerStack` document with a shared XY canvas, color per layer, add/subtract polygons, thickness, back-to-front ordering, and distinct assembly/print transforms.
-- [ ] Build true CAD sheet solids via polygon union minus cutout, with optional layer-local rim and explicitly reviewed disconnected-island handling. Frame/housing not required.
-- [ ] Generate valid STEP and STL per layer or explicitly named subcomponent; reopen and check validity, volume, holes, print bounds, tolerances, and intended sheet topology.
-- [ ] Create per-sheet previews, exploded layers, aligned front orthographic, physical side view, and source comparison from the **same exported solids**.
-- [ ] Produce artifact manifest, exact build commands, automated checks, assembly/temporary alignment instructions, and L-G01..L-G10 validation report.
-- [ ] Stop at `AWAITING_PHYSICAL_TEST` when software gates pass; user prints/aligns sample and judges visual depth, accuracy, and physical behavior. Never self-approve.
+- [x] Inspect fresh repo and required V3 docs; set up Python 3.12 env and pinned dependencies. Document actual versions.
+- [x] Make an original rights-cleared illustration with 4–8 planned sheet layers, overlapping colored regions, one genuine through-cutout, same hue repeated on separate depth levels, and a multiple-region layer. These counts are POC targets, not universal product constraints.
+- [x] Declare source masks and exact manual-versus-automatic work; use a reviewed plan/annotation at this stage, not a fictitious one-click converter.
+- [x] Build a versioned `LayerStack` document with a shared XY canvas, color per layer, add/subtract polygons, thickness, back-to-front ordering, and distinct assembly/print transforms.
+- [x] Build true CAD sheet solids via polygon union minus cutout, with optional layer-local rim and explicitly reviewed disconnected-island handling. Frame/housing not required.
+- [x] Generate valid STEP and STL per layer or explicitly named subcomponent; reopen and check validity, volume, holes, print bounds, tolerances, and intended sheet topology.
+- [x] Create per-sheet previews, exploded layers, aligned front orthographic, physical side view, and source comparison from the **same exported solids**.
+- [x] Produce artifact manifest, exact build commands, automated checks, assembly/temporary alignment instructions, and L-G01..L-G10 validation report.
+- [x] Stop at `AWAITING_PHYSICAL_TEST` when software gates pass; user prints/aligns sample and judges visual depth, accuracy, and physical behavior. Never self-approve.
+- [ ] Obtain L-G10 physical-stack evidence and explicit user approval; L-1 remains incomplete until then.
 
 **Gate:** all software criteria `specs/LAYER_FEASIBILITY_GATE.md` PASS, physical stacked trial reviewed, explicit user approval. Failure => revise L-1, not build the app to hide weak layer output.
 

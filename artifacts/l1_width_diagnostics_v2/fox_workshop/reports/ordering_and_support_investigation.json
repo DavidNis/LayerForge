@@ -1,0 +1,550 @@
+{
+  "case_id": "fox_workshop",
+  "strict_all_region_7px_search": {
+    "status": "NO_PLAN_WITHIN_BOUNDS",
+    "reason": "no perimeter-connected subtractive layer sequence was found within the bounded search",
+    "search": {
+      "method": "bounded_region_graph_beam_search",
+      "status": "NO_PLAN_WITHIN_BOUNDS",
+      "global_infeasibility_proven": false,
+      "max_states_per_depth": 65536,
+      "explored_candidate_states": 3053025,
+      "pruned_candidate_states": 1549121,
+      "frontier_widths": [
+        {
+          "depth": 1,
+          "candidate_states": 1,
+          "kept_states": 1
+        },
+        {
+          "depth": 2,
+          "candidate_states": 5,
+          "kept_states": 5
+        },
+        {
+          "depth": 3,
+          "candidate_states": 19,
+          "kept_states": 19
+        },
+        {
+          "depth": 4,
+          "candidate_states": 87,
+          "kept_states": 87
+        },
+        {
+          "depth": 5,
+          "candidate_states": 392,
+          "kept_states": 392
+        },
+        {
+          "depth": 6,
+          "candidate_states": 1597,
+          "kept_states": 1597
+        },
+        {
+          "depth": 7,
+          "candidate_states": 5862,
+          "kept_states": 5862
+        },
+        {
+          "depth": 8,
+          "candidate_states": 19151,
+          "kept_states": 19151
+        },
+        {
+          "depth": 9,
+          "candidate_states": 55386,
+          "kept_states": 55386
+        },
+        {
+          "depth": 10,
+          "candidate_states": 142282,
+          "kept_states": 65536
+        },
+        {
+          "depth": 11,
+          "candidate_states": 169762,
+          "kept_states": 65536
+        },
+        {
+          "depth": 12,
+          "candidate_states": 173118,
+          "kept_states": 65536
+        },
+        {
+          "depth": 13,
+          "candidate_states": 174359,
+          "kept_states": 65536
+        },
+        {
+          "depth": 14,
+          "candidate_states": 173593,
+          "kept_states": 65536
+        },
+        {
+          "depth": 15,
+          "candidate_states": 171476,
+          "kept_states": 65536
+        },
+        {
+          "depth": 16,
+          "candidate_states": 168444,
+          "kept_states": 65536
+        },
+        {
+          "depth": 17,
+          "candidate_states": 165828,
+          "kept_states": 65536
+        },
+        {
+          "depth": 18,
+          "candidate_states": 163505,
+          "kept_states": 65536
+        },
+        {
+          "depth": 19,
+          "candidate_states": 160525,
+          "kept_states": 65536
+        },
+        {
+          "depth": 20,
+          "candidate_states": 156863,
+          "kept_states": 65536
+        },
+        {
+          "depth": 21,
+          "candidate_states": 152334,
+          "kept_states": 65536
+        },
+        {
+          "depth": 22,
+          "candidate_states": 146368,
+          "kept_states": 65536
+        },
+        {
+          "depth": 23,
+          "candidate_states": 138843,
+          "kept_states": 65536
+        },
+        {
+          "depth": 24,
+          "candidate_states": 130060,
+          "kept_states": 65536
+        },
+        {
+          "depth": 25,
+          "candidate_states": 119556,
+          "kept_states": 65536
+        },
+        {
+          "depth": 26,
+          "candidate_states": 108174,
+          "kept_states": 65536
+        },
+        {
+          "depth": 27,
+          "candidate_states": 96434,
+          "kept_states": 65536
+        },
+        {
+          "depth": 28,
+          "candidate_states": 82781,
+          "kept_states": 65536
+        },
+        {
+          "depth": 29,
+          "candidate_states": 63509,
+          "kept_states": 63509
+        },
+        {
+          "depth": 30,
+          "candidate_states": 45986,
+          "kept_states": 45986
+        },
+        {
+          "depth": 31,
+          "candidate_states": 29483,
+          "kept_states": 29483
+        },
+        {
+          "depth": 32,
+          "candidate_states": 17449,
+          "kept_states": 17449
+        },
+        {
+          "depth": 33,
+          "candidate_states": 9699,
+          "kept_states": 9699
+        },
+        {
+          "depth": 34,
+          "candidate_states": 5128,
+          "kept_states": 5128
+        },
+        {
+          "depth": 35,
+          "candidate_states": 2618,
+          "kept_states": 2618
+        },
+        {
+          "depth": 36,
+          "candidate_states": 1299,
+          "kept_states": 1299
+        },
+        {
+          "depth": 37,
+          "candidate_states": 625,
+          "kept_states": 625
+        },
+        {
+          "depth": 38,
+          "candidate_states": 277,
+          "kept_states": 277
+        },
+        {
+          "depth": 39,
+          "candidate_states": 105,
+          "kept_states": 105
+        },
+        {
+          "depth": 40,
+          "candidate_states": 33,
+          "kept_states": 33
+        },
+        {
+          "depth": 41,
+          "candidate_states": 8,
+          "kept_states": 8
+        },
+        {
+          "depth": 42,
+          "candidate_states": 1,
+          "kept_states": 1
+        },
+        {
+          "depth": 0,
+          "candidate_states": 0,
+          "kept_states": 0
+        }
+      ],
+      "minimum_contact_pixels": 7,
+      "thin_decorative_exemption": false,
+      "thin_decorative_region_count": 280,
+      "limitation": "The beam is bounded and the region-contact proxy is not an exact mask-level morphology search; this result is not a proof of global infeasibility."
+    },
+    "global_infeasibility_proven": false
+  },
+  "thin_decoration_exempt_7px_search": {
+    "status": "CANDIDATE_FOUND",
+    "same_sequence_as_current": true,
+    "search": {
+      "method": "bounded_region_graph_beam_search",
+      "global_minimum_proven": false,
+      "max_states_per_depth": 65536,
+      "explored_candidate_states": 1502124,
+      "pruned_candidate_states": 800233,
+      "frontier_widths": [
+        {
+          "depth": 1,
+          "candidate_states": 1,
+          "kept_states": 1
+        },
+        {
+          "depth": 2,
+          "candidate_states": 5,
+          "kept_states": 5
+        },
+        {
+          "depth": 3,
+          "candidate_states": 19,
+          "kept_states": 19
+        },
+        {
+          "depth": 4,
+          "candidate_states": 92,
+          "kept_states": 92
+        },
+        {
+          "depth": 5,
+          "candidate_states": 468,
+          "kept_states": 468
+        },
+        {
+          "depth": 6,
+          "candidate_states": 2207,
+          "kept_states": 2207
+        },
+        {
+          "depth": 7,
+          "candidate_states": 9423,
+          "kept_states": 9423
+        },
+        {
+          "depth": 8,
+          "candidate_states": 36101,
+          "kept_states": 36101
+        },
+        {
+          "depth": 9,
+          "candidate_states": 123718,
+          "kept_states": 65536
+        },
+        {
+          "depth": 10,
+          "candidate_states": 234385,
+          "kept_states": 65536
+        },
+        {
+          "depth": 11,
+          "candidate_states": 232111,
+          "kept_states": 65536
+        },
+        {
+          "depth": 12,
+          "candidate_states": 205648,
+          "kept_states": 65536
+        },
+        {
+          "depth": 13,
+          "candidate_states": 173047,
+          "kept_states": 65536
+        },
+        {
+          "depth": 14,
+          "candidate_states": 151830,
+          "kept_states": 65536
+        },
+        {
+          "depth": 15,
+          "candidate_states": 107858,
+          "kept_states": 65536
+        },
+        {
+          "depth": 16,
+          "candidate_states": 89796,
+          "kept_states": 65536
+        },
+        {
+          "depth": 17,
+          "candidate_states": 71664,
+          "kept_states": 65536
+        },
+        {
+          "depth": 18,
+          "candidate_states": 63751,
+          "kept_states": 63751
+        }
+      ],
+      "objective": [
+        "minimum completed layer count",
+        "minimum tiny-visible-contribution layer count",
+        "minimum cumulative retained interior pixel-layers",
+        "deterministic palette-index tie break"
+      ],
+      "winning_tiny_layer_count": 1,
+      "winning_retained_pixel_layers": 3650133,
+      "minimum_contact_pixels": 7,
+      "thin_decorative_exemption": true,
+      "thin_decorative_region_count": 280
+    },
+    "evaluation": {
+      "sequence_front_to_back": [
+        0,
+        2,
+        8,
+        2,
+        4,
+        0,
+        5,
+        2,
+        4,
+        8,
+        7,
+        3,
+        6,
+        0,
+        1,
+        2,
+        3,
+        5
+      ],
+      "layer_count": 18,
+      "exact_composite_changed_pixels": 0,
+      "width_summary": {
+        "layer_count": 18,
+        "conflicting_layer_count": 14,
+        "orphan_structural_core_components": 84,
+        "structural_bottleneck_visible_components": 18,
+        "thin_decorative_visible_components": 70,
+        "visible_components_outside_restored_support": 15
+      }
+    },
+    "global_infeasibility_proven": false
+  },
+  "current_sequence_front_to_back": [
+    0,
+    2,
+    8,
+    2,
+    4,
+    0,
+    5,
+    2,
+    4,
+    8,
+    7,
+    3,
+    6,
+    0,
+    1,
+    2,
+    3,
+    5
+  ],
+  "repeated_color_layers": [
+    {
+      "palette_index": 0,
+      "color": "#FBF1D6",
+      "layer_count": 3,
+      "reason": "separate reachability depths in the exact-composite topology; a new width-aware repartition must revalidate whether each occurrence remains necessary"
+    },
+    {
+      "palette_index": 2,
+      "color": "#1A202C",
+      "layer_count": 4,
+      "reason": "separate reachability depths in the exact-composite topology; a new width-aware repartition must revalidate whether each occurrence remains necessary"
+    },
+    {
+      "palette_index": 3,
+      "color": "#F88122",
+      "layer_count": 2,
+      "reason": "separate reachability depths in the exact-composite topology; a new width-aware repartition must revalidate whether each occurrence remains necessary"
+    },
+    {
+      "palette_index": 4,
+      "color": "#457D45",
+      "layer_count": 2,
+      "reason": "separate reachability depths in the exact-composite topology; a new width-aware repartition must revalidate whether each occurrence remains necessary"
+    },
+    {
+      "palette_index": 5,
+      "color": "#A66940",
+      "layer_count": 2,
+      "reason": "separate reachability depths in the exact-composite topology; a new width-aware repartition must revalidate whether each occurrence remains necessary"
+    },
+    {
+      "palette_index": 8,
+      "color": "#78B4B2",
+      "layer_count": 2,
+      "reason": "separate reachability depths in the exact-composite topology; a new width-aware repartition must revalidate whether each occurrence remains necessary"
+    }
+  ],
+  "fixed_order_hidden_support": {
+    "method": "union of material in all sheets in front minus current retained material",
+    "safe_hidden_pixels_available": 0,
+    "layers": [
+      {
+        "id": "layer_00_a66940",
+        "depth_back_to_front": 0,
+        "safe_hidden_pixels_available_without_reordering": 0
+      },
+      {
+        "id": "layer_01_f88122",
+        "depth_back_to_front": 1,
+        "safe_hidden_pixels_available_without_reordering": 0
+      },
+      {
+        "id": "layer_02_1a202c",
+        "depth_back_to_front": 2,
+        "safe_hidden_pixels_available_without_reordering": 0
+      },
+      {
+        "id": "layer_03_6c4730",
+        "depth_back_to_front": 3,
+        "safe_hidden_pixels_available_without_reordering": 0
+      },
+      {
+        "id": "layer_04_fbf1d6",
+        "depth_back_to_front": 4,
+        "safe_hidden_pixels_available_without_reordering": 0
+      },
+      {
+        "id": "layer_05_2a3949",
+        "depth_back_to_front": 5,
+        "safe_hidden_pixels_available_without_reordering": 0
+      },
+      {
+        "id": "layer_06_f88122",
+        "depth_back_to_front": 6,
+        "safe_hidden_pixels_available_without_reordering": 0
+      },
+      {
+        "id": "layer_07_4479a5",
+        "depth_back_to_front": 7,
+        "safe_hidden_pixels_available_without_reordering": 0
+      },
+      {
+        "id": "layer_08_78b4b2",
+        "depth_back_to_front": 8,
+        "safe_hidden_pixels_available_without_reordering": 0
+      },
+      {
+        "id": "layer_09_457d45",
+        "depth_back_to_front": 9,
+        "safe_hidden_pixels_available_without_reordering": 0
+      },
+      {
+        "id": "layer_10_1a202c",
+        "depth_back_to_front": 10,
+        "safe_hidden_pixels_available_without_reordering": 0
+      },
+      {
+        "id": "layer_11_a66940",
+        "depth_back_to_front": 11,
+        "safe_hidden_pixels_available_without_reordering": 0
+      },
+      {
+        "id": "layer_12_fbf1d6",
+        "depth_back_to_front": 12,
+        "safe_hidden_pixels_available_without_reordering": 0
+      },
+      {
+        "id": "layer_13_457d45",
+        "depth_back_to_front": 13,
+        "safe_hidden_pixels_available_without_reordering": 0
+      },
+      {
+        "id": "layer_14_1a202c",
+        "depth_back_to_front": 14,
+        "safe_hidden_pixels_available_without_reordering": 0
+      },
+      {
+        "id": "layer_15_78b4b2",
+        "depth_back_to_front": 15,
+        "safe_hidden_pixels_available_without_reordering": 0
+      },
+      {
+        "id": "layer_16_1a202c",
+        "depth_back_to_front": 16,
+        "safe_hidden_pixels_available_without_reordering": 0
+      },
+      {
+        "id": "layer_17_fbf1d6",
+        "depth_back_to_front": 17,
+        "safe_hidden_pixels_available_without_reordering": 0
+      }
+    ],
+    "conclusion": "The current nested masks already retain every region hidden by a front sheet; fixed-order hidden fill cannot widen the remaining necks."
+  },
+  "infeasibility_claim": {
+    "globally_proven": false,
+    "proven_only": "the reported masks contain the enumerated 7x7 orphan cores, and the current nested order has no additional front-occluded pixels available for hidden fill",
+    "not_proven": "that no alternate ordering, repeated-color repartition, or exact mask-level global search can satisfy the design"
+  },
+  "proposed_resolution": {
+    "planner_change": "search exact cumulative mask morphology at each prefix instead of using interface-contact length as a sufficient proxy",
+    "ordering": "optimize color order and provider-region grouping jointly against orphan-core count and retained area",
+    "repeated_colors": "permit another occurrence only when it removes a measured bottleneck while preserving every source pixel",
+    "acceptance": "zero 7x7 orphan structural cores, zero changed composite pixels, unchanged shared perimeter, and no visible connector bridge"
+  }
+}
