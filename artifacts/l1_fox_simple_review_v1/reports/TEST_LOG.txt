@@ -1,0 +1,20 @@
+LayerForge simplified fox focused validation
+Status: READY_FOR_USER_TEST; L1 NOT APPROVED
+
+Planner execution: PASS (completed and produced 23 physical-sheet masks)
+Planner result: UNRESOLVED_PLAN_REQUIRES_USER_DECISION
+Focused pytest: 4 PASS, 0 FAIL, 0 SKIP in 6.75 seconds
+
+Verified by focused tests:
+- exact fox_simple_input.png source hash
+- no simplification stage used
+- identical mask dimensions and continuous common perimeter
+- one 4-neighbor connected component per sheet
+- independent mask reconstruction exactly matches indexed target
+- 1.2 mm width failure remains explicit
+- no STL or STEP generated after the failed 2D gate
+
+Execution note: the first reporting wrapper referenced a nonexistent metadata key after
+the planner completed. The wrapper exited with KeyError; the deterministic planner was
+rerun with the reporting key corrected. This was a wrapper/reporting error, not a geometry
+validation pass or failure.
