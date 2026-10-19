@@ -1,0 +1,53 @@
+{
+  "timed_out": false,
+  "timeout_seconds": 30,
+  "exit_code": 0,
+  "wall_seconds": 1.9809539999696426,
+  "stdout": "{\"status\": \"COMPLETE_VALID_PLAN_FOUND\", \"preprocessing\": {\"indexed_colors\": 3, \"palette_hex\": [\"#F4E7BF\", \"#172238\", \"#F1B632\"], \"connected_regions\": 12, \"greedy_provider_groups\": 5}, \"search_seconds\": 0.544127999979537, \"search_ceiling_layers\": 12, \"record\": {\"sequence\": [0, 2, 1, 0, 1], \"groups\": [1, 2048, 96, 6, 1944], \"neighbour_bits\": 4095, \"assigned_area\": 262144, \"retained_pixel_layers\": 1197821, \"failed_prefixes\": 0, \"cumulative_orphan_components\": 0, \"cumulative_orphan_pixels\": 0, \"worst_prefix_orphan_components\": 0}, \"search_report\": {\"method\": \"bounded_actual_cumulative_mask_beam_search\", \"hard_width_gate_during_search\": true, \"global_optimality_proven\": false, \"global_infeasibility_proven\": false, \"max_layers\": 12, \"goal_source_regions\": 12, \"allowed_source_regions\": 12, \"fixed_start_source_regions\": 0, \"max_states_per_depth\": 8, \"explored_candidate_states\": 41, \"pruned_candidate_states\": 8, \"evaluated_unique_actual_masks\": 87, \"morphology_kernel_pixels\": 7, \"frontier_widths\": [{\"depth\": 1, \"candidate_states\": 1, \"kept_states\": 1}, {\"depth\": 2, \"candidate_states\": 1, \"kept_states\": 1}, {\"depth\": 3, \"candidate_states\": 5, \"kept_states\": 5}, {\"depth\": 4, \"candidate_states\": 16, \"kept_states\": 8}, {\"depth\": 5, \"candidate_states\": 18, \"kept_states\": 18}], \"status\": \"CANDIDATE_FOUND\"}, \"instrumentation\": {\"candidate_generator_calls\": 48, \"accepted_groups_returned\": 59, \"new_mask_evaluations\": 87, \"four_neighbor_rejections\": 0, \"structural_width_rejections\": 0, \"per_depth\": {\"1\": {\"generator_calls\": 3, \"accepted_groups_returned\": 1, \"new_mask_evaluations\": 1, \"four_neighbor_rejections\": 0, \"structural_width_rejections\": 0}, \"2\": {\"generator_calls\": 3, \"accepted_groups_returned\": 1, \"new_mask_evaluations\": 1, \"four_neighbor_rejections\": 0, \"structural_width_rejections\": 0}, \"3\": {\"generator_calls\": 3, \"accepted_groups_returned\": 5, \"new_mask_evaluations\": 15, \"four_neighbor_rejections\": 0, \"structural_width_rejections\": 0}, \"4\": {\"generator_calls\": 15, \"accepted_groups_returned\": 22, \"new_mask_evaluations\": 26, \"four_neighbor_rejections\": 0, \"structural_width_rejections\": 0}, \"5\": {\"generator_calls\": 24, \"accepted_groups_returned\": 30, \"new_mask_evaluations\": 44, \"four_neighbor_rejections\": 0, \"structural_width_rejections\": 0}}}, \"validation\": {\"status\": \"PASS\", \"layer_count\": 5, \"front_to_back_colors\": [\"#F4E7BF\", \"#F1B632\", \"#172238\", \"#F4E7BF\", \"#172238\"], \"back_to_front_colors\": [\"#172238\", \"#F4E7BF\", \"#172238\", \"#F1B632\", \"#F4E7BF\"], \"repeated_colors\": {\"#172238\": 2, \"#F4E7BF\": 2}, \"geometry_mismatched_pixels\": 0, \"geometry_pixel_accuracy_against_indexed_target\": 1.0, \"visible_automatic_connector_pixels\": 0, \"layers\": [{\"depth_back_to_front\": 0, \"color\": \"#172238\", \"four_neighbor_status\": \"PASS\", \"width_status\": \"PASS\", \"orphan_structural_core_components\": 0, \"missing_perimeter_pixels\": 0}, {\"depth_back_to_front\": 1, \"color\": \"#F4E7BF\", \"four_neighbor_status\": \"PASS\", \"width_status\": \"PASS\", \"orphan_structural_core_components\": 0, \"missing_perimeter_pixels\": 0}, {\"depth_back_to_front\": 2, \"color\": \"#172238\", \"four_neighbor_status\": \"PASS\", \"width_status\": \"PASS\", \"orphan_structural_core_components\": 0, \"missing_perimeter_pixels\": 0}, {\"depth_back_to_front\": 3, \"color\": \"#F1B632\", \"four_neighbor_status\": \"PASS\", \"width_status\": \"PASS\", \"orphan_structural_core_components\": 0, \"missing_perimeter_pixels\": 0}, {\"depth_back_to_front\": 4, \"color\": \"#F4E7BF\", \"four_neighbor_status\": \"PASS\", \"width_status\": \"PASS\", \"orphan_structural_core_components\": 0, \"missing_perimeter_pixels\": 0}]}, \"layer_files\": [{\"id\": \"layer_00_172238\", \"depth_back_to_front\": 0, \"palette_index\": 1, \"provider_index\": 4, \"provider_role\": \"width_aware_actual_mask_search_batch\", \"color\": \"#172238\", \"retained_material_mask\": \"automatic/layers/layer_00_172238/retained_material_mask.png\", \"through_cutouts_mask\": \"automatic/layers/layer_00_172238/through_cutouts_mask.png\", \"source_visible_region_mask\": \"automatic/layers/layer_00_172238/source_visible_region_mask.png\", \"hidden_retained_material_mask\": \"automatic/layers/layer_00_172238/hidden_retained_material_mask.png\", \"physical_sheet_preview\": \"automatic/layers/layer_00_172238/physical_sheet_preview.png\"}, {\"id\": \"layer_01_f4e7bf\", \"depth_back_to_front\": 1, \"palette_index\": 0, \"provider_index\": 3, \"provider_role\": \"width_aware_actual_mask_search_batch\", \"color\": \"#F4E7BF\", \"retained_material_mask\": \"automatic/layers/layer_01_f4e7bf/retained_material_mask.png\", \"through_cutouts_mask\": \"automatic/layers/layer_01_f4e7bf/through_cutouts_mask.png\", \"source_visible_region_mask\": \"automatic/layers/layer_01_f4e7bf/source_visible_region_mask.png\", \"hidden_retained_material_mask\": \"automatic/layers/layer_01_f4e7bf/hidden_retained_material_mask.png\", \"physical_sheet_preview\": \"automatic/layers/layer_01_f4e7bf/physical_sheet_preview.png\"}, {\"id\": \"layer_02_172238\", \"depth_back_to_front\": 2, \"palette_index\": 1, \"provider_index\": 2, \"provider_role\": \"width_aware_actual_mask_search_batch\", \"color\": \"#172238\", \"retained_material_mask\": \"automatic/layers/layer_02_172238/retained_material_mask.png\", \"through_cutouts_mask\": \"automatic/layers/layer_02_172238/through_cutouts_mask.png\", \"source_visible_region_mask\": \"automatic/layers/layer_02_172238/source_visible_region_mask.png\", \"hidden_retained_material_mask\": \"automatic/layers/layer_02_172238/hidden_retained_material_mask.png\", \"physical_sheet_preview\": \"automatic/layers/layer_02_172238/physical_sheet_preview.png\"}, {\"id\": \"layer_03_f1b632\", \"depth_back_to_front\": 3, \"palette_index\": 2, \"provider_index\": 1, \"provider_role\": \"width_aware_actual_mask_search_batch\", \"color\": \"#F1B632\", \"retained_material_mask\": \"automatic/layers/layer_03_f1b632/retained_material_mask.png\", \"through_cutouts_mask\": \"automatic/layers/layer_03_f1b632/through_cutouts_mask.png\", \"source_visible_region_mask\": \"automatic/layers/layer_03_f1b632/source_visible_region_mask.png\", \"hidden_retained_material_mask\": \"automatic/layers/layer_03_f1b632/hidden_retained_material_mask.png\", \"physical_sheet_preview\": \"automatic/layers/layer_03_f1b632/physical_sheet_preview.png\"}, {\"id\": \"layer_04_f4e7bf\", \"depth_back_to_front\": 4, \"palette_index\": 0, \"provider_index\": 0, \"provider_role\": \"width_aware_actual_mask_search_batch\", \"color\": \"#F4E7BF\", \"retained_material_mask\": \"automatic/layers/layer_04_f4e7bf/retained_material_mask.png\", \"through_cutouts_mask\": \"automatic/layers/layer_04_f4e7bf/through_cutouts_mask.png\", \"source_visible_region_mask\": \"automatic/layers/layer_04_f4e7bf/source_visible_region_mask.png\", \"hidden_retained_material_mask\": \"automatic/layers/layer_04_f4e7bf/hidden_retained_material_mask.png\", \"physical_sheet_preview\": \"automatic/layers/layer_04_f4e7bf/physical_sheet_preview.png\"}], \"elapsed_worker_seconds\": 1.6723277000128292}\n",
+  "stderr": "",
+  "partial_progress": {
+    "status": "COMPLETE_VALID_PLAN_FOUND",
+    "candidate_generator_calls": 48,
+    "accepted_groups_returned": 59,
+    "new_mask_evaluations": 87,
+    "four_neighbor_rejections": 0,
+    "structural_width_rejections": 0,
+    "per_depth": {
+      "1": {
+        "generator_calls": 3,
+        "accepted_groups_returned": 1,
+        "new_mask_evaluations": 1,
+        "four_neighbor_rejections": 0,
+        "structural_width_rejections": 0
+      },
+      "2": {
+        "generator_calls": 3,
+        "accepted_groups_returned": 1,
+        "new_mask_evaluations": 1,
+        "four_neighbor_rejections": 0,
+        "structural_width_rejections": 0
+      },
+      "3": {
+        "generator_calls": 3,
+        "accepted_groups_returned": 5,
+        "new_mask_evaluations": 15,
+        "four_neighbor_rejections": 0,
+        "structural_width_rejections": 0
+      },
+      "4": {
+        "generator_calls": 15,
+        "accepted_groups_returned": 22,
+        "new_mask_evaluations": 26,
+        "four_neighbor_rejections": 0,
+        "structural_width_rejections": 0
+      },
+      "5": {
+        "generator_calls": 24,
+        "accepted_groups_returned": 30,
+        "new_mask_evaluations": 44,
+        "four_neighbor_rejections": 0,
+        "structural_width_rejections": 0
+      }
+    }
+  }
+}

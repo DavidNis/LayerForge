@@ -4,20 +4,30 @@ from __future__ import annotations
 
 import argparse
 import json
+import time
+from datetime import datetime, timezone
 from pathlib import Path
 
-from .auto_pipeline import DEFAULT_CONFIG, apply_corrections, run_auto_case
-from .connectivity_repair import run_connectivity_repair_case
-from .pipeline import DEFAULT_MANIFEST, DEFAULT_OUTPUT, build, verify
-from .layer_optimization import run_optimization_case
-from .subtractive_poc import DEFAULT_CONFIG as POC_CONFIG
-from .subtractive_poc import run_poc_case
-from .width_diagnostics import run_width_diagnostics_case
-from .width_aware_planner import run_width_aware_case
-from .suitability import run_suitability_case
-from .shadowbox_simplification import run_controlled_simplification, run_direct_case
-from .object_simplification_poc import run_full_review as run_object_simplification_review
-from .flat_color_workflow import run_flat_color_review
+from . import PROJECT_ROOT
+
+
+DEFAULT_MANIFEST = PROJECT_ROOT / "fixtures" / "orbit_bloom_v1" / "layer_stack.json"
+DEFAULT_OUTPUT = PROJECT_ROOT / "artifacts" / "layer_feasibility" / "orbit_bloom_v1"
+_CLI_STARTED = time.perf_counter()
+
+
+def _progress(stage: str, **details: object) -> None:
+    print(
+        json.dumps(
+            {
+                "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+                "elapsed_seconds": time.perf_counter() - _CLI_STARTED,
+                "stage": stage,
+                **details,
+            }
+        ),
+        flush=True,
+    )
 
 
 def parser() -> argparse.ArgumentParser:
@@ -121,27 +131,45 @@ def parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     args = parser().parse_args()
+    _progress("CLI_READY", command=args.command)
     if args.command == "build":
+        from .pipeline import build
+
         report = build(args.manifest, args.output)
     elif args.command == "verify":
+        from .pipeline import verify
+
         report = verify(args.output)
     elif args.command == "auto":
+        from .auto_pipeline import DEFAULT_CONFIG, run_auto_case
+
         report = run_auto_case(args.input, args.case_id, args.output, DEFAULT_CONFIG)
     elif args.command == "apply-corrections":
+        from .auto_pipeline import apply_corrections
+
         report = apply_corrections(args.automatic_manifest, args.corrections, args.output)
         print(json.dumps(report, indent=2))
         return 0
     elif args.command == "poc2d":
+        from .subtractive_poc import DEFAULT_CONFIG as POC_CONFIG
+        from .subtractive_poc import run_poc_case
+
         report = run_poc_case(args.input, args.case_id, args.output, POC_CONFIG)
         print(json.dumps({"case_id": report["case_id"], "status": report["status"]}, indent=2))
         return 0 if report["status"] == "PASS" else 1
     elif args.command == "optimize2d":
+        from .layer_optimization import run_optimization_case
+        from .subtractive_poc import DEFAULT_CONFIG as POC_CONFIG
+
         report = run_optimization_case(
             args.input, args.case_id, args.baseline, args.output, POC_CONFIG
         )
         print(json.dumps({"case_id": report["case_id"], "status": report["status"]}, indent=2))
         return 0 if report["status"] == "READY_FOR_USER_TEST" else 1
     elif args.command == "repair-connectivity2d":
+        from .connectivity_repair import run_connectivity_repair_case
+        from .subtractive_poc import DEFAULT_CONFIG as POC_CONFIG
+
         report = run_connectivity_repair_case(
             args.input, args.case_id, args.failed_plan, args.output, POC_CONFIG
         )
@@ -157,12 +185,18 @@ def main() -> int:
         )
         return 0 if report["review_state"] == "READY_FOR_USER_TEST" else 1
     elif args.command == "diagnose-width2d":
+        from .subtractive_poc import DEFAULT_CONFIG as POC_CONFIG
+        from .width_diagnostics import run_width_diagnostics_case
+
         report = run_width_diagnostics_case(
             args.input, args.case_id, args.repaired_plan, args.output, POC_CONFIG
         )
         print(json.dumps(report, indent=2))
         return 0 if report["review_state"] == "READY_FOR_USER_TEST" else 1
     elif args.command == "assess-suitability2d":
+        from .subtractive_poc import DEFAULT_CONFIG as POC_CONFIG
+        from .suitability import run_suitability_case
+
         report = run_suitability_case(args.input, args.case_id, args.output, POC_CONFIG)
         print(
             json.dumps(
@@ -176,6 +210,9 @@ def main() -> int:
         )
         return 0
     elif args.command == "simplify-shadowbox2d":
+        from .shadowbox_simplification import run_controlled_simplification
+        from .subtractive_poc import DEFAULT_CONFIG as POC_CONFIG
+
         report = run_controlled_simplification(
             args.input, args.case_id, args.output, POC_CONFIG
         )
@@ -191,6 +228,11 @@ def main() -> int:
         )
         return 0
     elif args.command == "validate-direct2d":
+        _progress("DIRECT_2D_DEPENDENCY_IMPORT_START")
+        from .shadowbox_simplification import run_direct_case
+        from .subtractive_poc import DEFAULT_CONFIG as POC_CONFIG
+
+        _progress("DIRECT_2D_DEPENDENCY_IMPORT_COMPLETE")
         report = run_direct_case(args.input, args.case_id, args.output, POC_CONFIG)
         print(
             json.dumps(
@@ -204,6 +246,10 @@ def main() -> int:
         )
         return 0
     elif args.command == "object-simplification2d":
+        from .object_simplification_poc import (
+            run_full_review as run_object_simplification_review,
+        )
+
         report = run_object_simplification_review(
             args.fox_input,
             args.bear_input,
@@ -213,6 +259,9 @@ def main() -> int:
         print(json.dumps(report, indent=2))
         return 0
     elif args.command == "flat-color-workflow2d":
+        from .flat_color_workflow import run_flat_color_review
+        from .subtractive_poc import DEFAULT_CONFIG as POC_CONFIG
+
         report = run_flat_color_review(
             args.input,
             args.reference,
@@ -236,6 +285,9 @@ def main() -> int:
         )
         return 0
     else:
+        from .subtractive_poc import DEFAULT_CONFIG as POC_CONFIG
+        from .width_aware_planner import run_width_aware_case
+
         window = None
         if args.window_start is not None or args.window_end is not None:
             if args.window_start is None or args.window_end is None:

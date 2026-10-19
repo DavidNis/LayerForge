@@ -1,0 +1,112 @@
+{
+  "timed_out": false,
+  "exit_code": 0,
+  "wall_seconds": 4.425507500011008,
+  "stdout": "{\"status\": \"NO_COMPLETE_PLAN\", \"search_seconds\": 3.729751899954863, \"record\": null, \"search_report\": {\"method\": \"bounded_actual_cumulative_mask_beam_search\", \"hard_width_gate_during_search\": true, \"global_optimality_proven\": false, \"global_infeasibility_proven\": false, \"max_layers\": 11, \"goal_source_regions\": 196, \"allowed_source_regions\": 196, \"fixed_start_source_regions\": 0, \"max_states_per_depth\": 8, \"explored_candidate_states\": 94, \"pruned_candidate_states\": 11, \"evaluated_unique_actual_masks\": 704, \"morphology_kernel_pixels\": 7, \"frontier_widths\": [{\"depth\": 1, \"candidate_states\": 4, \"kept_states\": 4}, {\"depth\": 2, \"candidate_states\": 7, \"kept_states\": 7}, {\"depth\": 3, \"candidate_states\": 9, \"kept_states\": 8}, {\"depth\": 4, \"candidate_states\": 10, \"kept_states\": 8}, {\"depth\": 5, \"candidate_states\": 10, \"kept_states\": 8}, {\"depth\": 6, \"candidate_states\": 10, \"kept_states\": 8}, {\"depth\": 7, \"candidate_states\": 8, \"kept_states\": 8}, {\"depth\": 8, \"candidate_states\": 9, \"kept_states\": 8}, {\"depth\": 9, \"candidate_states\": 9, \"kept_states\": 8}, {\"depth\": 10, \"candidate_states\": 9, \"kept_states\": 8}, {\"depth\": 11, \"candidate_states\": 9, \"kept_states\": 8}], \"status\": \"NO_COMPLETE_CANDIDATE_WITHIN_BOUNDS\"}, \"telemetry\": {\"status\": \"NO_COMPLETE_PLAN\", \"deepest_search_depth\": 11, \"explored_candidate_states_partial\": 94, \"generator_calls\": 684, \"candidate_groups_returned\": 201, \"unique_successor_states_observed\": 80, \"geometry_validations_performed\": 704, \"geometry_gate_failures\": 63, \"four_neighbor_failures\": 0, \"width_failures\": 63, \"elapsed_seconds\": 4.136577699973714}}\n",
+  "stderr": "",
+  "partial_progress": {
+    "status": "NO_COMPLETE_PLAN",
+    "deepest_search_depth": 11,
+    "explored_candidate_states_partial": 94,
+    "generator_calls": 684,
+    "candidate_groups_returned": 201,
+    "unique_successor_states_observed": 80,
+    "geometry_validations_performed": 704,
+    "geometry_gate_failures": 63,
+    "four_neighbor_failures": 0,
+    "width_failures": 63,
+    "elapsed_seconds": 4.1375463999575
+  },
+  "search_result": {
+    "status": "NO_COMPLETE_PLAN",
+    "search_seconds": 3.729751899954863,
+    "record": null,
+    "search_report": {
+      "method": "bounded_actual_cumulative_mask_beam_search",
+      "hard_width_gate_during_search": true,
+      "global_optimality_proven": false,
+      "global_infeasibility_proven": false,
+      "max_layers": 11,
+      "goal_source_regions": 196,
+      "allowed_source_regions": 196,
+      "fixed_start_source_regions": 0,
+      "max_states_per_depth": 8,
+      "explored_candidate_states": 94,
+      "pruned_candidate_states": 11,
+      "evaluated_unique_actual_masks": 704,
+      "morphology_kernel_pixels": 7,
+      "frontier_widths": [
+        {
+          "depth": 1,
+          "candidate_states": 4,
+          "kept_states": 4
+        },
+        {
+          "depth": 2,
+          "candidate_states": 7,
+          "kept_states": 7
+        },
+        {
+          "depth": 3,
+          "candidate_states": 9,
+          "kept_states": 8
+        },
+        {
+          "depth": 4,
+          "candidate_states": 10,
+          "kept_states": 8
+        },
+        {
+          "depth": 5,
+          "candidate_states": 10,
+          "kept_states": 8
+        },
+        {
+          "depth": 6,
+          "candidate_states": 10,
+          "kept_states": 8
+        },
+        {
+          "depth": 7,
+          "candidate_states": 8,
+          "kept_states": 8
+        },
+        {
+          "depth": 8,
+          "candidate_states": 9,
+          "kept_states": 8
+        },
+        {
+          "depth": 9,
+          "candidate_states": 9,
+          "kept_states": 8
+        },
+        {
+          "depth": 10,
+          "candidate_states": 9,
+          "kept_states": 8
+        },
+        {
+          "depth": 11,
+          "candidate_states": 9,
+          "kept_states": 8
+        }
+      ],
+      "status": "NO_COMPLETE_CANDIDATE_WITHIN_BOUNDS"
+    },
+    "telemetry": {
+      "status": "NO_COMPLETE_PLAN",
+      "deepest_search_depth": 11,
+      "explored_candidate_states_partial": 94,
+      "generator_calls": 684,
+      "candidate_groups_returned": 201,
+      "unique_successor_states_observed": 70,
+      "geometry_validations_performed": 704,
+      "geometry_gate_failures": 63,
+      "four_neighbor_failures": 0,
+      "width_failures": 63,
+      "elapsed_seconds": 3.9028598999721
+    }
+  },
+  "validation": null
+}

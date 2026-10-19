@@ -1,0 +1,623 @@
+{
+  "status": "PASS",
+  "reference_validation": {
+    "status": "PASS",
+    "method": "Independent use of current LayerForge mask construction, 4-neighbor audit, and 1.2 mm width audit; fixture_report.json results were not used.",
+    "reference_layer_count": 5,
+    "reference_order_front_to_back": [
+      "#FAF7F0",
+      "#F2C84B",
+      "#ED852B",
+      "#FAF7F0",
+      "#242939"
+    ],
+    "shared_dimensions_pixels": [
+      576,
+      576
+    ],
+    "containment_failures": [],
+    "unassigned_source_pixels": 0,
+    "physical_mask_mismatch_pixels_against_existing_constructor": [
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "source_reconstruction_mismatched_pixels": 0,
+    "aperture_color_mismatched_pixels": 0,
+    "existing_plan_validation": {
+      "status": "PASS",
+      "composite_source": "actual planned physical layer masks in declared back-to-front order",
+      "geometry_pixel_accuracy_against_quantized_target": 1.0,
+      "geometry_mismatched_pixels": 0,
+      "mean_absolute_rgb_error_against_original_0_255": 0.0,
+      "maximum_rgb_error_against_original_0_255": 0,
+      "visible_automatic_connector_pixels": 0,
+      "exposed_hidden_material_pixels": 0,
+      "all_physical_sheets_connected": true,
+      "all_shared_perimeters_complete": true,
+      "unsupported_thin_detail_count": 0,
+      "unsupported_thin_details": [],
+      "manual_corrections_required": false,
+      "manual_corrections_applied": 0,
+      "order_back_to_front": [
+        4,
+        3,
+        2,
+        1,
+        0
+      ],
+      "layers": [
+        {
+          "depth": 0,
+          "palette_index": 3,
+          "provider_index": 4,
+          "provider_role": "supplied_reference_mask",
+          "color": "#242939",
+          "connected_components": 1,
+          "missing_perimeter_pixels": 0,
+          "cutout_components": 0,
+          "visible_pixels": 4374,
+          "hidden_material_pixels": 257770
+        },
+        {
+          "depth": 1,
+          "palette_index": 0,
+          "provider_index": 3,
+          "provider_role": "supplied_reference_mask",
+          "color": "#FAF7F0",
+          "connected_components": 1,
+          "missing_perimeter_pixels": 0,
+          "cutout_components": 9,
+          "visible_pixels": 14293,
+          "hidden_material_pixels": 243477
+        },
+        {
+          "depth": 2,
+          "palette_index": 2,
+          "provider_index": 2,
+          "provider_role": "supplied_reference_mask",
+          "color": "#ED852B",
+          "connected_components": 1,
+          "missing_perimeter_pixels": 0,
+          "cutout_components": 6,
+          "visible_pixels": 9231,
+          "hidden_material_pixels": 234246
+        },
+        {
+          "depth": 3,
+          "palette_index": 1,
+          "provider_index": 1,
+          "provider_role": "supplied_reference_mask",
+          "color": "#F2C84B",
+          "connected_components": 1,
+          "missing_perimeter_pixels": 0,
+          "cutout_components": 4,
+          "visible_pixels": 74157,
+          "hidden_material_pixels": 160089
+        },
+        {
+          "depth": 4,
+          "palette_index": 0,
+          "provider_index": 0,
+          "provider_role": "supplied_reference_mask",
+          "color": "#FAF7F0",
+          "connected_components": 1,
+          "missing_perimeter_pixels": 0,
+          "cutout_components": 3,
+          "visible_pixels": 160089,
+          "hidden_material_pixels": 0
+        }
+      ]
+    },
+    "layers": [
+      {
+        "layer_front_to_back": 1,
+        "color": "#FAF7F0",
+        "dimensions_pixels": [
+          576,
+          576
+        ],
+        "retained_pixels": 229721,
+        "cutout_pixels": 102055,
+        "missing_shared_perimeter_pixels": 0,
+        "four_neighbor_status": "PASS",
+        "four_neighbor_components": 1,
+        "four_neighbor_orphan_components": 0,
+        "width_status": "PASS",
+        "orphan_structural_core_components": 0,
+        "orphan_structural_core_pixels": 0,
+        "morphology_kernel_pixels": 7,
+        "enforced_connection_width_mm": 1.2,
+        "visible_region_components": 1
+      },
+      {
+        "layer_front_to_back": 2,
+        "color": "#F2C84B",
+        "dimensions_pixels": [
+          576,
+          576
+        ],
+        "retained_pixels": 303878,
+        "cutout_pixels": 27898,
+        "missing_shared_perimeter_pixels": 0,
+        "four_neighbor_status": "PASS",
+        "four_neighbor_components": 1,
+        "four_neighbor_orphan_components": 0,
+        "width_status": "PASS",
+        "orphan_structural_core_components": 0,
+        "orphan_structural_core_pixels": 0,
+        "morphology_kernel_pixels": 7,
+        "enforced_connection_width_mm": 1.2,
+        "visible_region_components": 3
+      },
+      {
+        "layer_front_to_back": 3,
+        "color": "#ED852B",
+        "dimensions_pixels": [
+          576,
+          576
+        ],
+        "retained_pixels": 313109,
+        "cutout_pixels": 18667,
+        "missing_shared_perimeter_pixels": 0,
+        "four_neighbor_status": "PASS",
+        "four_neighbor_components": 1,
+        "four_neighbor_orphan_components": 0,
+        "width_status": "PASS",
+        "orphan_structural_core_components": 0,
+        "orphan_structural_core_pixels": 0,
+        "morphology_kernel_pixels": 7,
+        "enforced_connection_width_mm": 1.2,
+        "visible_region_components": 5
+      },
+      {
+        "layer_front_to_back": 4,
+        "color": "#FAF7F0",
+        "dimensions_pixels": [
+          576,
+          576
+        ],
+        "retained_pixels": 327402,
+        "cutout_pixels": 4374,
+        "missing_shared_perimeter_pixels": 0,
+        "four_neighbor_status": "PASS",
+        "four_neighbor_components": 1,
+        "four_neighbor_orphan_components": 0,
+        "width_status": "PASS",
+        "orphan_structural_core_components": 0,
+        "orphan_structural_core_pixels": 0,
+        "morphology_kernel_pixels": 7,
+        "enforced_connection_width_mm": 1.2,
+        "visible_region_components": 1
+      },
+      {
+        "layer_front_to_back": 5,
+        "color": "#242939",
+        "dimensions_pixels": [
+          576,
+          576
+        ],
+        "retained_pixels": 331776,
+        "cutout_pixels": 0,
+        "missing_shared_perimeter_pixels": 0,
+        "four_neighbor_status": "PASS",
+        "four_neighbor_components": 1,
+        "four_neighbor_orphan_components": 0,
+        "width_status": "PASS",
+        "orphan_structural_core_components": 0,
+        "orphan_structural_core_pixels": 0,
+        "morphology_kernel_pixels": 7,
+        "enforced_connection_width_mm": 1.2,
+        "visible_region_components": 9
+      }
+    ]
+  },
+  "planner_execution": {
+    "timed_out": false,
+    "timeout_seconds": 30,
+    "exit_code": 0,
+    "wall_seconds": 17.84155660000397,
+    "stdout": "{\"status\": \"COMPLETE_VALID_PLAN_FOUND\", \"planner_input\": \"source_composite_only.png only\", \"preprocessing\": {\"indexed_colors\": 6, \"palette_hex\": [\"#FBF7EF\", \"#F2C84C\", \"#272C3A\", \"#76777E\", \"#EEDBA7\", \"#EB852C\"], \"connected_regions\": 47, \"greedy_provider_groups\": 7, \"changed_pixels_against_resized_source\": 262144, \"mean_absolute_rgb_error_against_resized_source_0_255\": 0.9072316487630209, \"maximum_rgb_error_against_resized_source_0_255\": 183}, \"search_seconds\": 15.919586899981368, \"search_report\": {\"method\": \"bounded_actual_cumulative_mask_beam_search\", \"hard_width_gate_during_search\": true, \"global_optimality_proven\": false, \"global_infeasibility_proven\": false, \"max_layers\": 7, \"goal_source_regions\": 47, \"allowed_source_regions\": 47, \"fixed_start_source_regions\": 0, \"max_states_per_depth\": 8, \"explored_candidate_states\": 362, \"pruned_candidate_states\": 287, \"evaluated_unique_actual_masks\": 2515, \"morphology_kernel_pixels\": 7, \"frontier_widths\": [{\"depth\": 1, \"candidate_states\": 1, \"kept_states\": 1}, {\"depth\": 2, \"candidate_states\": 7, \"kept_states\": 7}, {\"depth\": 3, \"candidate_states\": 52, \"kept_states\": 8}, {\"depth\": 4, \"candidate_states\": 102, \"kept_states\": 8}, {\"depth\": 5, \"candidate_states\": 93, \"kept_states\": 8}, {\"depth\": 6, \"candidate_states\": 72, \"kept_states\": 8}, {\"depth\": 7, \"candidate_states\": 35, \"kept_states\": 35}], \"status\": \"CANDIDATE_FOUND\"}, \"instrumentation\": {\"generator_calls\": 246, \"accepted_groups_returned\": 435, \"new_mask_evaluations\": 2515, \"four_neighbor_rejections\": 0, \"structural_width_rejections\": 119, \"per_depth\": {\"1\": {\"generator_calls\": 6, \"accepted_groups_returned\": 1, \"new_mask_evaluations\": 1, \"four_neighbor_rejections\": 0, \"structural_width_rejections\": 0}, \"2\": {\"generator_calls\": 6, \"accepted_groups_returned\": 7, \"new_mask_evaluations\": 39, \"four_neighbor_rejections\": 0, \"structural_width_rejections\": 0}, \"3\": {\"generator_calls\": 42, \"accepted_groups_returned\": 66, \"new_mask_evaluations\": 230, \"four_neighbor_rejections\": 0, \"structural_width_rejections\": 15}, \"4\": {\"generator_calls\": 48, \"accepted_groups_returned\": 114, \"new_mask_evaluations\": 536, \"four_neighbor_rejections\": 0, \"structural_width_rejections\": 39}, \"5\": {\"generator_calls\": 48, \"accepted_groups_returned\": 108, \"new_mask_evaluations\": 684, \"four_neighbor_rejections\": 0, \"structural_width_rejections\": 30}, \"6\": {\"generator_calls\": 48, \"accepted_groups_returned\": 84, \"new_mask_evaluations\": 604, \"four_neighbor_rejections\": 0, \"structural_width_rejections\": 22}, \"7\": {\"generator_calls\": 48, \"accepted_groups_returned\": 55, \"new_mask_evaluations\": 421, \"four_neighbor_rejections\": 0, \"structural_width_rejections\": 13}}}, \"record\": {\"sequence\": [0, 1, 5, 4, 0, 3, 2], \"groups\": [1, 28, 131941395333120, 8795019280384, 2, 1073725440, 16352], \"neighbour_bits\": 140737488355327, \"assigned_area\": 262144, \"retained_pixel_layers\": 1696094, \"failed_prefixes\": 0, \"cumulative_orphan_components\": 0, \"cumulative_orphan_pixels\": 0, \"worst_prefix_orphan_components\": 0}, \"validation\": {\"status\": \"PASS\", \"physical_layer_count\": 7, \"front_to_back_colors\": [\"#FBF7EF\", \"#F2C84C\", \"#EB852C\", \"#EEDBA7\", \"#FBF7EF\", \"#76777E\", \"#272C3A\"], \"back_to_front_colors\": [\"#272C3A\", \"#76777E\", \"#FBF7EF\", \"#EEDBA7\", \"#EB852C\", \"#F2C84C\", \"#FBF7EF\"], \"repeated_colors\": {\"#FBF7EF\": 2}, \"geometry_mismatched_pixels_against_indexed_target\": 0, \"indexed_target_accuracy\": 1.0, \"visible_automatic_connector_pixels\": 0, \"layers\": [{\"depth_back_to_front\": 0, \"color\": \"#272C3A\", \"four_neighbor_status\": \"PASS\", \"width_status\": \"PASS\", \"orphan_structural_core_components\": 0, \"missing_perimeter_pixels\": 0}, {\"depth_back_to_front\": 1, \"color\": \"#76777E\", \"four_neighbor_status\": \"PASS\", \"width_status\": \"PASS\", \"orphan_structural_core_components\": 0, \"missing_perimeter_pixels\": 0}, {\"depth_back_to_front\": 2, \"color\": \"#FBF7EF\", \"four_neighbor_status\": \"PASS\", \"width_status\": \"PASS\", \"orphan_structural_core_components\": 0, \"missing_perimeter_pixels\": 0}, {\"depth_back_to_front\": 3, \"color\": \"#EEDBA7\", \"four_neighbor_status\": \"PASS\", \"width_status\": \"PASS\", \"orphan_structural_core_components\": 0, \"missing_perimeter_pixels\": 0}, {\"depth_back_to_front\": 4, \"color\": \"#EB852C\", \"four_neighbor_status\": \"PASS\", \"width_status\": \"PASS\", \"orphan_structural_core_components\": 0, \"missing_perimeter_pixels\": 0}, {\"depth_back_to_front\": 5, \"color\": \"#F2C84C\", \"four_neighbor_status\": \"PASS\", \"width_status\": \"PASS\", \"orphan_structural_core_components\": 0, \"missing_perimeter_pixels\": 0}, {\"depth_back_to_front\": 6, \"color\": \"#FBF7EF\", \"four_neighbor_status\": \"PASS\", \"width_status\": \"PASS\", \"orphan_structural_core_components\": 0, \"missing_perimeter_pixels\": 0}]}, \"layer_files\": [{\"id\": \"layer_00_272c3a\", \"depth_back_to_front\": 0, \"palette_index\": 2, \"provider_index\": 6, \"provider_role\": \"width_aware_actual_mask_search_batch\", \"color\": \"#272C3A\", \"retained_material_mask\": \"automatic/layers/layer_00_272c3a/retained_material_mask.png\", \"through_cutouts_mask\": \"automatic/layers/layer_00_272c3a/through_cutouts_mask.png\", \"source_visible_region_mask\": \"automatic/layers/layer_00_272c3a/source_visible_region_mask.png\", \"hidden_retained_material_mask\": \"automatic/layers/layer_00_272c3a/hidden_retained_material_mask.png\", \"physical_sheet_preview\": \"automatic/layers/layer_00_272c3a/physical_sheet_preview.png\"}, {\"id\": \"layer_01_76777e\", \"depth_back_to_front\": 1, \"palette_index\": 3, \"provider_index\": 5, \"provider_role\": \"width_aware_actual_mask_search_batch\", \"color\": \"#76777E\", \"retained_material_mask\": \"automatic/layers/layer_01_76777e/retained_material_mask.png\", \"through_cutouts_mask\": \"automatic/layers/layer_01_76777e/through_cutouts_mask.png\", \"source_visible_region_mask\": \"automatic/layers/layer_01_76777e/source_visible_region_mask.png\", \"hidden_retained_material_mask\": \"automatic/layers/layer_01_76777e/hidden_retained_material_mask.png\", \"physical_sheet_preview\": \"automatic/layers/layer_01_76777e/physical_sheet_preview.png\"}, {\"id\": \"layer_02_fbf7ef\", \"depth_back_to_front\": 2, \"palette_index\": 0, \"provider_index\": 4, \"provider_role\": \"width_aware_actual_mask_search_batch\", \"color\": \"#FBF7EF\", \"retained_material_mask\": \"automatic/layers/layer_02_fbf7ef/retained_material_mask.png\", \"through_cutouts_mask\": \"automatic/layers/layer_02_fbf7ef/through_cutouts_mask.png\", \"source_visible_region_mask\": \"automatic/layers/layer_02_fbf7ef/source_visible_region_mask.png\", \"hidden_retained_material_mask\": \"automatic/layers/layer_02_fbf7ef/hidden_retained_material_mask.png\", \"physical_sheet_preview\": \"automatic/layers/layer_02_fbf7ef/physical_sheet_preview.png\"}, {\"id\": \"layer_03_eedba7\", \"depth_back_to_front\": 3, \"palette_index\": 4, \"provider_index\": 3, \"provider_role\": \"width_aware_actual_mask_search_batch\", \"color\": \"#EEDBA7\", \"retained_material_mask\": \"automatic/layers/layer_03_eedba7/retained_material_mask.png\", \"through_cutouts_mask\": \"automatic/layers/layer_03_eedba7/through_cutouts_mask.png\", \"source_visible_region_mask\": \"automatic/layers/layer_03_eedba7/source_visible_region_mask.png\", \"hidden_retained_material_mask\": \"automatic/layers/layer_03_eedba7/hidden_retained_material_mask.png\", \"physical_sheet_preview\": \"automatic/layers/layer_03_eedba7/physical_sheet_preview.png\"}, {\"id\": \"layer_04_eb852c\", \"depth_back_to_front\": 4, \"palette_index\": 5, \"provider_index\": 2, \"provider_role\": \"width_aware_actual_mask_search_batch\", \"color\": \"#EB852C\", \"retained_material_mask\": \"automatic/layers/layer_04_eb852c/retained_material_mask.png\", \"through_cutouts_mask\": \"automatic/layers/layer_04_eb852c/through_cutouts_mask.png\", \"source_visible_region_mask\": \"automatic/layers/layer_04_eb852c/source_visible_region_mask.png\", \"hidden_retained_material_mask\": \"automatic/layers/layer_04_eb852c/hidden_retained_material_mask.png\", \"physical_sheet_preview\": \"automatic/layers/layer_04_eb852c/physical_sheet_preview.png\"}, {\"id\": \"layer_05_f2c84c\", \"depth_back_to_front\": 5, \"palette_index\": 1, \"provider_index\": 1, \"provider_role\": \"width_aware_actual_mask_search_batch\", \"color\": \"#F2C84C\", \"retained_material_mask\": \"automatic/layers/layer_05_f2c84c/retained_material_mask.png\", \"through_cutouts_mask\": \"automatic/layers/layer_05_f2c84c/through_cutouts_mask.png\", \"source_visible_region_mask\": \"automatic/layers/layer_05_f2c84c/source_visible_region_mask.png\", \"hidden_retained_material_mask\": \"automatic/layers/layer_05_f2c84c/hidden_retained_material_mask.png\", \"physical_sheet_preview\": \"automatic/layers/layer_05_f2c84c/physical_sheet_preview.png\"}, {\"id\": \"layer_06_fbf7ef\", \"depth_back_to_front\": 6, \"palette_index\": 0, \"provider_index\": 0, \"provider_role\": \"width_aware_actual_mask_search_batch\", \"color\": \"#FBF7EF\", \"retained_material_mask\": \"automatic/layers/layer_06_fbf7ef/retained_material_mask.png\", \"through_cutouts_mask\": \"automatic/layers/layer_06_fbf7ef/through_cutouts_mask.png\", \"source_visible_region_mask\": \"automatic/layers/layer_06_fbf7ef/source_visible_region_mask.png\", \"hidden_retained_material_mask\": \"automatic/layers/layer_06_fbf7ef/hidden_retained_material_mask.png\", \"physical_sheet_preview\": \"automatic/layers/layer_06_fbf7ef/physical_sheet_preview.png\"}], \"worker_seconds\": 17.517767300014384}\n",
+    "stderr": "",
+    "partial_progress": {
+      "status": "COMPLETE_VALID_PLAN_FOUND",
+      "generator_calls": 246,
+      "accepted_groups_returned": 435,
+      "new_mask_evaluations": 2515,
+      "four_neighbor_rejections": 0,
+      "structural_width_rejections": 119,
+      "per_depth": {
+        "1": {
+          "generator_calls": 6,
+          "accepted_groups_returned": 1,
+          "new_mask_evaluations": 1,
+          "four_neighbor_rejections": 0,
+          "structural_width_rejections": 0
+        },
+        "2": {
+          "generator_calls": 6,
+          "accepted_groups_returned": 7,
+          "new_mask_evaluations": 39,
+          "four_neighbor_rejections": 0,
+          "structural_width_rejections": 0
+        },
+        "3": {
+          "generator_calls": 42,
+          "accepted_groups_returned": 66,
+          "new_mask_evaluations": 230,
+          "four_neighbor_rejections": 0,
+          "structural_width_rejections": 15
+        },
+        "4": {
+          "generator_calls": 48,
+          "accepted_groups_returned": 114,
+          "new_mask_evaluations": 536,
+          "four_neighbor_rejections": 0,
+          "structural_width_rejections": 39
+        },
+        "5": {
+          "generator_calls": 48,
+          "accepted_groups_returned": 108,
+          "new_mask_evaluations": 684,
+          "four_neighbor_rejections": 0,
+          "structural_width_rejections": 30
+        },
+        "6": {
+          "generator_calls": 48,
+          "accepted_groups_returned": 84,
+          "new_mask_evaluations": 604,
+          "four_neighbor_rejections": 0,
+          "structural_width_rejections": 22
+        },
+        "7": {
+          "generator_calls": 48,
+          "accepted_groups_returned": 55,
+          "new_mask_evaluations": 421,
+          "four_neighbor_rejections": 0,
+          "structural_width_rejections": 13
+        }
+      }
+    }
+  },
+  "planner_result": {
+    "status": "COMPLETE_VALID_PLAN_FOUND",
+    "planner_input": "source_composite_only.png only",
+    "preprocessing": {
+      "indexed_colors": 6,
+      "palette_hex": [
+        "#FBF7EF",
+        "#F2C84C",
+        "#272C3A",
+        "#76777E",
+        "#EEDBA7",
+        "#EB852C"
+      ],
+      "connected_regions": 47,
+      "greedy_provider_groups": 7,
+      "changed_pixels_against_resized_source": 262144,
+      "mean_absolute_rgb_error_against_resized_source_0_255": 0.9072316487630209,
+      "maximum_rgb_error_against_resized_source_0_255": 183
+    },
+    "search_seconds": 15.919586899981368,
+    "search_report": {
+      "method": "bounded_actual_cumulative_mask_beam_search",
+      "hard_width_gate_during_search": true,
+      "global_optimality_proven": false,
+      "global_infeasibility_proven": false,
+      "max_layers": 7,
+      "goal_source_regions": 47,
+      "allowed_source_regions": 47,
+      "fixed_start_source_regions": 0,
+      "max_states_per_depth": 8,
+      "explored_candidate_states": 362,
+      "pruned_candidate_states": 287,
+      "evaluated_unique_actual_masks": 2515,
+      "morphology_kernel_pixels": 7,
+      "frontier_widths": [
+        {
+          "depth": 1,
+          "candidate_states": 1,
+          "kept_states": 1
+        },
+        {
+          "depth": 2,
+          "candidate_states": 7,
+          "kept_states": 7
+        },
+        {
+          "depth": 3,
+          "candidate_states": 52,
+          "kept_states": 8
+        },
+        {
+          "depth": 4,
+          "candidate_states": 102,
+          "kept_states": 8
+        },
+        {
+          "depth": 5,
+          "candidate_states": 93,
+          "kept_states": 8
+        },
+        {
+          "depth": 6,
+          "candidate_states": 72,
+          "kept_states": 8
+        },
+        {
+          "depth": 7,
+          "candidate_states": 35,
+          "kept_states": 35
+        }
+      ],
+      "status": "CANDIDATE_FOUND"
+    },
+    "instrumentation": {
+      "generator_calls": 246,
+      "accepted_groups_returned": 435,
+      "new_mask_evaluations": 2515,
+      "four_neighbor_rejections": 0,
+      "structural_width_rejections": 119,
+      "per_depth": {
+        "1": {
+          "generator_calls": 6,
+          "accepted_groups_returned": 1,
+          "new_mask_evaluations": 1,
+          "four_neighbor_rejections": 0,
+          "structural_width_rejections": 0
+        },
+        "2": {
+          "generator_calls": 6,
+          "accepted_groups_returned": 7,
+          "new_mask_evaluations": 39,
+          "four_neighbor_rejections": 0,
+          "structural_width_rejections": 0
+        },
+        "3": {
+          "generator_calls": 42,
+          "accepted_groups_returned": 66,
+          "new_mask_evaluations": 230,
+          "four_neighbor_rejections": 0,
+          "structural_width_rejections": 15
+        },
+        "4": {
+          "generator_calls": 48,
+          "accepted_groups_returned": 114,
+          "new_mask_evaluations": 536,
+          "four_neighbor_rejections": 0,
+          "structural_width_rejections": 39
+        },
+        "5": {
+          "generator_calls": 48,
+          "accepted_groups_returned": 108,
+          "new_mask_evaluations": 684,
+          "four_neighbor_rejections": 0,
+          "structural_width_rejections": 30
+        },
+        "6": {
+          "generator_calls": 48,
+          "accepted_groups_returned": 84,
+          "new_mask_evaluations": 604,
+          "four_neighbor_rejections": 0,
+          "structural_width_rejections": 22
+        },
+        "7": {
+          "generator_calls": 48,
+          "accepted_groups_returned": 55,
+          "new_mask_evaluations": 421,
+          "four_neighbor_rejections": 0,
+          "structural_width_rejections": 13
+        }
+      }
+    },
+    "record": {
+      "sequence": [
+        0,
+        1,
+        5,
+        4,
+        0,
+        3,
+        2
+      ],
+      "groups": [
+        1,
+        28,
+        131941395333120,
+        8795019280384,
+        2,
+        1073725440,
+        16352
+      ],
+      "neighbour_bits": 140737488355327,
+      "assigned_area": 262144,
+      "retained_pixel_layers": 1696094,
+      "failed_prefixes": 0,
+      "cumulative_orphan_components": 0,
+      "cumulative_orphan_pixels": 0,
+      "worst_prefix_orphan_components": 0
+    },
+    "validation": {
+      "status": "PASS",
+      "physical_layer_count": 7,
+      "front_to_back_colors": [
+        "#FBF7EF",
+        "#F2C84C",
+        "#EB852C",
+        "#EEDBA7",
+        "#FBF7EF",
+        "#76777E",
+        "#272C3A"
+      ],
+      "back_to_front_colors": [
+        "#272C3A",
+        "#76777E",
+        "#FBF7EF",
+        "#EEDBA7",
+        "#EB852C",
+        "#F2C84C",
+        "#FBF7EF"
+      ],
+      "repeated_colors": {
+        "#FBF7EF": 2
+      },
+      "geometry_mismatched_pixels_against_indexed_target": 0,
+      "indexed_target_accuracy": 1.0,
+      "visible_automatic_connector_pixels": 0,
+      "layers": [
+        {
+          "depth_back_to_front": 0,
+          "color": "#272C3A",
+          "four_neighbor_status": "PASS",
+          "width_status": "PASS",
+          "orphan_structural_core_components": 0,
+          "missing_perimeter_pixels": 0
+        },
+        {
+          "depth_back_to_front": 1,
+          "color": "#76777E",
+          "four_neighbor_status": "PASS",
+          "width_status": "PASS",
+          "orphan_structural_core_components": 0,
+          "missing_perimeter_pixels": 0
+        },
+        {
+          "depth_back_to_front": 2,
+          "color": "#FBF7EF",
+          "four_neighbor_status": "PASS",
+          "width_status": "PASS",
+          "orphan_structural_core_components": 0,
+          "missing_perimeter_pixels": 0
+        },
+        {
+          "depth_back_to_front": 3,
+          "color": "#EEDBA7",
+          "four_neighbor_status": "PASS",
+          "width_status": "PASS",
+          "orphan_structural_core_components": 0,
+          "missing_perimeter_pixels": 0
+        },
+        {
+          "depth_back_to_front": 4,
+          "color": "#EB852C",
+          "four_neighbor_status": "PASS",
+          "width_status": "PASS",
+          "orphan_structural_core_components": 0,
+          "missing_perimeter_pixels": 0
+        },
+        {
+          "depth_back_to_front": 5,
+          "color": "#F2C84C",
+          "four_neighbor_status": "PASS",
+          "width_status": "PASS",
+          "orphan_structural_core_components": 0,
+          "missing_perimeter_pixels": 0
+        },
+        {
+          "depth_back_to_front": 6,
+          "color": "#FBF7EF",
+          "four_neighbor_status": "PASS",
+          "width_status": "PASS",
+          "orphan_structural_core_components": 0,
+          "missing_perimeter_pixels": 0
+        }
+      ]
+    },
+    "layer_files": [
+      {
+        "id": "layer_00_272c3a",
+        "depth_back_to_front": 0,
+        "palette_index": 2,
+        "provider_index": 6,
+        "provider_role": "width_aware_actual_mask_search_batch",
+        "color": "#272C3A",
+        "retained_material_mask": "automatic/layers/layer_00_272c3a/retained_material_mask.png",
+        "through_cutouts_mask": "automatic/layers/layer_00_272c3a/through_cutouts_mask.png",
+        "source_visible_region_mask": "automatic/layers/layer_00_272c3a/source_visible_region_mask.png",
+        "hidden_retained_material_mask": "automatic/layers/layer_00_272c3a/hidden_retained_material_mask.png",
+        "physical_sheet_preview": "automatic/layers/layer_00_272c3a/physical_sheet_preview.png"
+      },
+      {
+        "id": "layer_01_76777e",
+        "depth_back_to_front": 1,
+        "palette_index": 3,
+        "provider_index": 5,
+        "provider_role": "width_aware_actual_mask_search_batch",
+        "color": "#76777E",
+        "retained_material_mask": "automatic/layers/layer_01_76777e/retained_material_mask.png",
+        "through_cutouts_mask": "automatic/layers/layer_01_76777e/through_cutouts_mask.png",
+        "source_visible_region_mask": "automatic/layers/layer_01_76777e/source_visible_region_mask.png",
+        "hidden_retained_material_mask": "automatic/layers/layer_01_76777e/hidden_retained_material_mask.png",
+        "physical_sheet_preview": "automatic/layers/layer_01_76777e/physical_sheet_preview.png"
+      },
+      {
+        "id": "layer_02_fbf7ef",
+        "depth_back_to_front": 2,
+        "palette_index": 0,
+        "provider_index": 4,
+        "provider_role": "width_aware_actual_mask_search_batch",
+        "color": "#FBF7EF",
+        "retained_material_mask": "automatic/layers/layer_02_fbf7ef/retained_material_mask.png",
+        "through_cutouts_mask": "automatic/layers/layer_02_fbf7ef/through_cutouts_mask.png",
+        "source_visible_region_mask": "automatic/layers/layer_02_fbf7ef/source_visible_region_mask.png",
+        "hidden_retained_material_mask": "automatic/layers/layer_02_fbf7ef/hidden_retained_material_mask.png",
+        "physical_sheet_preview": "automatic/layers/layer_02_fbf7ef/physical_sheet_preview.png"
+      },
+      {
+        "id": "layer_03_eedba7",
+        "depth_back_to_front": 3,
+        "palette_index": 4,
+        "provider_index": 3,
+        "provider_role": "width_aware_actual_mask_search_batch",
+        "color": "#EEDBA7",
+        "retained_material_mask": "automatic/layers/layer_03_eedba7/retained_material_mask.png",
+        "through_cutouts_mask": "automatic/layers/layer_03_eedba7/through_cutouts_mask.png",
+        "source_visible_region_mask": "automatic/layers/layer_03_eedba7/source_visible_region_mask.png",
+        "hidden_retained_material_mask": "automatic/layers/layer_03_eedba7/hidden_retained_material_mask.png",
+        "physical_sheet_preview": "automatic/layers/layer_03_eedba7/physical_sheet_preview.png"
+      },
+      {
+        "id": "layer_04_eb852c",
+        "depth_back_to_front": 4,
+        "palette_index": 5,
+        "provider_index": 2,
+        "provider_role": "width_aware_actual_mask_search_batch",
+        "color": "#EB852C",
+        "retained_material_mask": "automatic/layers/layer_04_eb852c/retained_material_mask.png",
+        "through_cutouts_mask": "automatic/layers/layer_04_eb852c/through_cutouts_mask.png",
+        "source_visible_region_mask": "automatic/layers/layer_04_eb852c/source_visible_region_mask.png",
+        "hidden_retained_material_mask": "automatic/layers/layer_04_eb852c/hidden_retained_material_mask.png",
+        "physical_sheet_preview": "automatic/layers/layer_04_eb852c/physical_sheet_preview.png"
+      },
+      {
+        "id": "layer_05_f2c84c",
+        "depth_back_to_front": 5,
+        "palette_index": 1,
+        "provider_index": 1,
+        "provider_role": "width_aware_actual_mask_search_batch",
+        "color": "#F2C84C",
+        "retained_material_mask": "automatic/layers/layer_05_f2c84c/retained_material_mask.png",
+        "through_cutouts_mask": "automatic/layers/layer_05_f2c84c/through_cutouts_mask.png",
+        "source_visible_region_mask": "automatic/layers/layer_05_f2c84c/source_visible_region_mask.png",
+        "hidden_retained_material_mask": "automatic/layers/layer_05_f2c84c/hidden_retained_material_mask.png",
+        "physical_sheet_preview": "automatic/layers/layer_05_f2c84c/physical_sheet_preview.png"
+      },
+      {
+        "id": "layer_06_fbf7ef",
+        "depth_back_to_front": 6,
+        "palette_index": 0,
+        "provider_index": 0,
+        "provider_role": "width_aware_actual_mask_search_batch",
+        "color": "#FBF7EF",
+        "retained_material_mask": "automatic/layers/layer_06_fbf7ef/retained_material_mask.png",
+        "through_cutouts_mask": "automatic/layers/layer_06_fbf7ef/through_cutouts_mask.png",
+        "source_visible_region_mask": "automatic/layers/layer_06_fbf7ef/source_visible_region_mask.png",
+        "hidden_retained_material_mask": "automatic/layers/layer_06_fbf7ef/hidden_retained_material_mask.png",
+        "physical_sheet_preview": "automatic/layers/layer_06_fbf7ef/physical_sheet_preview.png"
+      }
+    ],
+    "worker_seconds": 17.517767300014384
+  }
+}

@@ -1,0 +1,7 @@
+{"timestamp_utc": "2026-10-18T18:54:38.231105+00:00", "elapsed_seconds": 0.022911200008820742, "stage": "CLI_READY", "command": "validate-direct2d"}
+{"timestamp_utc": "2026-10-18T18:54:38.231105+00:00", "elapsed_seconds": 0.024372000014409423, "stage": "DIRECT_2D_DEPENDENCY_IMPORT_START"}
+{"timestamp_utc": "2026-10-18T18:54:38.446874+00:00", "elapsed_seconds": 0.23244110000086948, "stage": "DIRECT_2D_DEPENDENCY_IMPORT_COMPLETE"}
+{"timestamp_utc": "2026-10-18T18:54:38.458876+00:00", "stage": "DIRECT_2D_PREPROCESSING_START", "source": "sci_fi_characters_shadowbox.png"}
+{"timestamp_utc": "2026-10-18T18:54:41.213863+00:00", "stage": "DIRECT_2D_PREPROCESSING_COMPLETE", "indexed_colors": 9, "greedy_provider_groups": 11}
+{"timestamp_utc": "2026-10-18T18:54:41.237230+00:00", "stage": "DIRECT_2D_PLANNING_START"}
+{"timestamp_utc": "2026-10-18T18:54:41.282806+00:00", "stage": "L1_2D_PLANNER_ENTERED", "indexed_colors": 9, "greedy_provider_groups": 11}

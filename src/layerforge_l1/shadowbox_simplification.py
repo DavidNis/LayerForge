@@ -14,6 +14,7 @@ import shutil
 import zipfile
 from collections import Counter
 from dataclasses import asdict, dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -33,6 +34,19 @@ from .subtractive_poc import (
     discover_order,
     validate_plan,
 )
+
+
+def _progress(stage: str, **details: object) -> None:
+    print(
+        json.dumps(
+            {
+                "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+                "stage": stage,
+                **details,
+            }
+        ),
+        flush=True,
+    )
 from .width_aware_planner import (
     WidthAwareSearchConfig,
     _materialize_plan,
@@ -321,6 +335,11 @@ def run_actual_planner(
     output: Path,
     poc: PocConfig = DEFAULT_CONFIG,
 ) -> dict[str, Any]:
+    _progress(
+        "L1_2D_PLANNER_ENTERED",
+        indexed_colors=len(analysis["palette_rgb"]),
+        greedy_provider_groups=len(analysis["providers"]),
+    )
     baseline_layers = len(analysis["providers"])
     bounded_search: dict[str, Any]
     try:
@@ -591,14 +610,21 @@ def run_direct_case(
     output_root: Path,
     poc: PocConfig = DEFAULT_CONFIG,
 ) -> dict[str, Any]:
+    _progress("DIRECT_2D_PREPROCESSING_START", source=str(source))
     root = output_root / case_id
     original_dir = root / "original"
     original_dir.mkdir(parents=True, exist_ok=True)
     shutil.copy2(source, original_dir / "source.png")
     analysis = analyze_image(source, poc)
+    _progress(
+        "DIRECT_2D_PREPROCESSING_COMPLETE",
+        indexed_colors=len(analysis["palette_rgb"]),
+        greedy_provider_groups=len(analysis["providers"]),
+    )
     palette = np.asarray(analysis["palette_rgb"], dtype=np.uint8)
     labels = np.asarray(analysis["labels"], dtype=np.uint8)
     _render_candidate(labels, palette, original_dir / "indexed_planning_target.png")
+    _progress("DIRECT_2D_PLANNING_START")
     planner = run_actual_planner(
         _analysis_from_labels(analysis, labels), root / "direct_plan", poc
     )

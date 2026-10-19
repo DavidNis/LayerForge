@@ -1,0 +1,90 @@
+{
+  "status": "PROVISIONAL_FIXTURE_ONLY",
+  "validation_note": "Independent OpenCV check approximates specified 7x7 erosion and 4-neighbor checks; does not replace existing LayerForge validator, which is not available in uploaded files. No LayerForge search was run.",
+  "mm_size": [
+    100,
+    100
+  ],
+  "resolution_px": [
+    576,
+    576
+  ],
+  "width_kernel": "7x7 elliptical",
+  "depth_order_front_to_back": [
+    {
+      "depth": 1,
+      "color": "#FAF7F0"
+    },
+    {
+      "depth": 2,
+      "color": "#F2C84B"
+    },
+    {
+      "depth": 3,
+      "color": "#ED852B"
+    },
+    {
+      "depth": 4,
+      "color": "#FAF7F0"
+    },
+    {
+      "depth": 5,
+      "color": "#242939"
+    }
+  ],
+  "morphology": [
+    {
+      "depth": 1,
+      "color": "#FAF7F0",
+      "role": "Front white",
+      "4_neighbor_components": 1,
+      "morphological_orphan_cores": 0,
+      "morphological_orphan_core_areas_px": [],
+      "material_area_percent": 69.24,
+      "outer_edge_entirely_retained": true
+    },
+    {
+      "depth": 2,
+      "color": "#F2C84B",
+      "role": "Yellow",
+      "4_neighbor_components": 1,
+      "morphological_orphan_cores": 0,
+      "morphological_orphan_core_areas_px": [],
+      "material_area_percent": 91.59,
+      "outer_edge_entirely_retained": true
+    },
+    {
+      "depth": 3,
+      "color": "#ED852B",
+      "role": "Orange",
+      "4_neighbor_components": 1,
+      "morphological_orphan_cores": 0,
+      "morphological_orphan_core_areas_px": [],
+      "material_area_percent": 94.37,
+      "outer_edge_entirely_retained": true
+    },
+    {
+      "depth": 4,
+      "color": "#FAF7F0",
+      "role": "Rear white",
+      "4_neighbor_components": 1,
+      "morphological_orphan_cores": 0,
+      "morphological_orphan_core_areas_px": [],
+      "material_area_percent": 98.68,
+      "outer_edge_entirely_retained": true
+    },
+    {
+      "depth": 5,
+      "color": "#242939",
+      "role": "Black",
+      "4_neighbor_components": 1,
+      "morphological_orphan_cores": 0,
+      "morphological_orphan_core_areas_px": [],
+      "material_area_percent": 100.0,
+      "outer_edge_entirely_retained": true
+    }
+  ],
+  "roundtrip_mismatch_pixels": 0,
+  "planner_was_given_reference_masks": false,
+  "planner_test_executed": false
+}

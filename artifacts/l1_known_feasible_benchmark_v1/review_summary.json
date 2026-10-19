@@ -1,0 +1,77 @@
+{
+  "milestone": "L1",
+  "approval_status": "NOT_APPROVED",
+  "benchmark_status": "PASS",
+  "fixture": {
+    "id": "synthetic_nested_face_v1",
+    "provenance": "Original deterministic programmatic fixture created for this benchmark; no external artwork.",
+    "source_composite": "source_composite.png",
+    "physical_layer_count": 5,
+    "distinct_colors": 3,
+    "front_to_back_colors": [
+      "#F4E7BF",
+      "#F2B632",
+      "#172238",
+      "#F4E7BF",
+      "#172238"
+    ],
+    "repeated_colors": {
+      "#F4E7BF": 2,
+      "#172238": 2
+    },
+    "four_neighbor_failed_layers": 0,
+    "structural_width_failed_layers": 0,
+    "orphan_structural_core_components": 0,
+    "missing_perimeter_pixels": 0,
+    "geometry_mismatched_pixels": 0,
+    "visible_automatic_connector_pixels": 0,
+    "validation_report": "ground_truth/validation.json",
+    "sheet_mask_preview": "ground_truth/sheet_mask_previews.png",
+    "exploded_preview": "ground_truth/exploded_layers.png",
+    "reconstructed_front_view": "ground_truth/reconstructed_front_view.png"
+  },
+  "independent_planner": {
+    "input_scope": "The planner worker loaded only source_composite.png and ordinary configuration; it did not load ground-truth masks, ordering, or provider metadata.",
+    "status": "COMPLETE_VALID_PLAN_FOUND",
+    "termination_reason": "CANDIDATE_FOUND_AT_DEPTH_5",
+    "planning_seconds": 0.544127999979537,
+    "timed_out": false,
+    "indexed_colors": 3,
+    "connected_regions": 12,
+    "greedy_provider_groups": 5,
+    "physical_layer_count": 5,
+    "front_to_back_colors": [
+      "#F4E7BF",
+      "#F1B632",
+      "#172238",
+      "#F4E7BF",
+      "#172238"
+    ],
+    "repeated_colors": {
+      "#F4E7BF": 2,
+      "#172238": 2
+    },
+    "explored_candidate_states": 41,
+    "pruned_candidate_states": 8,
+    "evaluated_unique_actual_masks": 87,
+    "four_neighbor_rejections": 0,
+    "structural_width_rejections": 0,
+    "four_neighbor_failed_final_layers": 0,
+    "structural_width_failed_final_layers": 0,
+    "orphan_structural_core_components": 0,
+    "missing_perimeter_pixels": 0,
+    "geometry_mismatched_pixels_against_indexed_target": 0,
+    "indexed_target_accuracy": 1.0,
+    "visible_automatic_connector_pixels": 0,
+    "source_vs_indexed_changed_pixels": 70087,
+    "source_vs_indexed_mean_absolute_rgb_error_0_255": 0.08912022908528645,
+    "source_vs_indexed_explanation": "Palette refitting changed yellow from #F2B632 to #F1B632 by one red-channel value; geometry and region boundaries were unchanged.",
+    "indexed_target": "planner/indexed_target.png",
+    "search_result": "planner/search_result.json",
+    "execution_report": "planner/execution_report.json",
+    "sheet_mask_preview": "planner/sheet_mask_previews.png",
+    "exploded_preview": "planner/exploded_layers.png",
+    "reconstructed_front_view": "planner/reconstructed_front_view.png"
+  },
+  "conclusion": "The current subtractive physical representation and bounded planner can independently solve this verified feasible nested-cutout fixture. This benchmark does not establish capability on the more complex sci-fi or fox illustrations; their failures remain attributable to problem complexity and bounded planning rather than a universal inability to represent valid subtractive stacks."
+}

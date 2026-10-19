@@ -58,6 +58,7 @@ class WidthAwareSearchConfig:
     unresolved_beam_states: int = 64
     max_layer_increase: int = 0
     candidate_singletons_per_color: int = 2
+    selection_strategy: str = "diverse"
 
 
 DEFAULT_WIDTH_AWARE_CONFIG = WidthAwareSearchConfig()
@@ -82,6 +83,17 @@ class WidthSearchRecord:
     cumulative_orphan_components: int
     cumulative_orphan_pixels: int
     worst_prefix_orphan_components: int
+
+
+@dataclass(frozen=True)
+class _ContinuationProfile:
+    valid_next_states: int
+    valid_colors: int
+    valid_color_bits: int
+    candidate_region_bits: int
+    reachable_region_bits: int
+    largest_group_regions: int
+    largest_group_area: int
 
 
 class _ActualMaskEvaluator:
@@ -148,7 +160,7 @@ class _ActualMaskEvaluator:
         return result
 
 
-def _candidate_groups(
+def _candidate_groups_legacy(
     state: int,
     neighbour_bits: int,
     color: int,
@@ -228,6 +240,295 @@ def _candidate_groups(
     )
 
 
+def _topology_cohort_groups(
+    state: int,
+    eligible: int,
+    graph: dict[str, Any],
+    allowed_bits: int,
+) -> set[int]:
+    """Return bounded partial groups with the same occlusion role.
+
+    A cohort contains same-color regions that are already supported by the same
+    assigned regions (or by the outer boundary) and expose the same palette
+    colors on their still-hidden side.  These signatures are a compact proxy
+    for a common containment/occlusion role.  One cohort is emitted per exact
+    signature, rather than enumerating arbitrary region subsets.
+    """
+
+    nodes = graph["nodes"]
+    adjacency = graph["adjacency"]
+    border_bits = int(graph["border_bits"])
+    cohorts: dict[tuple[int, bool, int], int] = {}
+    for index in _bit_indices(eligible):
+        adjacent = int(adjacency[index])
+        support_bits = adjacent & state
+        future_bits = adjacent & allowed_bits & ~state & ~eligible
+        future_colors = 0
+        for future_index in _bit_indices(future_bits):
+            future_colors |= 1 << int(nodes[future_index].palette_index)
+        signature = (
+            support_bits,
+            bool((1 << index) & border_bits),
+            future_colors,
+        )
+        cohorts[signature] = cohorts.get(signature, 0) | (1 << index)
+    return {
+        group
+        for group in cohorts.values()
+        if group.bit_count() > 1 and group != eligible
+    }
+
+
+def _candidate_groups(
+    state: int,
+    neighbour_bits: int,
+    color: int,
+    graph: dict[str, Any],
+    evaluator: _ActualMaskEvaluator,
+    hard_width: bool,
+    singleton_limit: int,
+    allowed_bits: int,
+) -> list[int]:
+    """Extend the legacy choices with bounded topology-coherent subsets."""
+
+    legacy = _candidate_groups_legacy(
+        state,
+        neighbour_bits,
+        color,
+        graph,
+        evaluator,
+        hard_width,
+        singleton_limit,
+        allowed_bits,
+    )
+    eligible = (
+        (neighbour_bits | int(graph["border_bits"]))
+        & int(graph["color_bits"][color])
+        & allowed_bits
+        & ~state
+    )
+    if eligible.bit_count() < 3:
+        return legacy
+
+    groups = set(legacy)
+    for group in _topology_cohort_groups(state, eligible, graph, allowed_bits):
+        metrics = evaluator.metrics(state | group)
+        if metrics.four_neighbor_components != 1:
+            continue
+        if hard_width and metrics.orphan_core_components:
+            continue
+        groups.add(group)
+    nodes = graph["nodes"]
+    areas = tuple(node.area for node in nodes)
+    return sorted(
+        groups,
+        key=lambda group: (
+            evaluator.metrics(state | group).orphan_core_components,
+            evaluator.metrics(state | group).orphan_core_pixels,
+            -group.bit_count(),
+            -_bit_area(group, areas),
+            group,
+        ),
+    )
+
+
+def _continuation_profile(
+    state: int,
+    record: WidthSearchRecord,
+    graph: dict[str, Any],
+    evaluator: _ActualMaskEvaluator,
+    hard_width: bool,
+    singleton_limit: int,
+    allowed_bits: int,
+    areas: tuple[int, ...],
+) -> _ContinuationProfile:
+    """Bounded one-layer feasibility probe using the existing generator."""
+
+    remaining = allowed_bits & ~state
+    reachable = (
+        (record.neighbour_bits | int(graph["border_bits"])) & remaining
+    )
+    next_states: set[int] = set()
+    valid_color_bits = 0
+    candidate_region_bits = 0
+    largest_group_regions = 0
+    largest_group_area = 0
+    for color in range(len(graph["color_bits"])):
+        groups = _candidate_groups(
+            state,
+            record.neighbour_bits,
+            color,
+            graph,
+            evaluator,
+            hard_width,
+            singleton_limit,
+            allowed_bits,
+        )
+        if groups:
+            valid_color_bits |= 1 << color
+        for group in groups:
+            next_states.add(state | group)
+            candidate_region_bits |= group
+            largest_group_regions = max(largest_group_regions, group.bit_count())
+            largest_group_area = max(largest_group_area, _bit_area(group, areas))
+    return _ContinuationProfile(
+        valid_next_states=len(next_states),
+        valid_colors=valid_color_bits.bit_count(),
+        valid_color_bits=valid_color_bits,
+        candidate_region_bits=candidate_region_bits,
+        reachable_region_bits=reachable,
+        largest_group_regions=largest_group_regions,
+        largest_group_area=largest_group_area,
+    )
+
+
+def _legacy_state_rank(
+    state: int,
+    record: WidthSearchRecord,
+    depth: int,
+    graph: dict[str, Any],
+    evaluator: _ActualMaskEvaluator,
+    allowed_bits: int,
+) -> tuple[Any, ...]:
+    remaining_colors = sum(
+        bool(int(bits) & allowed_bits & ~state) for bits in graph["color_bits"]
+    )
+    current = evaluator.metrics(state)
+    return (
+        depth + remaining_colors,
+        record.failed_prefixes,
+        current.orphan_core_components,
+        record.cumulative_orphan_components,
+        current.orphan_core_pixels,
+        record.cumulative_orphan_pixels,
+        -record.assigned_area,
+        record.retained_pixel_layers,
+        record.sequence,
+    )
+
+
+def _diverse_state_rank(
+    state: int,
+    record: WidthSearchRecord,
+    profile: _ContinuationProfile,
+    depth: int,
+    max_layers: int,
+    graph: dict[str, Any],
+    evaluator: _ActualMaskEvaluator,
+    allowed_bits: int,
+) -> tuple[Any, ...]:
+    """Rank completion viability before current prefix size."""
+
+    remaining = allowed_bits & ~state
+    remaining_colors = sum(
+        bool(int(bits) & remaining) for bits in graph["color_bits"]
+    )
+    layers_left = max_layers - depth
+    required_regions_per_layer = (
+        (remaining.bit_count() + layers_left - 1) // layers_left
+        if layers_left > 0
+        else remaining.bit_count()
+    )
+    current = evaluator.metrics(state)
+    repeated_depths = len(record.sequence) - len(set(record.sequence))
+    dead_end = bool(remaining) and profile.valid_next_states == 0
+    return (
+        int(dead_end),
+        max(0, remaining_colors - layers_left),
+        max(0, required_regions_per_layer - profile.largest_group_regions),
+        record.failed_prefixes,
+        current.orphan_core_components,
+        profile.reachable_region_bits.bit_count()
+        - profile.candidate_region_bits.bit_count(),
+        -profile.valid_colors,
+        -profile.valid_next_states,
+        -profile.candidate_region_bits.bit_count(),
+        repeated_depths,
+        -state.bit_count(),
+        -record.assigned_area,
+        record.retained_pixel_layers,
+        record.sequence,
+    )
+
+
+def _bit_jaccard(first: int, second: int) -> float:
+    union = (first | second).bit_count()
+    return (first & second).bit_count() / union if union else 1.0
+
+
+def _select_diverse_beam(
+    ranked: list[tuple[int, WidthSearchRecord]],
+    profiles: dict[int, _ContinuationProfile],
+    max_states: int,
+) -> list[tuple[int, WidthSearchRecord]]:
+    """Keep high-quality representatives, then maximize topology diversity."""
+
+    if len(ranked) <= max_states:
+        return ranked
+    rank_index = {state: index for index, (state, _) in enumerate(ranked)}
+    selected: list[tuple[int, WidthSearchRecord]] = []
+    selected_states: set[int] = set()
+
+    # Reserve half the beam for distinct layer-order/continuation signatures.
+    signature_quota = max(1, max_states // 2)
+    signatures: set[tuple[int, int, int]] = set()
+    for item in ranked:
+        state, record = item
+        profile = profiles[state]
+        signature = (
+            profile.valid_color_bits,
+            record.sequence[-1] if record.sequence else -1,
+            min(profile.valid_next_states, 3),
+        )
+        if signature in signatures:
+            continue
+        signatures.add(signature)
+        selected.append(item)
+        selected_states.add(state)
+        if len(selected) >= signature_quota:
+            break
+
+    while len(selected) < max_states:
+        remaining = [item for item in ranked if item[0] not in selected_states]
+        if not remaining:
+            break
+
+        def diversity_score(item: tuple[int, WidthSearchRecord]) -> tuple[Any, ...]:
+            state, _ = item
+            profile = profiles[state]
+            maximum_similarity = max(
+                0.7 * _bit_jaccard(state, kept_state)
+                + 0.3
+                * _bit_jaccard(
+                    profile.candidate_region_bits,
+                    profiles[kept_state].candidate_region_bits,
+                )
+                for kept_state in selected_states
+            )
+            return (
+                int(profile.valid_next_states == 0),
+                round(maximum_similarity, 6),
+                rank_index[state],
+                state,
+            )
+
+        chosen = min(remaining, key=diversity_score)
+        selected.append(chosen)
+        selected_states.add(chosen[0])
+    return sorted(selected, key=lambda item: rank_index[item[0]])
+
+
+def _mean_pairwise_state_distance(states: list[int]) -> float:
+    if len(states) < 2:
+        return 0.0
+    distances = [
+        1.0 - _bit_jaccard(states[first], states[second])
+        for first in range(len(states))
+        for second in range(first + 1, len(states))
+    ]
+    return float(sum(distances) / len(distances))
+
+
 def _search(
     graph: dict[str, Any],
     evaluator: _ActualMaskEvaluator,
@@ -239,7 +540,11 @@ def _search(
     allowed_bits: int | None = None,
     start_state: int = 0,
     start_neighbour_bits: int | None = None,
+    selection_strategy: str = "diverse",
+    progress_callback: Any | None = None,
 ) -> tuple[WidthSearchRecord | None, dict[str, Any]]:
+    if selection_strategy not in {"legacy", "diverse"}:
+        raise ValueError(f"unknown search selection strategy: {selection_strategy}")
     nodes = tuple(graph["nodes"])
     areas = tuple(node.area for node in nodes)
     full = int(graph["full_bits"] if goal_bits is None else goal_bits)
@@ -257,10 +562,13 @@ def _search(
     }
     explored = 0
     pruned = 0
-    frontier: list[dict[str, int]] = []
+    frontier: list[dict[str, Any]] = []
     best_complete: WidthSearchRecord | None = None
+    continuation_cache: dict[int, _ContinuationProfile] = {}
+    total_candidate_groups = 0
 
     for depth in range(1, max_layers + 1):
+        cache_before = set(evaluator.cache)
         candidates: dict[int, WidthSearchRecord] = {}
         for state, record in states.items():
             for color in range(len(graph["color_bits"])):
@@ -274,6 +582,7 @@ def _search(
                     singleton_limit,
                     allowed,
                 ):
+                    total_candidate_groups += 1
                     next_state = state | group
                     if next_state == state:
                         continue
@@ -324,38 +633,144 @@ def _search(
                     "depth": depth,
                     "candidate_states": len(candidates),
                     "kept_states": len(candidates),
+                    "assigned_source_regions_min": min(
+                        state.bit_count() for state in candidates
+                    ),
+                    "assigned_source_regions_max": max(
+                        state.bit_count() for state in candidates
+                    ),
+                    "assigned_visible_pixels_min": min(
+                        record.assigned_area for record in candidates.values()
+                    ),
+                    "assigned_visible_pixels_max": max(
+                        record.assigned_area for record in candidates.values()
+                    ),
+                    "complete_state_found": True,
                 }
             )
+            if progress_callback is not None:
+                progress_callback(dict(frontier[-1]))
             break
 
-        def rank(item: tuple[int, WidthSearchRecord]) -> tuple[Any, ...]:
-            state, record = item
-            remaining_colors = sum(
-                bool(int(bits) & allowed & ~state) for bits in graph["color_bits"]
+        profiles: dict[int, _ContinuationProfile] = {}
+        if selection_strategy == "diverse" and depth < max_layers:
+            for state, record in candidates.items():
+                profile = continuation_cache.get(state)
+                if profile is None:
+                    profile = _continuation_profile(
+                        state,
+                        record,
+                        graph,
+                        evaluator,
+                        hard_width,
+                        singleton_limit,
+                        allowed,
+                        areas,
+                    )
+                    continuation_cache[state] = profile
+                profiles[state] = profile
+            ranked = sorted(
+                candidates.items(),
+                key=lambda item: _diverse_state_rank(
+                    item[0],
+                    item[1],
+                    profiles[item[0]],
+                    depth,
+                    max_layers,
+                    graph,
+                    evaluator,
+                    allowed,
+                ),
             )
-            current = evaluator.metrics(state)
-            return (
-                depth + remaining_colors,
-                record.failed_prefixes,
-                current.orphan_core_components,
-                record.cumulative_orphan_components,
-                current.orphan_core_pixels,
-                record.cumulative_orphan_pixels,
-                -record.assigned_area,
-                record.retained_pixel_layers,
-                record.sequence,
+            kept = _select_diverse_beam(ranked, profiles, max_states)
+        else:
+            ranked = sorted(
+                candidates.items(),
+                key=lambda item: _legacy_state_rank(
+                    item[0], item[1], depth, graph, evaluator, allowed
+                ),
             )
+            kept = ranked[:max_states]
 
-        ranked = sorted(candidates.items(), key=rank)
-        kept = ranked[:max_states]
+        # The legacy selector gets the same retained-frontier diagnostics, but
+        # these probes happen only after selection and cannot affect it.
+        if depth < max_layers:
+            for state, record in kept:
+                profile = continuation_cache.get(state)
+                if profile is None:
+                    profile = _continuation_profile(
+                        state,
+                        record,
+                        graph,
+                        evaluator,
+                        hard_width,
+                        singleton_limit,
+                        allowed,
+                        areas,
+                    )
+                    continuation_cache[state] = profile
+                profiles[state] = profile
         pruned += max(0, len(ranked) - len(kept))
+        newly_evaluated = [
+            metrics
+            for state, metrics in evaluator.cache.items()
+            if state not in cache_before
+        ]
+        kept_states = [state for state, _ in kept]
         frontier.append(
             {
                 "depth": depth,
                 "candidate_states": len(ranked),
                 "kept_states": len(kept),
+                "assigned_source_regions_min": min(
+                    (state.bit_count() for state in kept_states), default=0
+                ),
+                "assigned_source_regions_max": max(
+                    (state.bit_count() for state in kept_states), default=0
+                ),
+                "assigned_visible_pixels_min": min(
+                    (record.assigned_area for _, record in kept), default=0
+                ),
+                "assigned_visible_pixels_max": max(
+                    (record.assigned_area for _, record in kept), default=0
+                ),
+                "remaining_reachable_regions_min": min(
+                    (
+                        profiles[state].reachable_region_bits.bit_count()
+                        for state in kept_states
+                    ),
+                    default=0,
+                ),
+                "remaining_reachable_regions_max": max(
+                    (
+                        profiles[state].reachable_region_bits.bit_count()
+                        for state in kept_states
+                    ),
+                    default=0,
+                ),
+                "valid_next_states_total": sum(
+                    profiles[state].valid_next_states for state in kept_states
+                ),
+                "dead_end_states_retained": sum(
+                    profiles[state].valid_next_states == 0 for state in kept_states
+                ),
+                "mean_pairwise_assigned_state_distance": _mean_pairwise_state_distance(
+                    kept_states
+                ),
+                "new_actual_masks_evaluated": len(newly_evaluated),
+                "new_four_neighbor_rejections": sum(
+                    metrics.four_neighbor_components != 1
+                    for metrics in newly_evaluated
+                ),
+                "new_width_rejections": sum(
+                    metrics.orphan_core_components > 0
+                    for metrics in newly_evaluated
+                ),
+                "complete_state_found": False,
             }
         )
+        if progress_callback is not None:
+            progress_callback(dict(frontier[-1]))
         states = dict(kept)
         if not states:
             break
@@ -370,9 +785,19 @@ def _search(
         "allowed_source_regions": allowed.bit_count(),
         "fixed_start_source_regions": start_state.bit_count(),
         "max_states_per_depth": max_states,
+        "selection_strategy": selection_strategy,
         "explored_candidate_states": explored,
+        "candidate_groups_expanded": total_candidate_groups,
         "pruned_candidate_states": pruned,
         "evaluated_unique_actual_masks": len(evaluator.cache),
+        "four_neighbor_rejected_actual_masks": sum(
+            metrics.four_neighbor_components != 1
+            for metrics in evaluator.cache.values()
+        ),
+        "width_rejected_actual_masks": sum(
+            metrics.orphan_core_components > 0
+            for metrics in evaluator.cache.values()
+        ),
         "morphology_kernel_pixels": evaluator.kernel_size,
         "frontier_widths": frontier,
         "status": "CANDIDATE_FOUND" if best_complete else "NO_COMPLETE_CANDIDATE_WITHIN_BOUNDS",
@@ -399,6 +824,7 @@ def plan_width_aware(
         search_config.candidate_singletons_per_color,
         goal_bits=None,
         allowed_bits=None,
+        selection_strategy=search_config.selection_strategy,
     )
     if hard is not None:
         return hard, graph, {
@@ -415,6 +841,7 @@ def plan_width_aware(
         search_config.candidate_singletons_per_color,
         goal_bits=None,
         allowed_bits=None,
+        selection_strategy=search_config.selection_strategy,
     )
     if unresolved is None:
         raise RuntimeError("width-aware planner found no complete candidate within bounds")
@@ -459,6 +886,7 @@ def plan_width_aware_prefix(
         search_config.candidate_singletons_per_color,
         goal_bits=goal,
         allowed_bits=goal,
+        selection_strategy=search_config.selection_strategy,
     )
     selected = hard
     fallback_report: dict[str, Any] | None = None
@@ -473,6 +901,7 @@ def plan_width_aware_prefix(
             search_config.candidate_singletons_per_color,
             goal_bits=goal,
             allowed_bits=goal,
+            selection_strategy=search_config.selection_strategy,
         )
         selected_mode = "UNRESOLVED_TARGET_PREFIX_CANDIDATE"
     if selected is None:
@@ -571,6 +1000,7 @@ def plan_width_aware_window(
         allowed_bits=allowed,
         start_state=start_state,
         start_neighbour_bits=start_neighbours,
+        selection_strategy=search_config.selection_strategy,
     )
     if selected is None:
         raise RuntimeError("width-aware window planner found no complete candidate")

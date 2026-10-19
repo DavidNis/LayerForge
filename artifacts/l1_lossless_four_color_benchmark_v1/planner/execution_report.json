@@ -1,0 +1,54 @@
+{
+  "timed_out": false,
+  "timeout_seconds": 30,
+  "exit_code": 0,
+  "wall_seconds": 3.4995338000007905,
+  "stdout": "{\"status\": \"COMPLETE_VALID_PLAN_FOUND\", \"planner_input\": \"lossless_four_color_target_512.png only\", \"preprocessing\": {\"mode\": \"exact_rgb_lossless_indexing\", \"indexed_colors\": 4, \"palette_hex\": [\"#242939\", \"#ED852B\", \"#F2C84B\", \"#FAF7F0\"], \"connected_regions\": 19, \"greedy_provider_groups\": 5, \"changed_pixels_against_input\": 0}, \"search_seconds\": 2.400412899965886, \"search_report\": {\"method\": \"bounded_actual_cumulative_mask_beam_search\", \"hard_width_gate_during_search\": true, \"global_optimality_proven\": false, \"global_infeasibility_proven\": false, \"max_layers\": 5, \"goal_source_regions\": 19, \"allowed_source_regions\": 19, \"fixed_start_source_regions\": 0, \"max_states_per_depth\": 8, \"explored_candidate_states\": 116, \"pruned_candidate_states\": 55, \"evaluated_unique_actual_masks\": 389, \"morphology_kernel_pixels\": 7, \"frontier_widths\": [{\"depth\": 1, \"candidate_states\": 1, \"kept_states\": 1}, {\"depth\": 2, \"candidate_states\": 4, \"kept_states\": 4}, {\"depth\": 3, \"candidate_states\": 24, \"kept_states\": 8}, {\"depth\": 4, \"candidate_states\": 47, \"kept_states\": 8}, {\"depth\": 5, \"candidate_states\": 40, \"kept_states\": 40}], \"status\": \"CANDIDATE_FOUND\"}, \"record\": {\"sequence\": [3, 2, 1, 3, 0], \"groups\": [131072, 114688, 15872, 262144, 511], \"neighbour_bits\": 524287, \"assigned_area\": 262144, \"retained_pixel_layers\": 1189572, \"failed_prefixes\": 0, \"cumulative_orphan_components\": 0, \"cumulative_orphan_pixels\": 0, \"worst_prefix_orphan_components\": 0}, \"validation\": {\"status\": \"PASS\", \"physical_layer_count\": 5, \"front_to_back_colors\": [\"#FAF7F0\", \"#F2C84B\", \"#ED852B\", \"#FAF7F0\", \"#242939\"], \"back_to_front_colors\": [\"#242939\", \"#FAF7F0\", \"#ED852B\", \"#F2C84B\", \"#FAF7F0\"], \"repeated_colors\": {\"#FAF7F0\": 2}, \"geometry_mismatched_pixels_against_indexed_target\": 0, \"indexed_target_accuracy\": 1.0, \"visible_automatic_connector_pixels\": 0, \"layers\": [{\"depth_back_to_front\": 0, \"color\": \"#242939\", \"four_neighbor_status\": \"PASS\", \"four_neighbor_components\": 1, \"width_status\": \"PASS\", \"orphan_structural_core_components\": 0, \"orphan_structural_core_pixels\": 0, \"missing_perimeter_pixels\": 0}, {\"depth_back_to_front\": 1, \"color\": \"#FAF7F0\", \"four_neighbor_status\": \"PASS\", \"four_neighbor_components\": 1, \"width_status\": \"PASS\", \"orphan_structural_core_components\": 0, \"orphan_structural_core_pixels\": 0, \"missing_perimeter_pixels\": 0}, {\"depth_back_to_front\": 2, \"color\": \"#ED852B\", \"four_neighbor_status\": \"PASS\", \"four_neighbor_components\": 1, \"width_status\": \"PASS\", \"orphan_structural_core_components\": 0, \"orphan_structural_core_pixels\": 0, \"missing_perimeter_pixels\": 0}, {\"depth_back_to_front\": 3, \"color\": \"#F2C84B\", \"four_neighbor_status\": \"PASS\", \"four_neighbor_components\": 1, \"width_status\": \"PASS\", \"orphan_structural_core_components\": 0, \"orphan_structural_core_pixels\": 0, \"missing_perimeter_pixels\": 0}, {\"depth_back_to_front\": 4, \"color\": \"#FAF7F0\", \"four_neighbor_status\": \"PASS\", \"four_neighbor_components\": 1, \"width_status\": \"PASS\", \"orphan_structural_core_components\": 0, \"orphan_structural_core_pixels\": 0, \"missing_perimeter_pixels\": 0}]}, \"layer_files\": [{\"id\": \"layer_00_242939\", \"depth_back_to_front\": 0, \"palette_index\": 0, \"provider_index\": 4, \"provider_role\": \"width_aware_actual_mask_search_batch\", \"color\": \"#242939\", \"retained_material_mask\": \"automatic/layers/layer_00_242939/retained_material_mask.png\", \"through_cutouts_mask\": \"automatic/layers/layer_00_242939/through_cutouts_mask.png\", \"source_visible_region_mask\": \"automatic/layers/layer_00_242939/source_visible_region_mask.png\", \"hidden_retained_material_mask\": \"automatic/layers/layer_00_242939/hidden_retained_material_mask.png\", \"physical_sheet_preview\": \"automatic/layers/layer_00_242939/physical_sheet_preview.png\"}, {\"id\": \"layer_01_faf7f0\", \"depth_back_to_front\": 1, \"palette_index\": 3, \"provider_index\": 3, \"provider_role\": \"width_aware_actual_mask_search_batch\", \"color\": \"#FAF7F0\", \"retained_material_mask\": \"automatic/layers/layer_01_faf7f0/retained_material_mask.png\", \"through_cutouts_mask\": \"automatic/layers/layer_01_faf7f0/through_cutouts_mask.png\", \"source_visible_region_mask\": \"automatic/layers/layer_01_faf7f0/source_visible_region_mask.png\", \"hidden_retained_material_mask\": \"automatic/layers/layer_01_faf7f0/hidden_retained_material_mask.png\", \"physical_sheet_preview\": \"automatic/layers/layer_01_faf7f0/physical_sheet_preview.png\"}, {\"id\": \"layer_02_ed852b\", \"depth_back_to_front\": 2, \"palette_index\": 1, \"provider_index\": 2, \"provider_role\": \"width_aware_actual_mask_search_batch\", \"color\": \"#ED852B\", \"retained_material_mask\": \"automatic/layers/layer_02_ed852b/retained_material_mask.png\", \"through_cutouts_mask\": \"automatic/layers/layer_02_ed852b/through_cutouts_mask.png\", \"source_visible_region_mask\": \"automatic/layers/layer_02_ed852b/source_visible_region_mask.png\", \"hidden_retained_material_mask\": \"automatic/layers/layer_02_ed852b/hidden_retained_material_mask.png\", \"physical_sheet_preview\": \"automatic/layers/layer_02_ed852b/physical_sheet_preview.png\"}, {\"id\": \"layer_03_f2c84b\", \"depth_back_to_front\": 3, \"palette_index\": 2, \"provider_index\": 1, \"provider_role\": \"width_aware_actual_mask_search_batch\", \"color\": \"#F2C84B\", \"retained_material_mask\": \"automatic/layers/layer_03_f2c84b/retained_material_mask.png\", \"through_cutouts_mask\": \"automatic/layers/layer_03_f2c84b/through_cutouts_mask.png\", \"source_visible_region_mask\": \"automatic/layers/layer_03_f2c84b/source_visible_region_mask.png\", \"hidden_retained_material_mask\": \"automatic/layers/layer_03_f2c84b/hidden_retained_material_mask.png\", \"physical_sheet_preview\": \"automatic/layers/layer_03_f2c84b/physical_sheet_preview.png\"}, {\"id\": \"layer_04_faf7f0\", \"depth_back_to_front\": 4, \"palette_index\": 3, \"provider_index\": 0, \"provider_role\": \"width_aware_actual_mask_search_batch\", \"color\": \"#FAF7F0\", \"retained_material_mask\": \"automatic/layers/layer_04_faf7f0/retained_material_mask.png\", \"through_cutouts_mask\": \"automatic/layers/layer_04_faf7f0/through_cutouts_mask.png\", \"source_visible_region_mask\": \"automatic/layers/layer_04_faf7f0/source_visible_region_mask.png\", \"hidden_retained_material_mask\": \"automatic/layers/layer_04_faf7f0/hidden_retained_material_mask.png\", \"physical_sheet_preview\": \"automatic/layers/layer_04_faf7f0/physical_sheet_preview.png\"}], \"worker_seconds\": 3.2171247000223957}\n",
+  "stderr": "",
+  "partial_progress": {
+    "status": "COMPLETE_VALID_PLAN_FOUND",
+    "search_report": {
+      "method": "bounded_actual_cumulative_mask_beam_search",
+      "hard_width_gate_during_search": true,
+      "global_optimality_proven": false,
+      "global_infeasibility_proven": false,
+      "max_layers": 5,
+      "goal_source_regions": 19,
+      "allowed_source_regions": 19,
+      "fixed_start_source_regions": 0,
+      "max_states_per_depth": 8,
+      "explored_candidate_states": 116,
+      "pruned_candidate_states": 55,
+      "evaluated_unique_actual_masks": 389,
+      "morphology_kernel_pixels": 7,
+      "frontier_widths": [
+        {
+          "depth": 1,
+          "candidate_states": 1,
+          "kept_states": 1
+        },
+        {
+          "depth": 2,
+          "candidate_states": 4,
+          "kept_states": 4
+        },
+        {
+          "depth": 3,
+          "candidate_states": 24,
+          "kept_states": 8
+        },
+        {
+          "depth": 4,
+          "candidate_states": 47,
+          "kept_states": 8
+        },
+        {
+          "depth": 5,
+          "candidate_states": 40,
+          "kept_states": 40
+        }
+      ],
+      "status": "CANDIDATE_FOUND"
+    }
+  }
+}
