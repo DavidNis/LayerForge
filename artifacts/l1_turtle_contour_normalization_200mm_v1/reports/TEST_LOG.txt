@@ -1,0 +1,32 @@
+Contour normalization focused verification
+Date: 2026-10-20
+
+FAIL  first artifact-write attempt: JSON serialization rejected numpy.int64
+      coordinates after the deterministic candidate had been rendered.
+      Coordinate values were converted to Python int and the identical
+      deterministic pass was written successfully; no alternate candidate or
+      parameter trial was generated.
+PASS  python -m py_compile src/layerforge_l1/contour_normalization.py scripts/normalize_turtle_contours_200mm.py
+PASS  python -m pytest tests/test_contour_normalization.py -q --junitxml=artifacts/l1_turtle_contour_normalization_200mm_v1/reports/pytest.xml
+      4 passed in 0.47s
+
+Focused cases:
+- straight thin contour: PASS
+- curved closed contour: PASS
+- diagonal contour: PASS
+- intersecting contour with nearby independent detail: PASS
+
+Turtle candidate validation:
+- source is the original indexed target: PASS
+- exact nine-color palette preserved: PASS
+- all changed pixels use existing #0E0F0D: PASS
+- distinct dark components merged: 0 (PASS)
+- per-color connected-component count changes: 0 (PASS)
+- identified contour segments: 115
+- segments normalized: 30
+- longer segments rejected to preserve color topology: 4
+- short graph fragments retained for review: 6 (4 are below 1.2 mm)
+- physical-layer planning / CP-SAT / CAD / STL / STEP: NOT RUN (out of scope)
+
+Review recommendation: REVISE
+Milestone: L1 remains NOT APPROVED

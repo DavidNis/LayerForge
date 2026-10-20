@@ -1,0 +1,1160 @@
+{
+  "status": "READY_FOR_USER_TEST",
+  "recommendation": "REVISE",
+  "proposal_modified": false,
+  "reviewed_input_sha256": {
+    "original_front": "7783f91cca9cbe2bd619d8a816827db6a6d231d2818db023305dd7c0325b9a13",
+    "existing_repair_proposal": "ac343debe027f9cf3fce8051cb02762799c3816d64dc6e59b1fd2087b012da94"
+  },
+  "physical_size_mm": [
+    200.0,
+    200.0
+  ],
+  "outer_mask_pixels": 576,
+  "artwork_preview_pixels": 512,
+  "mm_per_outer_mask_pixel": 0.3472222222222222,
+  "minimum_visible_contour_width_mm": 1.2,
+  "change_classification": {
+    "changed_pixels": 4075,
+    "positive_dark_contour_widening_pixels": 3670,
+    "non_dark_structural_widening_pixels": 404,
+    "dark_color_substitution_pixels": 1,
+    "unrelated_by_operation_provenance": 0
+  },
+  "color_transitions": [
+    {
+      "before": "#5DA146",
+      "after": "#0E0F0D",
+      "pixels": 926
+    },
+    {
+      "before": "#90C6E1",
+      "after": "#0E0F0D",
+      "pixels": 800
+    },
+    {
+      "before": "#986840",
+      "after": "#0E0F0D",
+      "pixels": 652
+    },
+    {
+      "before": "#F1D748",
+      "after": "#0E0F0D",
+      "pixels": 483
+    },
+    {
+      "before": "#276DA3",
+      "after": "#0E0F0D",
+      "pixels": 385
+    },
+    {
+      "before": "#F6F6F6",
+      "after": "#0E0F0D",
+      "pixels": 358
+    },
+    {
+      "before": "#90C6E1",
+      "after": "#986840",
+      "pixels": 168
+    },
+    {
+      "before": "#5DA146",
+      "after": "#986840",
+      "pixels": 149
+    },
+    {
+      "before": "#F1D748",
+      "after": "#986840",
+      "pixels": 78
+    },
+    {
+      "before": "#4B98CF",
+      "after": "#0E0F0D",
+      "pixels": 66
+    },
+    {
+      "before": "#F1D748",
+      "after": "#90C6E1",
+      "pixels": 5
+    },
+    {
+      "before": "#F1D748",
+      "after": "#5DA146",
+      "pixels": 3
+    },
+    {
+      "before": "#F1D748",
+      "after": "#F6F6F6",
+      "pixels": 1
+    },
+    {
+      "before": "#17334B",
+      "after": "#0E0F0D",
+      "pixels": 1
+    }
+  ],
+  "positive_visible_contours": {
+    "before": {
+      "medial_samples": 4927,
+      "samples_below_1_2mm": 2575,
+      "percent_below_1_2mm": 52.263040389689465,
+      "minimum_mm": 0.3472222089767456,
+      "p10_mm": 1.0416666269302368,
+      "median_mm": 1.1784026622772217,
+      "p90_mm": 1.736111044883728,
+      "maximum_mm": 11.319441795349121,
+      "method": "local maxima of an L2 distance transform; occupied raster width estimated as max(1, 2*radius-1) pixels at 200/576 mm per pixel"
+    },
+    "after": {
+      "medial_samples": 4856,
+      "samples_below_1_2mm": 1403,
+      "percent_below_1_2mm": 28.892092257001643,
+      "minimum_mm": 0.3472222089767456,
+      "p10_mm": 1.0416666269302368,
+      "median_mm": 1.736111044883728,
+      "p90_mm": 2.150624990463257,
+      "maximum_mm": 11.319441795349121,
+      "method": "local maxima of an L2 distance transform; occupied raster width estimated as max(1, 2*radius-1) pixels at 200/576 mm per pixel"
+    },
+    "interpretation": "The proposal improves many structural/outline paths but does not normalize every visible contour to 1.2 mm. Endpoint and diagonal raster samples are included and require vector-stage confirmation before manufacturing claims."
+  },
+  "regions": [
+    {
+      "region": "eyes",
+      "bounds_pixels": [
+        150,
+        135,
+        305,
+        220
+      ],
+      "changed_pixels": 1,
+      "before_positive_dark_contours": {
+        "medial_samples": 91,
+        "samples_below_1_2mm": 16,
+        "percent_below_1_2mm": 17.582417582417584,
+        "minimum_mm": 0.3472222089767456,
+        "p10_mm": 0.6249999403953552,
+        "median_mm": 2.150624990463257,
+        "p90_mm": 3.122846841812134,
+        "maximum_mm": 11.319441795349121,
+        "method": "local maxima of an L2 distance transform; occupied raster width estimated as max(1, 2*radius-1) pixels at 200/576 mm per pixel"
+      },
+      "after_positive_dark_contours": {
+        "medial_samples": 90,
+        "samples_below_1_2mm": 16,
+        "percent_below_1_2mm": 17.77777777777778,
+        "minimum_mm": 0.3472222089767456,
+        "p10_mm": 0.6249999403953552,
+        "median_mm": 2.150624990463257,
+        "p90_mm": 3.150408983230591,
+        "maximum_mm": 11.319441795349121,
+        "method": "local maxima of an L2 distance transform; occupied raster width estimated as max(1, 2*radius-1) pixels at 200/576 mm per pixel"
+      }
+    },
+    {
+      "region": "mouth",
+      "bounds_pixels": [
+        175,
+        202,
+        307,
+        250
+      ],
+      "changed_pixels": 54,
+      "before_positive_dark_contours": {
+        "medial_samples": 183,
+        "samples_below_1_2mm": 150,
+        "percent_below_1_2mm": 81.9672131147541,
+        "minimum_mm": 0.3472222089767456,
+        "p10_mm": 1.0416666269302368,
+        "median_mm": 1.0416666269302368,
+        "p90_mm": 1.597222089767456,
+        "maximum_mm": 4.513888835906982,
+        "method": "local maxima of an L2 distance transform; occupied raster width estimated as max(1, 2*radius-1) pixels at 200/576 mm per pixel"
+      },
+      "after_positive_dark_contours": {
+        "medial_samples": 178,
+        "samples_below_1_2mm": 151,
+        "percent_below_1_2mm": 84.8314606741573,
+        "minimum_mm": 0.3472222089767456,
+        "p10_mm": 1.0416666269302368,
+        "median_mm": 1.0416666269302368,
+        "p90_mm": 2.471576690673828,
+        "maximum_mm": 4.513888835906982,
+        "method": "local maxima of an L2 distance transform; occupied raster width estimated as max(1, 2*radius-1) pixels at 200/576 mm per pixel"
+      }
+    },
+    {
+      "region": "head_outline",
+      "bounds_pixels": [
+        92,
+        85,
+        340,
+        280
+      ],
+      "changed_pixels": 662,
+      "before_positive_dark_contours": {
+        "medial_samples": 1167,
+        "samples_below_1_2mm": 451,
+        "percent_below_1_2mm": 38.64610111396744,
+        "minimum_mm": 0.3472222089767456,
+        "p10_mm": 0.6249999403953552,
+        "median_mm": 1.597222089767456,
+        "p90_mm": 1.872847080230713,
+        "maximum_mm": 11.319441795349121,
+        "method": "local maxima of an L2 distance transform; occupied raster width estimated as max(1, 2*radius-1) pixels at 200/576 mm per pixel"
+      },
+      "after_positive_dark_contours": {
+        "medial_samples": 1119,
+        "samples_below_1_2mm": 372,
+        "percent_below_1_2mm": 33.24396782841823,
+        "minimum_mm": 0.3472222089767456,
+        "p10_mm": 0.6249999403953552,
+        "median_mm": 1.597222089767456,
+        "p90_mm": 2.4305553436279297,
+        "maximum_mm": 11.319441795349121,
+        "method": "local maxima of an L2 distance transform; occupied raster width estimated as max(1, 2*radius-1) pixels at 200/576 mm per pixel"
+      }
+    },
+    {
+      "region": "shell",
+      "bounds_pixels": [
+        18,
+        215,
+        210,
+        392
+      ],
+      "changed_pixels": 668,
+      "before_positive_dark_contours": {
+        "medial_samples": 1030,
+        "samples_below_1_2mm": 288,
+        "percent_below_1_2mm": 27.96116504854369,
+        "minimum_mm": 0.3472222089767456,
+        "p10_mm": 1.0416666269302368,
+        "median_mm": 1.597222089767456,
+        "p90_mm": 1.872847080230713,
+        "maximum_mm": 3.819444179534912,
+        "method": "local maxima of an L2 distance transform; occupied raster width estimated as max(1, 2*radius-1) pixels at 200/576 mm per pixel"
+      },
+      "after_positive_dark_contours": {
+        "medial_samples": 996,
+        "samples_below_1_2mm": 143,
+        "percent_below_1_2mm": 14.357429718875503,
+        "minimum_mm": 0.3472222089767456,
+        "p10_mm": 1.0416666269302368,
+        "median_mm": 1.736111044883728,
+        "p90_mm": 2.4305553436279297,
+        "maximum_mm": 3.819444179534912,
+        "method": "local maxima of an L2 distance transform; occupied raster width estimated as max(1, 2*radius-1) pixels at 200/576 mm per pixel"
+      }
+    },
+    {
+      "region": "arms",
+      "bounds_pixels": [
+        115,
+        235,
+        350,
+        372
+      ],
+      "changed_pixels": 735,
+      "before_positive_dark_contours": {
+        "medial_samples": 954,
+        "samples_below_1_2mm": 284,
+        "percent_below_1_2mm": 29.769392033542978,
+        "minimum_mm": 1.0416666269302368,
+        "p10_mm": 1.0416666269302368,
+        "median_mm": 1.736111044883728,
+        "p90_mm": 1.872847080230713,
+        "maximum_mm": 3.819444179534912,
+        "method": "local maxima of an L2 distance transform; occupied raster width estimated as max(1, 2*radius-1) pixels at 200/576 mm per pixel"
+      },
+      "after_positive_dark_contours": {
+        "medial_samples": 923,
+        "samples_below_1_2mm": 167,
+        "percent_below_1_2mm": 18.0931744312026,
+        "minimum_mm": 1.0416666269302368,
+        "p10_mm": 1.0416666269302368,
+        "median_mm": 1.736111044883728,
+        "p90_mm": 2.567291498184204,
+        "maximum_mm": 3.819444179534912,
+        "method": "local maxima of an L2 distance transform; occupied raster width estimated as max(1, 2*radius-1) pixels at 200/576 mm per pixel"
+      }
+    },
+    {
+      "region": "feet",
+      "bounds_pixels": [
+        125,
+        295,
+        360,
+        412
+      ],
+      "changed_pixels": 423,
+      "before_positive_dark_contours": {
+        "medial_samples": 870,
+        "samples_below_1_2mm": 300,
+        "percent_below_1_2mm": 34.48275862068966,
+        "minimum_mm": 0.3472222089767456,
+        "p10_mm": 1.0416666269302368,
+        "median_mm": 1.736111044883728,
+        "p90_mm": 1.872847080230713,
+        "maximum_mm": 3.819444179534912,
+        "method": "local maxima of an L2 distance transform; occupied raster width estimated as max(1, 2*radius-1) pixels at 200/576 mm per pixel"
+      },
+      "after_positive_dark_contours": {
+        "medial_samples": 841,
+        "samples_below_1_2mm": 218,
+        "percent_below_1_2mm": 25.921521997621877,
+        "minimum_mm": 0.3472222089767456,
+        "p10_mm": 1.0416666269302368,
+        "median_mm": 1.736111044883728,
+        "p90_mm": 2.4305553436279297,
+        "maximum_mm": 3.819444179534912,
+        "method": "local maxima of an L2 distance transform; occupied raster width estimated as max(1, 2*radius-1) pixels at 200/576 mm per pixel"
+      }
+    },
+    {
+      "region": "tail",
+      "bounds_pixels": [
+        12,
+        245,
+        155,
+        392
+      ],
+      "changed_pixels": 626,
+      "before_positive_dark_contours": {
+        "medial_samples": 727,
+        "samples_below_1_2mm": 177,
+        "percent_below_1_2mm": 24.346629986244842,
+        "minimum_mm": 0.3472222089767456,
+        "p10_mm": 1.0416666269302368,
+        "median_mm": 1.736111044883728,
+        "p90_mm": 1.872847080230713,
+        "maximum_mm": 3.9561803340911865,
+        "method": "local maxima of an L2 distance transform; occupied raster width estimated as max(1, 2*radius-1) pixels at 200/576 mm per pixel"
+      },
+      "after_positive_dark_contours": {
+        "medial_samples": 698,
+        "samples_below_1_2mm": 37,
+        "percent_below_1_2mm": 5.300859598853868,
+        "minimum_mm": 0.3472222089767456,
+        "p10_mm": 1.597222089767456,
+        "median_mm": 1.736111044883728,
+        "p90_mm": 2.4305553436279297,
+        "maximum_mm": 3.9561803340911865,
+        "method": "local maxima of an L2 distance transform; occupied raster width estimated as max(1, 2*radius-1) pixels at 200/576 mm per pixel"
+      }
+    },
+    {
+      "region": "leaf",
+      "bounds_pixels": [
+        22,
+        325,
+        478,
+        474
+      ],
+      "changed_pixels": 370,
+      "before_positive_dark_contours": {
+        "medial_samples": 1706,
+        "samples_below_1_2mm": 388,
+        "percent_below_1_2mm": 22.743259085580306,
+        "minimum_mm": 0.3472222089767456,
+        "p10_mm": 1.0416666269302368,
+        "median_mm": 1.736111044883728,
+        "p90_mm": 1.736111044883728,
+        "maximum_mm": 3.819444179534912,
+        "method": "local maxima of an L2 distance transform; occupied raster width estimated as max(1, 2*radius-1) pixels at 200/576 mm per pixel"
+      },
+      "after_positive_dark_contours": {
+        "medial_samples": 1673,
+        "samples_below_1_2mm": 293,
+        "percent_below_1_2mm": 17.513448894202032,
+        "minimum_mm": 0.3472222089767456,
+        "p10_mm": 1.0416666269302368,
+        "median_mm": 1.736111044883728,
+        "p90_mm": 1.872847080230713,
+        "maximum_mm": 3.819444179534912,
+        "method": "local maxima of an L2 distance transform; occupied raster width estimated as max(1, 2*radius-1) pixels at 200/576 mm per pixel"
+      }
+    }
+  ],
+  "negative_openings": {
+    "warning_count_by_physical_sheet": 29,
+    "unique_warning_geometries": 9,
+    "classification_counts": {
+      "UNRELATED_SINGLE_PIXEL_HOLE": 19,
+      "NARROW_NON_DARK_COLOR_OPENING": 9,
+      "VISIBLE_DARK_CONTOUR_OR_DETAIL_OPENING": 1
+    },
+    "unique_geometry_counts_by_classification": {
+      "UNRELATED_SINGLE_PIXEL_HOLE": 4,
+      "NARROW_NON_DARK_COLOR_OPENING": 4,
+      "VISIBLE_DARK_CONTOUR_OR_DETAIL_OPENING": 1
+    },
+    "records": [
+      {
+        "layer_index_back_to_front": 1,
+        "layer_color": "#4B98CF",
+        "component": 3,
+        "bounds_outer_pixels": [
+          82,
+          317,
+          1,
+          1
+        ],
+        "bounds_artwork_pixels": [
+          50,
+          285,
+          1,
+          1
+        ],
+        "area_pixels": 1,
+        "exposed_target_colors": {
+          "#276DA3": 1
+        },
+        "classification": "UNRELATED_SINGLE_PIXEL_HOLE",
+        "before_effective_raster_width_mm": 0.3472222222222222,
+        "after_effective_raster_width_mm": 0.3472222222222222,
+        "proposal_changed_this_opening": false
+      },
+      {
+        "layer_index_back_to_front": 1,
+        "layer_color": "#4B98CF",
+        "component": 8,
+        "bounds_outer_pixels": [
+          466,
+          412,
+          1,
+          1
+        ],
+        "bounds_artwork_pixels": [
+          434,
+          380,
+          1,
+          1
+        ],
+        "area_pixels": 1,
+        "exposed_target_colors": {
+          "#276DA3": 1
+        },
+        "classification": "UNRELATED_SINGLE_PIXEL_HOLE",
+        "before_effective_raster_width_mm": 0.3472222222222222,
+        "after_effective_raster_width_mm": 0.3472222222222222,
+        "proposal_changed_this_opening": false
+      },
+      {
+        "layer_index_back_to_front": 1,
+        "layer_color": "#4B98CF",
+        "component": 9,
+        "bounds_outer_pixels": [
+          349,
+          436,
+          1,
+          1
+        ],
+        "bounds_artwork_pixels": [
+          317,
+          404,
+          1,
+          1
+        ],
+        "area_pixels": 1,
+        "exposed_target_colors": {
+          "#276DA3": 1
+        },
+        "classification": "UNRELATED_SINGLE_PIXEL_HOLE",
+        "before_effective_raster_width_mm": 0.3472222222222222,
+        "after_effective_raster_width_mm": 0.3472222222222222,
+        "proposal_changed_this_opening": false
+      },
+      {
+        "layer_index_back_to_front": 2,
+        "layer_color": "#90C6E1",
+        "component": 1,
+        "bounds_outer_pixels": [
+          199,
+          114,
+          24,
+          1
+        ],
+        "bounds_artwork_pixels": [
+          167,
+          82,
+          24,
+          1
+        ],
+        "area_pixels": 24,
+        "exposed_target_colors": {
+          "#4B98CF": 24
+        },
+        "classification": "NARROW_NON_DARK_COLOR_OPENING",
+        "before_effective_raster_width_mm": 0.3472222222222222,
+        "after_effective_raster_width_mm": 0.3472222222222222,
+        "proposal_changed_this_opening": false
+      },
+      {
+        "layer_index_back_to_front": 2,
+        "layer_color": "#90C6E1",
+        "component": 2,
+        "bounds_outer_pixels": [
+          66,
+          180,
+          56,
+          1
+        ],
+        "bounds_artwork_pixels": [
+          34,
+          148,
+          56,
+          1
+        ],
+        "area_pixels": 56,
+        "exposed_target_colors": {
+          "#4B98CF": 56
+        },
+        "classification": "NARROW_NON_DARK_COLOR_OPENING",
+        "before_effective_raster_width_mm": 0.3472222222222222,
+        "after_effective_raster_width_mm": 0.3472222222222222,
+        "proposal_changed_this_opening": false
+      },
+      {
+        "layer_index_back_to_front": 2,
+        "layer_color": "#90C6E1",
+        "component": 4,
+        "bounds_outer_pixels": [
+          349,
+          436,
+          1,
+          1
+        ],
+        "bounds_artwork_pixels": [
+          317,
+          404,
+          1,
+          1
+        ],
+        "area_pixels": 1,
+        "exposed_target_colors": {
+          "#276DA3": 1
+        },
+        "classification": "UNRELATED_SINGLE_PIXEL_HOLE",
+        "before_effective_raster_width_mm": 0.3472222222222222,
+        "after_effective_raster_width_mm": 0.3472222222222222,
+        "proposal_changed_this_opening": false
+      },
+      {
+        "layer_index_back_to_front": 3,
+        "layer_color": "#F1D748",
+        "component": 1,
+        "bounds_outer_pixels": [
+          135,
+          114,
+          88,
+          1
+        ],
+        "bounds_artwork_pixels": [
+          103,
+          82,
+          88,
+          1
+        ],
+        "area_pixels": 88,
+        "exposed_target_colors": {
+          "#90C6E1": 64,
+          "#4B98CF": 24
+        },
+        "classification": "NARROW_NON_DARK_COLOR_OPENING",
+        "before_effective_raster_width_mm": 0.3472222222222222,
+        "after_effective_raster_width_mm": 0.3472222222222222,
+        "proposal_changed_this_opening": false
+      },
+      {
+        "layer_index_back_to_front": 3,
+        "layer_color": "#F1D748",
+        "component": 2,
+        "bounds_outer_pixels": [
+          394,
+          136,
+          38,
+          1
+        ],
+        "bounds_artwork_pixels": [
+          362,
+          104,
+          38,
+          1
+        ],
+        "area_pixels": 38,
+        "exposed_target_colors": {
+          "#90C6E1": 38
+        },
+        "classification": "NARROW_NON_DARK_COLOR_OPENING",
+        "before_effective_raster_width_mm": 0.3472222222222222,
+        "after_effective_raster_width_mm": 0.3472222222222222,
+        "proposal_changed_this_opening": false
+      },
+      {
+        "layer_index_back_to_front": 3,
+        "layer_color": "#F1D748",
+        "component": 3,
+        "bounds_outer_pixels": [
+          66,
+          180,
+          56,
+          1
+        ],
+        "bounds_artwork_pixels": [
+          34,
+          148,
+          56,
+          1
+        ],
+        "area_pixels": 56,
+        "exposed_target_colors": {
+          "#4B98CF": 56
+        },
+        "classification": "NARROW_NON_DARK_COLOR_OPENING",
+        "before_effective_raster_width_mm": 0.3472222222222222,
+        "after_effective_raster_width_mm": 0.3472222222222222,
+        "proposal_changed_this_opening": false
+      },
+      {
+        "layer_index_back_to_front": 3,
+        "layer_color": "#F1D748",
+        "component": 10,
+        "bounds_outer_pixels": [
+          349,
+          436,
+          1,
+          1
+        ],
+        "bounds_artwork_pixels": [
+          317,
+          404,
+          1,
+          1
+        ],
+        "area_pixels": 1,
+        "exposed_target_colors": {
+          "#276DA3": 1
+        },
+        "classification": "UNRELATED_SINGLE_PIXEL_HOLE",
+        "before_effective_raster_width_mm": 0.3472222222222222,
+        "after_effective_raster_width_mm": 0.3472222222222222,
+        "proposal_changed_this_opening": false
+      },
+      {
+        "layer_index_back_to_front": 4,
+        "layer_color": "#F6F6F6",
+        "component": 2,
+        "bounds_outer_pixels": [
+          135,
+          114,
+          88,
+          1
+        ],
+        "bounds_artwork_pixels": [
+          103,
+          82,
+          88,
+          1
+        ],
+        "area_pixels": 88,
+        "exposed_target_colors": {
+          "#90C6E1": 64,
+          "#4B98CF": 24
+        },
+        "classification": "NARROW_NON_DARK_COLOR_OPENING",
+        "before_effective_raster_width_mm": 0.3472222222222222,
+        "after_effective_raster_width_mm": 0.3472222222222222,
+        "proposal_changed_this_opening": false
+      },
+      {
+        "layer_index_back_to_front": 4,
+        "layer_color": "#F6F6F6",
+        "component": 3,
+        "bounds_outer_pixels": [
+          394,
+          136,
+          38,
+          1
+        ],
+        "bounds_artwork_pixels": [
+          362,
+          104,
+          38,
+          1
+        ],
+        "area_pixels": 38,
+        "exposed_target_colors": {
+          "#90C6E1": 38
+        },
+        "classification": "NARROW_NON_DARK_COLOR_OPENING",
+        "before_effective_raster_width_mm": 0.3472222222222222,
+        "after_effective_raster_width_mm": 0.3472222222222222,
+        "proposal_changed_this_opening": true
+      },
+      {
+        "layer_index_back_to_front": 4,
+        "layer_color": "#F6F6F6",
+        "component": 4,
+        "bounds_outer_pixels": [
+          66,
+          180,
+          56,
+          1
+        ],
+        "bounds_artwork_pixels": [
+          34,
+          148,
+          56,
+          1
+        ],
+        "area_pixels": 56,
+        "exposed_target_colors": {
+          "#4B98CF": 56
+        },
+        "classification": "NARROW_NON_DARK_COLOR_OPENING",
+        "before_effective_raster_width_mm": 0.3472222222222222,
+        "after_effective_raster_width_mm": 0.3472222222222222,
+        "proposal_changed_this_opening": false
+      },
+      {
+        "layer_index_back_to_front": 4,
+        "layer_color": "#F6F6F6",
+        "component": 12,
+        "bounds_outer_pixels": [
+          178,
+          354,
+          1,
+          1
+        ],
+        "bounds_artwork_pixels": [
+          146,
+          322,
+          1,
+          1
+        ],
+        "area_pixels": 1,
+        "exposed_target_colors": {
+          "#F1D748": 1
+        },
+        "classification": "UNRELATED_SINGLE_PIXEL_HOLE",
+        "before_effective_raster_width_mm": 0.3472222222222222,
+        "after_effective_raster_width_mm": 0.3472222222222222,
+        "proposal_changed_this_opening": false
+      },
+      {
+        "layer_index_back_to_front": 4,
+        "layer_color": "#F6F6F6",
+        "component": 17,
+        "bounds_outer_pixels": [
+          349,
+          436,
+          1,
+          1
+        ],
+        "bounds_artwork_pixels": [
+          317,
+          404,
+          1,
+          1
+        ],
+        "area_pixels": 1,
+        "exposed_target_colors": {
+          "#276DA3": 1
+        },
+        "classification": "UNRELATED_SINGLE_PIXEL_HOLE",
+        "before_effective_raster_width_mm": 0.3472222222222222,
+        "after_effective_raster_width_mm": 0.3472222222222222,
+        "proposal_changed_this_opening": false
+      },
+      {
+        "layer_index_back_to_front": 5,
+        "layer_color": "#0E0F0D",
+        "component": 5,
+        "bounds_outer_pixels": [
+          66,
+          180,
+          56,
+          1
+        ],
+        "bounds_artwork_pixels": [
+          34,
+          148,
+          56,
+          1
+        ],
+        "area_pixels": 56,
+        "exposed_target_colors": {
+          "#4B98CF": 56
+        },
+        "classification": "NARROW_NON_DARK_COLOR_OPENING",
+        "before_effective_raster_width_mm": 0.3472222222222222,
+        "after_effective_raster_width_mm": 0.3472222222222222,
+        "proposal_changed_this_opening": false
+      },
+      {
+        "layer_index_back_to_front": 5,
+        "layer_color": "#0E0F0D",
+        "component": 16,
+        "bounds_outer_pixels": [
+          178,
+          354,
+          1,
+          1
+        ],
+        "bounds_artwork_pixels": [
+          146,
+          322,
+          1,
+          1
+        ],
+        "area_pixels": 1,
+        "exposed_target_colors": {
+          "#F1D748": 1
+        },
+        "classification": "UNRELATED_SINGLE_PIXEL_HOLE",
+        "before_effective_raster_width_mm": 0.3472222222222222,
+        "after_effective_raster_width_mm": 0.3472222222222222,
+        "proposal_changed_this_opening": false
+      },
+      {
+        "layer_index_back_to_front": 5,
+        "layer_color": "#0E0F0D",
+        "component": 21,
+        "bounds_outer_pixels": [
+          349,
+          436,
+          1,
+          1
+        ],
+        "bounds_artwork_pixels": [
+          317,
+          404,
+          1,
+          1
+        ],
+        "area_pixels": 1,
+        "exposed_target_colors": {
+          "#276DA3": 1
+        },
+        "classification": "UNRELATED_SINGLE_PIXEL_HOLE",
+        "before_effective_raster_width_mm": 0.3472222222222222,
+        "after_effective_raster_width_mm": 0.3472222222222222,
+        "proposal_changed_this_opening": false
+      },
+      {
+        "layer_index_back_to_front": 6,
+        "layer_color": "#90C6E1",
+        "component": 7,
+        "bounds_outer_pixels": [
+          268,
+          243,
+          7,
+          7
+        ],
+        "bounds_artwork_pixels": [
+          236,
+          211,
+          7,
+          7
+        ],
+        "area_pixels": 24,
+        "exposed_target_colors": {
+          "#0E0F0D": 24
+        },
+        "classification": "VISIBLE_DARK_CONTOUR_OR_DETAIL_OPENING",
+        "before_effective_raster_width_mm": 0.6249999271498786,
+        "after_effective_raster_width_mm": 0.6249999403953552,
+        "proposal_changed_this_opening": false
+      },
+      {
+        "layer_index_back_to_front": 6,
+        "layer_color": "#90C6E1",
+        "component": 18,
+        "bounds_outer_pixels": [
+          178,
+          354,
+          1,
+          1
+        ],
+        "bounds_artwork_pixels": [
+          146,
+          322,
+          1,
+          1
+        ],
+        "area_pixels": 1,
+        "exposed_target_colors": {
+          "#F1D748": 1
+        },
+        "classification": "UNRELATED_SINGLE_PIXEL_HOLE",
+        "before_effective_raster_width_mm": 0.3472222222222222,
+        "after_effective_raster_width_mm": 0.3472222222222222,
+        "proposal_changed_this_opening": false
+      },
+      {
+        "layer_index_back_to_front": 6,
+        "layer_color": "#90C6E1",
+        "component": 23,
+        "bounds_outer_pixels": [
+          349,
+          436,
+          1,
+          1
+        ],
+        "bounds_artwork_pixels": [
+          317,
+          404,
+          1,
+          1
+        ],
+        "area_pixels": 1,
+        "exposed_target_colors": {
+          "#276DA3": 1
+        },
+        "classification": "UNRELATED_SINGLE_PIXEL_HOLE",
+        "before_effective_raster_width_mm": 0.3472222222222222,
+        "after_effective_raster_width_mm": 0.3472222222222222,
+        "proposal_changed_this_opening": false
+      },
+      {
+        "layer_index_back_to_front": 7,
+        "layer_color": "#5DA146",
+        "component": 13,
+        "bounds_outer_pixels": [
+          178,
+          354,
+          1,
+          1
+        ],
+        "bounds_artwork_pixels": [
+          146,
+          322,
+          1,
+          1
+        ],
+        "area_pixels": 1,
+        "exposed_target_colors": {
+          "#F1D748": 1
+        },
+        "classification": "UNRELATED_SINGLE_PIXEL_HOLE",
+        "before_effective_raster_width_mm": 0.3472222222222222,
+        "after_effective_raster_width_mm": 0.3472222222222222,
+        "proposal_changed_this_opening": false
+      },
+      {
+        "layer_index_back_to_front": 7,
+        "layer_color": "#5DA146",
+        "component": 18,
+        "bounds_outer_pixels": [
+          349,
+          436,
+          1,
+          1
+        ],
+        "bounds_artwork_pixels": [
+          317,
+          404,
+          1,
+          1
+        ],
+        "area_pixels": 1,
+        "exposed_target_colors": {
+          "#276DA3": 1
+        },
+        "classification": "UNRELATED_SINGLE_PIXEL_HOLE",
+        "before_effective_raster_width_mm": 0.3472222222222222,
+        "after_effective_raster_width_mm": 0.3472222222222222,
+        "proposal_changed_this_opening": false
+      },
+      {
+        "layer_index_back_to_front": 8,
+        "layer_color": "#986840",
+        "component": 20,
+        "bounds_outer_pixels": [
+          178,
+          354,
+          1,
+          1
+        ],
+        "bounds_artwork_pixels": [
+          146,
+          322,
+          1,
+          1
+        ],
+        "area_pixels": 1,
+        "exposed_target_colors": {
+          "#F1D748": 1
+        },
+        "classification": "UNRELATED_SINGLE_PIXEL_HOLE",
+        "before_effective_raster_width_mm": 0.3472222222222222,
+        "after_effective_raster_width_mm": 0.3472222222222222,
+        "proposal_changed_this_opening": false
+      },
+      {
+        "layer_index_back_to_front": 8,
+        "layer_color": "#986840",
+        "component": 26,
+        "bounds_outer_pixels": [
+          349,
+          436,
+          1,
+          1
+        ],
+        "bounds_artwork_pixels": [
+          317,
+          404,
+          1,
+          1
+        ],
+        "area_pixels": 1,
+        "exposed_target_colors": {
+          "#276DA3": 1
+        },
+        "classification": "UNRELATED_SINGLE_PIXEL_HOLE",
+        "before_effective_raster_width_mm": 0.3472222222222222,
+        "after_effective_raster_width_mm": 0.3472222222222222,
+        "proposal_changed_this_opening": false
+      },
+      {
+        "layer_index_back_to_front": 9,
+        "layer_color": "#17334B",
+        "component": 24,
+        "bounds_outer_pixels": [
+          178,
+          354,
+          1,
+          1
+        ],
+        "bounds_artwork_pixels": [
+          146,
+          322,
+          1,
+          1
+        ],
+        "area_pixels": 1,
+        "exposed_target_colors": {
+          "#F1D748": 1
+        },
+        "classification": "UNRELATED_SINGLE_PIXEL_HOLE",
+        "before_effective_raster_width_mm": 0.3472222222222222,
+        "after_effective_raster_width_mm": 0.3472222222222222,
+        "proposal_changed_this_opening": false
+      },
+      {
+        "layer_index_back_to_front": 9,
+        "layer_color": "#17334B",
+        "component": 30,
+        "bounds_outer_pixels": [
+          349,
+          436,
+          1,
+          1
+        ],
+        "bounds_artwork_pixels": [
+          317,
+          404,
+          1,
+          1
+        ],
+        "area_pixels": 1,
+        "exposed_target_colors": {
+          "#276DA3": 1
+        },
+        "classification": "UNRELATED_SINGLE_PIXEL_HOLE",
+        "before_effective_raster_width_mm": 0.3472222222222222,
+        "after_effective_raster_width_mm": 0.3472222222222222,
+        "proposal_changed_this_opening": false
+      },
+      {
+        "layer_index_back_to_front": 10,
+        "layer_color": "#0E0F0D",
+        "component": 24,
+        "bounds_outer_pixels": [
+          178,
+          354,
+          1,
+          1
+        ],
+        "bounds_artwork_pixels": [
+          146,
+          322,
+          1,
+          1
+        ],
+        "area_pixels": 1,
+        "exposed_target_colors": {
+          "#F1D748": 1
+        },
+        "classification": "UNRELATED_SINGLE_PIXEL_HOLE",
+        "before_effective_raster_width_mm": 0.3472222222222222,
+        "after_effective_raster_width_mm": 0.3472222222222222,
+        "proposal_changed_this_opening": false
+      },
+      {
+        "layer_index_back_to_front": 10,
+        "layer_color": "#0E0F0D",
+        "component": 30,
+        "bounds_outer_pixels": [
+          349,
+          436,
+          1,
+          1
+        ],
+        "bounds_artwork_pixels": [
+          317,
+          404,
+          1,
+          1
+        ],
+        "area_pixels": 1,
+        "exposed_target_colors": {
+          "#276DA3": 1
+        },
+        "classification": "UNRELATED_SINGLE_PIXEL_HOLE",
+        "before_effective_raster_width_mm": 0.3472222222222222,
+        "after_effective_raster_width_mm": 0.3472222222222222,
+        "proposal_changed_this_opening": false
+      }
+    ],
+    "note": "The same physical opening can recur in several cumulative sheets; warning count and unique geometry count are therefore different."
+  },
+  "structural_validation": {
+    "four_neighbor_failing_layers": 0,
+    "orphan_structural_core_failing_layers": 0,
+    "missing_shared_perimeter_pixels": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "thin_decorative_warnings": 7,
+    "visible_components_outside_restored_support": 3
+  },
+  "visual_review": {
+    "preserved": [
+      "overall turtle and leaf silhouette",
+      "eye shapes and highlights",
+      "facial expression at normal viewing size",
+      "shell, limbs, tail, leaf, mountain, clouds, and water remain recognizable",
+      "palette and layer color order are unchanged"
+    ],
+    "unacceptable_or_incomplete": [
+      "mouth and several internal dark strokes remain below 1.2 mm",
+      "the dark facial opening warning remains unchanged below 1.2 mm",
+      "404 non-dark pixels alter colored boundaries for structural repair rather than contour normalization",
+      "localized black widening is asymmetric/jagged at the mountain, shoreline, limbs, shell, and leaf veins",
+      "seven thin-decorative warnings remain after the proposal"
+    ]
+  },
+  "recommendation_reason": "REVISE: the proposal preserves identity and fixes orphan structural cores, but it neither enforces 1.2 mm on all visible positive and negative contours nor limits changes to clean contour normalization."
+}

@@ -87,3 +87,71 @@ blocked.
 ## Decision log protocol
 
 Append immutable decisions with: ID, date, question, chosen option, evidence vs assumption, impact, status. Do not silently replace historical entries or turn open questions into requirements.
+
+## D-V3-011 | 2026-10-19 | Exact-prefix geometry feedback scope
+
+**Status:** VERIFIED EXPERIMENTAL EVIDENCE; not a product approval.
+
+For the fixed-depth global planner, a cumulative physical mask is determined by
+the exact set of source regions assigned at or before that depth. When that mask
+fails the unchanged physical validator, a no-good cut excluding only that exact
+region-set/depth pair is sound; it does not exclude different assignments or
+orders. In the bounded turtle recovery run, 166 such cuts across 20 assignments
+did not yield a valid stack. This is an `UNKNOWN` bounded result, not proof of
+geometric infeasibility. The current backend's `fixed_layers=12` means exactly
+12 non-empty layers, not an up-to-12 ceiling, and connected visible regions
+cannot yet be split across depths.
+
+## D-V3-012 | 2026-10-20 | Thin geometry requires role-separated evidence
+
+**Status:** PROPOSED FOR USER REVIEW; production behavior unchanged.
+
+Direct mesh analysis of the Pikachu reference verifies three different cases:
+terminal retained features below 1.2 mm, narrow negative openings, and narrow
+sole attachments that produce orphan structural cores. The current erosion
+validator correctly detects the third case but does not separately report thin
+terminal branches embedded in a larger connected component, and it intentionally
+does not evaluate opening printability. The proposed next checkpoint is a
+diagnostic core-and-connector role graph alongside the current validator. The
+1.2 mm rule remains unchanged unless the user later approves a policy change.
+
+## D-V3-013 | 2026-10-20 | Automatic width repair may use hidden additions only
+
+**Status:** VERIFIED EXPERIMENTAL POLICY; turtle result unresolved.
+
+A fixed-stack retained-width repair may add material only where an already
+existing more-forward physical sheet occludes that addition. The implementation
+locates actual narrow attachment paths within retained material and widens those
+paths; it does not globally dilate a sheet, change a reported measurement, or
+bridge an opening. The 200 mm turtle stack has zero such unused hidden pixels
+because its masks are cumulative and maximally filled under their foreground
+prefixes. Consequently, the exact-preserving attempt cannot repair its seven
+remaining failures. The visual-change proposal is evidence of repair mechanics,
+not an approved target or valid exact stack.
+
+## D-V3-014 | 2026-10-20 | Explicit contour normalization may change pixels
+
+**Status:** USER-REQUIRED; proposal still awaiting revision and approval.
+
+Exact equality to the original indexed illustration is not mandatory when the
+user explicitly authorizes widening visible contours to a physical minimum.
+Such changes must be measured at final print scale, visually reviewed, and
+preserved as a distinct proposed normalized target. Positive retained contours
+and negative openings exposing darker backing material require separate width
+measurements. The current turtle proposal is not accepted because it leaves
+sub-threshold visible details and includes non-dark structural changes beyond
+clean contour normalization.
+
+## D-V3-015 | 2026-10-20 | Visual contours normalize before physical construction
+
+**Status:** VERIFIED EXPERIMENTAL METHOD; candidate requires user revision/review.
+
+Visible contour normalization is a visual-target operation, separate from both
+retained-material repair and opening printability. The experimental operator
+traces complete centerline graph segments, measures them at the specified print
+scale, preserves filled dark regions, and applies only the existing contour
+color. It rejects any widening that would merge a distinct dark component or
+change another palette color's component topology. On the turtle target this
+prevents the asymmetric structural-repair bulges but leaves four topology
+conflicts and four thin micro-junctions unresolved; therefore the candidate is
+not automatically adopted and L1 remains unapproved.

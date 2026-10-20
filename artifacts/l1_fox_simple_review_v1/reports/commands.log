@@ -1,3 +1,0 @@
-PYTHONPATH=src .venv/Scripts/python.exe -c "analyze fox_simple_input.png; run_actual_planner; write focused summaries"
-PYTHONPATH=src .venv/Scripts/python.exe scripts/package_simple_fox_review.py
-PYTHONPATH=src .venv/Scripts/python.exe -m pytest tests/test_simple_fox_review.py -q

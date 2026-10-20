@@ -65,3 +65,48 @@ Status: `BLOCKED_BY_L-1`.
 - Separate frame/slot/stand designer.
 - Multicolor physical layers, more advanced indexing/registration.
 - AI proposals for complex flat illustrations, real photographs only beyond V1.
+
+## Experimental L1 evidence note — 2026-10-19
+
+By explicit user direction, a bounded global-planner diagnostic was run without
+advancing or approving a milestone. The turtle candidate has eight retained-width
+failures despite exact visual reconstruction. Twenty alternate fixed-12-depth
+assignments were checked; none passed all physical validators within the single
+bounded run. Status remains `READY_FOR_USER_TEST`; L1 is NOT APPROVED.
+
+## Experimental L1 evidence note — 2026-10-20
+
+The Pikachu 3MF thin-geometry checkpoint directly measured nine artwork meshes.
+Five pass the current retained-width validator and four contain orphan cores at
+the 1.2 mm rule. Thin terminal material and narrow negative openings also exist
+and require separate classifications. No validator, planner, source image, CAD
+export, or milestone status was changed. L1 remains NOT APPROVED.
+
+## Experimental L1 width-repair evidence note — 2026-10-20
+
+The corrected 200 mm turtle audit passes five sheets and fails seven. The new
+hidden-only width-repair operator preserves the subtractive construction model,
+but this particular cumulative stack has no unused occluded fill capacity. The
+exact reconstruction therefore remains unresolved. A clearly separated visual
+proposal passes the mask validators while changing 4,075 visible pixels and is
+not approved. No planner, palette, source, CAD, or milestone was advanced.
+
+## Experimental L1 visible-width review note — 2026-10-20
+
+The user clarified that controlled visible contour widening is permitted. The
+existing turtle proposal was reviewed as a potential normalized target, without
+regeneration. It preserves overall identity and passes the structural-core
+checks, but does not normalize every positive or negative visible contour to
+1.2 mm and includes 404 non-dark structural boundary changes. Recommendation:
+`REVISE`; L1 remains NOT APPROVED.
+
+## Experimental L1 contour-normalization note — 2026-10-20
+
+The approved implementation scope produced one candidate directly from the
+original indexed turtle artwork. Complete deficient centerline segments are
+widened on a 4x physical measurement grid, while proposals that would change
+color-region topology are rejected. The sun arc is visually uniform and 30
+segments were normalized, but four topology conflicts plus four thin
+micro-junctions remain unresolved. Recommendation is `REVISE`; no planner,
+physical layer, CP-SAT, CAD, STL, STEP, GUI, or milestone state changed. L1
+remains NOT APPROVED.

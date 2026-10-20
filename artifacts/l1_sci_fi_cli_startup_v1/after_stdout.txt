@@ -1,2 +1,0 @@
-{"event": "CLI_IMPORT_START", "timestamp_utc": "2026-10-18T18:54:23.343054+00:00"}
-{"event": "CLI_IMPORT_END", "timestamp_utc": "2026-10-18T18:54:23.430430+00:00", "elapsed_seconds": 0.08789249998517334}

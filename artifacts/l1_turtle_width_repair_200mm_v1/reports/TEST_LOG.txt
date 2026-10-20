@@ -1,0 +1,33 @@
+LayerForge turtle retained-width repair checkpoint
+Date: 2026-10-20
+
+PASS
+  PYTHONPATH=src .venv/Scripts/python.exe -m py_compile
+    src/layerforge_l1/hidden_width_repair.py
+    scripts/repair_turtle_width_200mm.py
+
+PASS
+  PYTHONPATH=src .venv/Scripts/python.exe -m pytest
+    tests/test_hidden_width_repair.py -q
+  Result: 3 passed in 0.28s
+
+PASS
+  PYTHONPATH=src .venv/Scripts/python.exe -u
+    scripts/repair_turtle_width_200mm.py
+  Result: 5 sheets pass at 200 mm; 7 exact-preserving failures remain;
+          visible-change proposal has 0 structural-width failures but changes
+          4,075 target pixels and is not approved.
+
+PASS
+  Artifact assertions: exact-preserving target equality, recorded 4,075-pixel
+  proposal difference, zero proposal 4-neighbor failures, and zero missing
+  perimeter pixels on all 12 sheets.
+
+UNRELATED FAILURES (not caused by this checkpoint)
+  pytest tests/test_hidden_width_repair.py tests/test_width_diagnostics.py -q
+  Result: 5 passed, 5 failed. All five failures are FileNotFoundError for
+  previously deleted historical artifacts/l1_width_diagnostics_v2 fox/bear
+  reports. The focused new repair tests pass.
+
+SKIP
+  CAD/STL/STEP, physical printing, planner search: outside authorized scope.

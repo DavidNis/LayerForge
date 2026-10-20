@@ -1,0 +1,31 @@
+LayerForge turtle 200 mm visible-width review
+Date: 2026-10-20
+
+PASS
+  PYTHONPATH=src .venv/Scripts/python.exe -m py_compile
+    scripts/review_turtle_width_repair_200mm.py
+
+PASS
+  PYTHONPATH=src .venv/Scripts/python.exe -u
+    scripts/review_turtle_width_repair_200mm.py
+  Result: reviewed the existing proposal without modifying or regenerating it.
+
+PASS
+  Review assertions:
+    - 4,075 changed visible pixels reproduced.
+    - 3,670 positive dark-contour additions.
+    - 404 non-dark structural changes.
+    - 1 dark-color substitution.
+    - 29 opening warnings classified across 9 unique geometries.
+    - Existing proposal retains zero 4-neighbor and orphan-core failures.
+    - Recommendation is REVISE.
+
+INPUT SHA-256
+  Original front:
+    7783f91cca9cbe2bd619d8a816827db6a6d231d2818db023305dd7c0325b9a13
+  Existing repair proposal:
+    ac343debe027f9cf3fce8051cb02762799c3816d64dc6e59b1fd2087b012da94
+
+SKIP
+  New repair generation, layer planning, CAD, STL, STEP, and physical printing:
+  outside this review-only checkpoint.
