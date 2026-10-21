@@ -1,0 +1,81 @@
+layer_00_17334b PASS -> PASS 0
+layer_01_f6f6f6 PASS -> PASS 0
+layer_02_0e0f0d PASS -> PASS 0
+layer_03_f1d748 PASS -> PASS 0
+layer_04_90c6e1 CONFLICT_REQUIRES_USER_DECISION -> PASS 0
+layer_05_5da146 CONFLICT_REQUIRES_USER_DECISION -> PASS 0
+layer_06_4b98cf CONFLICT_REQUIRES_USER_DECISION -> PASS 0
+layer_07_276da3 CONFLICT_REQUIRES_USER_DECISION -> PASS 0
+layer_08_986840 CONFLICT_REQUIRES_USER_DECISION -> PASS 0
+layer_09_0e0f0d CONFLICT_REQUIRES_USER_DECISION -> CONFLICT_REQUIRES_USER_DECISION 76378
+layer_10_4b98cf PASS -> PASS 84
+layer_11_90c6e1 PASS -> PASS 6
+{
+ "width_kernel_mm": 1.26953125,
+ "H1": {
+  "black_components_4conn": 8,
+  "largest_component_share_of_black": 0.8244374186349266,
+  "black_component_areas_px": [
+   26598,
+   1658,
+   1215,
+   1213,
+   997,
+   534,
+   24,
+   23
+  ],
+  "black_area_in_parts_thinner_than_width_kernel_share": 0.05256183745583039,
+  "rejected_stack_black_depths_front_to_back": [
+   2,
+   9
+  ]
+ },
+ "H5_target_admissibility": {
+  "#0E0F0D": {
+   "area_mm2_below_0_8mm": 110.626220703125,
+   "area_mm2_below_1_2mm": 258.75091552734375,
+   "area_mm2": 4922.79052734375
+  },
+  "#17334B": {
+   "area_mm2_below_0_8mm": 7.32421875,
+   "area_mm2_below_1_2mm": 7.32421875,
+   "area_mm2": 7.32421875
+  },
+  "#276DA3": {
+   "area_mm2_below_0_8mm": 25.262832641601562,
+   "area_mm2_below_1_2mm": 47.42622375488281,
+   "area_mm2": 3276.824951171875
+  },
+  "#4B98CF": {
+   "area_mm2_below_0_8mm": 23.965835571289062,
+   "area_mm2_below_1_2mm": 43.010711669921875,
+   "area_mm2": 6873.1689453125
+  },
+  "#5DA146": {
+   "area_mm2_below_0_8mm": 36.00120544433594,
+   "area_mm2_below_1_2mm": 76.12228393554688,
+   "area_mm2": 5032.501220703125
+  },
+  "#90C6E1": {
+   "area_mm2_below_0_8mm": 47.95074462890625,
+   "area_mm2_below_1_2mm": 98.74343872070312,
+   "area_mm2": 13873.291015625
+  },
+  "#986840": {
+   "area_mm2_below_0_8mm": 29.163360595703125,
+   "area_mm2_below_1_2mm": 50.35400390625,
+   "area_mm2": 2171.93603515625
+  },
+  "#F1D748": {
+   "area_mm2_below_0_8mm": 11.892318725585938,
+   "area_mm2_below_1_2mm": 26.674270629882812,
+   "area_mm2": 2258.148193359375
+  },
+  "#F6F6F6": {
+   "area_mm2_below_0_8mm": 10.71929931640625,
+   "area_mm2_below_1_2mm": 26.426315307617188,
+   "area_mm2": 1584.014892578125
+  }
+ }
+}

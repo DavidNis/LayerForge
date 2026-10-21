@@ -110,3 +110,61 @@ segments were normalized, but four topology conflicts plus four thin
 micro-junctions remain unresolved. Recommendation is `REVISE`; no planner,
 physical layer, CP-SAT, CAD, STL, STEP, GUI, or milestone state changed. L1
 remains NOT APPROVED.
+
+## Experimental L1 pre-layer image-preparation note — 2026-10-20
+
+One deterministic 200 mm image-only pass combined centerline-based contour
+normalization with spatially justified cleanup of seven one-pixel contour holes.
+It preserved the nine-color palette and introduced no new tiny components.
+Thirty-one below-threshold contour segments pass after widening; the
+sun/mountain occlusion junction and the small left cloud outline remain
+unresolved to avoid damaging colored-region topology. No layer planning,
+CP-SAT, CAD, STL, STEP, GUI, or milestone advancement occurred. Status is
+`READY_FOR_USER_TEST`; L1 remains NOT APPROVED.
+
+## Experimental L1 post-layer width-repair note - 2026-10-20
+
+The saved 12-sheet turtle proposal now passes the calibrated retained-width,
+four-neighbor, and shared-perimeter checks after deterministic geometry
+widening. The mask-derived composite differs from the locked target by 6,336
+pixels and therefore requires visual approval. This is not CAD/print approval,
+does not establish minimal layer count, and does not advance L1. Status remains
+`READY_FOR_USER_TEST`; L1 is NOT APPROVED.
+
+## Experimental L1 uniform-contour stack note - 2026-10-20
+
+The local structural-neck dilation output is rejected. Its replacement uses
+complete centerline restroking plus cumulative retained/cutout propagation.
+The resulting 12-sheet mask stack passes the current 2D structural checks and
+contains no blob repair, but its 6,264 visible changed pixels require user
+approval. No CAD, STL, STEP, GUI, frame, or milestone advancement occurred.
+Status is `READY_FOR_USER_TEST`; L1 remains NOT APPROVED.
+
+## Experimental L1 physical-width verification note - 2026-10-20
+
+A read-only audit of the saved rejected turtle masks confirmed correct mask
+polarity and one-component sheet connectivity. Six sheets contain retained
+connections that remain below the 1.2 mm rule on a 4x physically calibrated
+diagnostic; the seventh native failure disappears at higher resolution and is a
+raster false positive. No mask, validator, artwork, planner, CAD, STL, STEP, GUI,
+or milestone state was changed. Status remains `READY_FOR_USER_TEST`; L1 is NOT
+APPROVED.
+
+## Experimental L1 final contour-correction note - 2026-10-20
+
+The two remaining reviewed contour paths were locally re-stroked from the
+accepted preprocessing candidate, without rerunning global preprocessing. Both
+now exceed the 1.2 mm visible-contour threshold at a 200 mm print mapping, and
+all changes are confined to the authorized ID 1 and ID 108 neighborhoods. No
+layer planning, CP-SAT, CAD, STL, STEP, GUI, or milestone advancement occurred.
+Status is `PREPROCESSING_READY_FOR_USER_APPROVAL`; L1 remains NOT APPROVED.
+
+## Experimental L1 approved-turtle planning note - 2026-10-20
+
+One bounded global CP-SAT run used the locked corrected turtle image without
+preprocessing changes. Fixed depths 9 through 18 were tested and 35 complete
+assignments reached the geometry oracle; none passed every retained-width check.
+The preserved 12-sheet diagnostic stack is visually exact and 4-connected but
+fails seven sheet-width checks, so it is not a valid deliverable. No CAD, STL,
+STEP, GUI, frame, or milestone advancement occurred. Status is
+`READY_FOR_USER_TEST`; L1 remains NOT APPROVED.

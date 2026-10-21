@@ -1,0 +1,191 @@
+{
+  "config": {
+    "maximum_area_pixels": 16,
+    "maximum_extent_pixels": 6,
+    "dominant_neighbor_ratio": 0.85,
+    "contour_fill_ratio": 0.45,
+    "contour_colors": [
+      [
+        14,
+        15,
+        13
+      ]
+    ]
+  },
+  "tiny_regions_inspected": 7,
+  "tiny_regions_merged": 7,
+  "tiny_regions_preserved_ambiguous": 0,
+  "tiny_dark_details_preserved": 0,
+  "changed_pixels": 7,
+  "palette_before": [
+    "#0E0F0D",
+    "#17334B",
+    "#276DA3",
+    "#4B98CF",
+    "#5DA146",
+    "#90C6E1",
+    "#986840",
+    "#F1D748",
+    "#F6F6F6"
+  ],
+  "palette_after": [
+    "#0E0F0D",
+    "#17334B",
+    "#276DA3",
+    "#4B98CF",
+    "#5DA146",
+    "#90C6E1",
+    "#986840",
+    "#F1D748",
+    "#F6F6F6"
+  ],
+  "palette_entries_removed": [],
+  "palette_entries_added": [],
+  "decisions": [
+    {
+      "component_id_within_color": 1,
+      "source_color": "#17334B",
+      "area_pixels": 1,
+      "bounds_pixels": [
+        281,
+        256,
+        1,
+        1
+      ],
+      "maximum_extent_pixels": 1,
+      "touches_image_border": false,
+      "neighbor_contacts": {
+        "#0E0F0D": 5,
+        "#90C6E1": 3
+      },
+      "dominant_neighbor_color": "#0E0F0D",
+      "dominant_neighbor_ratio": 0.625,
+      "decision": "MERGE_HIGH_CONFIDENCE_CONTOUR_HOLE",
+      "reason": "tiny non-contour island is embedded in a contour boundary with dominant dark contact"
+    },
+    {
+      "component_id_within_color": 3,
+      "source_color": "#276DA3",
+      "area_pixels": 1,
+      "bounds_pixels": [
+        50,
+        285,
+        1,
+        1
+      ],
+      "maximum_extent_pixels": 1,
+      "touches_image_border": false,
+      "neighbor_contacts": {
+        "#0E0F0D": 4,
+        "#4B98CF": 3
+      },
+      "dominant_neighbor_color": "#0E0F0D",
+      "dominant_neighbor_ratio": 0.5714285714285714,
+      "decision": "MERGE_HIGH_CONFIDENCE_CONTOUR_HOLE",
+      "reason": "tiny non-contour island is embedded in a contour boundary with dominant dark contact"
+    },
+    {
+      "component_id_within_color": 8,
+      "source_color": "#276DA3",
+      "area_pixels": 1,
+      "bounds_pixels": [
+        434,
+        380,
+        1,
+        1
+      ],
+      "maximum_extent_pixels": 1,
+      "touches_image_border": false,
+      "neighbor_contacts": {
+        "#0E0F0D": 4,
+        "#4B98CF": 3
+      },
+      "dominant_neighbor_color": "#0E0F0D",
+      "dominant_neighbor_ratio": 0.5714285714285714,
+      "decision": "MERGE_HIGH_CONFIDENCE_CONTOUR_HOLE",
+      "reason": "tiny non-contour island is embedded in a contour boundary with dominant dark contact"
+    },
+    {
+      "component_id_within_color": 9,
+      "source_color": "#276DA3",
+      "area_pixels": 1,
+      "bounds_pixels": [
+        317,
+        404,
+        1,
+        1
+      ],
+      "maximum_extent_pixels": 1,
+      "touches_image_border": false,
+      "neighbor_contacts": {
+        "#0E0F0D": 7
+      },
+      "dominant_neighbor_color": "#0E0F0D",
+      "dominant_neighbor_ratio": 1.0,
+      "decision": "MERGE_HIGH_CONFIDENCE_CONTOUR_HOLE",
+      "reason": "tiny non-contour island is embedded in a contour boundary with dominant dark contact"
+    },
+    {
+      "component_id_within_color": 3,
+      "source_color": "#986840",
+      "area_pixels": 1,
+      "bounds_pixels": [
+        455,
+        259,
+        1,
+        1
+      ],
+      "maximum_extent_pixels": 1,
+      "touches_image_border": false,
+      "neighbor_contacts": {
+        "#0E0F0D": 4,
+        "#5DA146": 3
+      },
+      "dominant_neighbor_color": "#0E0F0D",
+      "dominant_neighbor_ratio": 0.5714285714285714,
+      "decision": "MERGE_HIGH_CONFIDENCE_CONTOUR_HOLE",
+      "reason": "tiny non-contour island is embedded in a contour boundary with dominant dark contact"
+    },
+    {
+      "component_id_within_color": 4,
+      "source_color": "#986840",
+      "area_pixels": 1,
+      "bounds_pixels": [
+        454,
+        260,
+        1,
+        1
+      ],
+      "maximum_extent_pixels": 1,
+      "touches_image_border": false,
+      "neighbor_contacts": {
+        "#0E0F0D": 3,
+        "#5DA146": 3
+      },
+      "dominant_neighbor_color": "#0E0F0D",
+      "dominant_neighbor_ratio": 0.5,
+      "decision": "MERGE_HIGH_CONFIDENCE_CONTOUR_HOLE",
+      "reason": "tiny non-contour island is embedded in a contour boundary with dominant dark contact"
+    },
+    {
+      "component_id_within_color": 5,
+      "source_color": "#F1D748",
+      "area_pixels": 1,
+      "bounds_pixels": [
+        146,
+        322,
+        1,
+        1
+      ],
+      "maximum_extent_pixels": 1,
+      "touches_image_border": false,
+      "neighbor_contacts": {
+        "#0E0F0D": 8
+      },
+      "dominant_neighbor_color": "#0E0F0D",
+      "dominant_neighbor_ratio": 1.0,
+      "decision": "MERGE_HIGH_CONFIDENCE_CONTOUR_HOLE",
+      "reason": "tiny non-contour island is embedded in a contour boundary with dominant dark contact"
+    }
+  ]
+}

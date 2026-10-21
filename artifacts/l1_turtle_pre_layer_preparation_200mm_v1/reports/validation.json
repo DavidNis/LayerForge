@@ -1,0 +1,226 @@
+{
+  "status": "READY_FOR_USER_TEST",
+  "milestone_approval": "L1_NOT_APPROVED",
+  "scope": "PRE_LAYER_IMAGE_PREPARATION_ONLY",
+  "source": {
+    "path": "artifacts\\l1_turtle_width_repair_200mm_v1\\source\\indexed_target.png",
+    "sha256": "7783f91cca9cbe2bd619d8a816827db6a6d231d2818db023305dd7c0325b9a13",
+    "source_overwritten": false,
+    "jpeg_recompression": false
+  },
+  "physical_mapping": {
+    "image_resolution_pixels": [
+      512,
+      512
+    ],
+    "print_size_mm": [
+      200.0,
+      200.0
+    ],
+    "mm_per_pixel": 0.390625,
+    "minimum_contour_width_mm": 1.2,
+    "minimum_contour_width_pixels": 3.072,
+    "analysis_scale": 4,
+    "half_pixel_measurement_uncertainty_mm": 0.1953125
+  },
+  "metrics": {
+    "contour_segments_inspected": 110,
+    "contour_segments_below_threshold": 34,
+    "contour_segments_widened": 31,
+    "unresolved_thin_contour_cases": 2,
+    "filled_dark_regions_excluded_from_contour_rule": 1,
+    "tiny_regions_inspected": 7,
+    "tiny_regions_merged": 7,
+    "tiny_regions_preserved_ambiguous": 0,
+    "tiny_dark_details_preserved": 0,
+    "total_changed_pixels": 1969,
+    "percent_image_modified": 0.7511138916015625,
+    "palette_changed": false,
+    "new_suspicious_tiny_regions_introduced": 0
+  },
+  "change_types": {
+    "tiny_cleanup_pixels_orange": 7,
+    "contour_widening_pixels_magenta": 1962,
+    "total_changed_pixels": 1969
+  },
+  "palette_before": [
+    {
+      "color": "#0E0F0D",
+      "pixels": 29774
+    },
+    {
+      "color": "#17334B",
+      "pixels": 49
+    },
+    {
+      "color": "#276DA3",
+      "pixels": 21750
+    },
+    {
+      "color": "#4B98CF",
+      "pixels": 45100
+    },
+    {
+      "color": "#5DA146",
+      "pixels": 33622
+    },
+    {
+      "color": "#90C6E1",
+      "pixels": 91464
+    },
+    {
+      "color": "#986840",
+      "pixels": 14481
+    },
+    {
+      "color": "#F1D748",
+      "pixels": 15118
+    },
+    {
+      "color": "#F6F6F6",
+      "pixels": 10786
+    }
+  ],
+  "palette_after": [
+    {
+      "color": "#0E0F0D",
+      "pixels": 31743
+    },
+    {
+      "color": "#17334B",
+      "pixels": 48
+    },
+    {
+      "color": "#276DA3",
+      "pixels": 21475
+    },
+    {
+      "color": "#4B98CF",
+      "pixels": 45100
+    },
+    {
+      "color": "#5DA146",
+      "pixels": 33020
+    },
+    {
+      "color": "#90C6E1",
+      "pixels": 91077
+    },
+    {
+      "color": "#986840",
+      "pixels": 14234
+    },
+    {
+      "color": "#F1D748",
+      "pixels": 14845
+    },
+    {
+      "color": "#F6F6F6",
+      "pixels": 10602
+    }
+  ],
+  "components_before": {
+    "#0E0F0D": {
+      "components": 8,
+      "components_at_most_16_pixels": 0
+    },
+    "#17334B": {
+      "components": 3,
+      "components_at_most_16_pixels": 1
+    },
+    "#276DA3": {
+      "components": 11,
+      "components_at_most_16_pixels": 3
+    },
+    "#4B98CF": {
+      "components": 3,
+      "components_at_most_16_pixels": 0
+    },
+    "#5DA146": {
+      "components": 9,
+      "components_at_most_16_pixels": 0
+    },
+    "#90C6E1": {
+      "components": 9,
+      "components_at_most_16_pixels": 0
+    },
+    "#986840": {
+      "components": 8,
+      "components_at_most_16_pixels": 2
+    },
+    "#F1D748": {
+      "components": 7,
+      "components_at_most_16_pixels": 1
+    },
+    "#F6F6F6": {
+      "components": 6,
+      "components_at_most_16_pixels": 0
+    }
+  },
+  "components_after": {
+    "#0E0F0D": {
+      "components": 8,
+      "components_at_most_16_pixels": 0
+    },
+    "#17334B": {
+      "components": 2,
+      "components_at_most_16_pixels": 0
+    },
+    "#276DA3": {
+      "components": 8,
+      "components_at_most_16_pixels": 0
+    },
+    "#4B98CF": {
+      "components": 3,
+      "components_at_most_16_pixels": 0
+    },
+    "#5DA146": {
+      "components": 9,
+      "components_at_most_16_pixels": 0
+    },
+    "#90C6E1": {
+      "components": 9,
+      "components_at_most_16_pixels": 0
+    },
+    "#986840": {
+      "components": 6,
+      "components_at_most_16_pixels": 0
+    },
+    "#F1D748": {
+      "components": 6,
+      "components_at_most_16_pixels": 0
+    },
+    "#F6F6F6": {
+      "components": 6,
+      "components_at_most_16_pixels": 0
+    }
+  },
+  "new_tiny_region_details": [],
+  "tiny_cleanup_decision_counts": {
+    "MERGE_HIGH_CONFIDENCE_CONTOUR_HOLE": 7
+  },
+  "region_changed_pixels": {
+    "turtle_face": 120,
+    "shell": 586,
+    "sun": 305,
+    "leaf_ground_background": 1407
+  },
+  "unresolved_contour_segment_ids": [
+    1,
+    108
+  ],
+  "meaningful_detail_review": {
+    "eyes_or_filled_facial_marks_lost": false,
+    "semantic_objects_removed": false,
+    "mouth_stroke_widening_is_intentional": true,
+    "palette_remains_flat_and_discrete": true,
+    "anti_alias_or_gradient_colors_added": false,
+    "basis": "cleanup protects dark components; contour edits only add the existing dark contour color; no palette colors or source objects are invented"
+  },
+  "recommendation": "REVISE",
+  "limitations": [
+    "Raster contour widths are measured on a 4x nearest-neighbor grid, not vector paths.",
+    "Short junction fragments are preserved when a stable complete segment cannot be inferred.",
+    "No physical sheet, opening, connectivity, or layer-plan validation was run."
+  ]
+}

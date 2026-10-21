@@ -155,3 +155,92 @@ change another palette color's component topology. On the turtle target this
 prevents the asymmetric structural-repair bulges but leaves four topology
 conflicts and four thin micro-junctions unresolved; therefore the candidate is
 not automatically adopted and L1 remains unapproved.
+
+## D-V3-016 | 2026-10-20 | Tiny-region cleanup requires spatial evidence
+
+**Status:** VERIFIED EXPERIMENTAL METHOD; candidate awaits user review.
+
+A tiny indexed component is not noise merely because its area is small. The
+pre-layer cleanup only reassigns a component to an already touching color when
+area, extent, boundary-contact dominance, and feature role all support the
+change. Dark contour/detail components are protected, and ambiguous components
+remain unchanged. On the turtle checkpoint, seven one-pixel non-dark islands
+embedded in black boundaries were merged into that existing black color; no
+palette entry, semantic object, or intentional filled detail was removed.
+
+## D-V3-017 | 2026-10-20 | Final contour fixes are bounded reviewed-path edits
+
+**Status:** VERIFIED EXPERIMENTAL METHOD; candidate awaits user approval.
+
+When a global preprocessing candidate has already passed visual review, a final
+contour fix must match the recorded centerline path and confine added pixels to
+that reviewed local neighborhood. For turtle IDs 1 and 108, the operator uses
+the existing contour color, preserves the centerline, applies a rasterization
+allowance on a 4x physical measurement grid, and verifies the narrowest result
+after returning to 512 x 512. This checkpoint does not authorize changes to
+other normalized paths, palette entries, tiny-region decisions, or layer plans.
+
+## D-V3-018 | 2026-10-20 | Bounded fixed-K scans do not prove global infeasibility
+
+**Status:** VERIFIED EXPERIMENTAL EVIDENCE; no valid turtle stack found.
+
+The experimental backend represents exactly K non-empty layers and assigns each
+connected visible source-color region wholly to one depth. An ascending bounded
+scan may compare several fixed K values under one shared deadline, but timeout,
+candidate-cap, or oracle-rejection results remain `UNKNOWN` outside the tested
+assignments. The corrected turtle run proved only K=9 infeasible within this
+representation. Its repeated broad orphan-core failures support future work on
+sound minimal geometry conflict cuts; they do not prove that the artwork itself
+is impossible or that connected-region splitting is required.
+
+## D-V3-019 | 2026-10-20 | Retained-width validation needs physical supersampling
+
+**Status:** VERIFIED DIAGNOSTIC FINDING; production validator unchanged.
+
+Binary polarity, perimeter anchoring, cutout exclusion, and four-neighbor sheet
+connectivity are correct on the saved turtle masks. Native odd-kernel rounding,
+however, maps the 1.2 mm threshold to a coarse 5x5 footprint and falsely rejects
+one two-core sheet. A 4x nearest-neighbor diagnostic of the unchanged erosion
+rule clears that sheet while confirming near-threshold bottlenecks on six other
+sheets. Future acceptance should retain 1.2 mm but evaluate it on a calibrated
+supersampled or vector mask before geometry failures constrain the planner.
+
+## D-V3-020 | 2026-10-20 | Post-layer width repair may change the visible target only with review
+
+**Status:** USER-AUTHORIZED EXPERIMENT; visual result not approved.
+
+Retained geometry below 1.2 mm is widened on the actual physical masks after
+planning. The operator follows existing retained paths, uses already occluded
+space first, and records unavoidable visible additions separately. At the
+turtle's 512 px / 200 mm artwork mapping, the existing perimeter makes the
+outer sheet 225 mm. A 4x physically calibrated audit is authoritative for this
+checkpoint. Passing structural validation does not approve the 6,336 changed
+visible pixels; the repaired composite remains subject to user review.
+
+## D-V3-021 | 2026-10-20 | Visible contour width uses complete centerline reconstruction
+
+**Status:** VERIFIED EXPERIMENTAL METHOD; candidate awaits visual approval.
+
+Local dilation of validator bottleneck paths is forbidden for visible outline
+normalization because it creates bulges and blobs. Visible black and navy
+strokes are instead split into coherent centerline paths, assigned a stable
+path-local intended width, and re-rasterized on a 4x grid at no less than
+1.2 mm. Added color is propagated consistently through cumulative retained
+masks and foreground cutouts. Structural hidden-support repair remains a
+separate concern and may not alter the visible stroke geometry.
+
+## D-V3-022 | 2026-10-21 | Experimental per-cell reveal-closure planner
+
+**Status:** EXPERIMENTAL; one final turtle run interrupted (host memory); not approved.
+
+`src/layerforge_l1/reveal_planner.py` assigns depth per *cell* (source regions
+cut by a 10 px tile grid), so one connected color region may span several
+sheets. Each sheet is planned front to back. Its material is the structurally
+reachable part of the covered set (erosion by the existing validator kernel,
+4-connected anchoring to the perimeter, dilation back). Extra checks align it
+with the existing validator's 4-connected orphan-core rule, plus visible nubs
+up to 0.5 mm. Thin hidden material is never carried. Feasibility is decided by
+an order-independent monotone closure; a bounded beam searches sheet counts.
+The existing validator is reused unchanged for acceptance (OBSERVED_IN_FILE:
+the planner applies a stricter visible-support rule than the validator's
+thin-decorative warnings).

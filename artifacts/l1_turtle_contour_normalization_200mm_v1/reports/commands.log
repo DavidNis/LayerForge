@@ -1,6 +1,0 @@
-$env:PYTHONPATH='src'; .\.venv\Scripts\python.exe scripts\normalize_turtle_contours_200mm.py
-$env:PYTHONPATH='src'; .\.venv\Scripts\python.exe scripts\normalize_turtle_contours_200mm.py  # identical deterministic rerun after JSON scalar serialization fix
-$env:PYTHONPATH='src'; .\.venv\Scripts\python.exe -m pytest tests/test_contour_normalization.py -q --junitxml=artifacts\l1_turtle_contour_normalization_200mm_v1\reports\pytest.xml
-.\.venv\Scripts\python.exe -m py_compile src\layerforge_l1\contour_normalization.py scripts\normalize_turtle_contours_200mm.py
-git diff --check -- src/layerforge_l1/contour_normalization.py scripts/normalize_turtle_contours_200mm.py tests/test_contour_normalization.py
-Compress-Archive -Path artifacts\l1_turtle_contour_normalization_200mm_v1\* -DestinationPath artifacts\LayerForge_L1_turtle_contour_normalization_200mm_v1.zip -CompressionLevel Optimal

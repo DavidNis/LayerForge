@@ -90,3 +90,87 @@ No complete UI/server, arbitrary photographic depth estimation, frame design, gl
   (4 PASS).
 - [ ] Resolve or explicitly approve the four topology-conflicting segments and
   four thin micro-junctions before adopting this candidate as a planning target.
+
+## Experimental pre-layer image preparation (not approved)
+
+- [x] Run one combined deterministic contour-normalization and conservative
+  tiny-region-cleanup pass from the unchanged indexed turtle source.
+- [x] Preserve all nine palette entries, filled facial details, object shapes,
+  and flat-color encoding; introduce no gradients or generated artwork.
+- [x] Produce full comparison, change overlay, requested closeups, complete
+  thin-contour report, and one decision record per tiny component.
+- [x] Run eight focused contour and cleanup tests (8 PASS).
+- [ ] User reviews the candidate; two topology-conflicting thin contours remain
+  unresolved and no layer planning may start without further direction.
+
+## Final two turtle contour corrections (awaiting user approval)
+
+- [x] Use the existing processed candidate without restarting preprocessing.
+- [x] Correct only reviewed contour IDs 1 and 108 at the 200 x 200 mm mapping.
+- [x] Verify both corrected minima exceed 1.2 mm after rasterization.
+- [x] Preserve ID 62, the existing palette, prior cleanup, and all pixels
+  outside the two reviewed neighborhoods.
+- [x] Produce closeups, a changed-pixel overlay, measurements, and focused tests.
+- [ ] Obtain user visual approval before any physical-layer planning.
+
+## Approved turtle global physical-layer planning (not approved)
+
+- [x] Lock and losslessly verify the final corrected turtle target.
+- [x] Run one bounded global CP-SAT experiment across fixed K=9..18.
+- [x] Apply existing exact-prefix no-goods and physical validation without
+  changing the palette, source, 1.2 mm requirement, or planner architecture.
+- [x] Reopen and validate the preserved best rejected masks after the reporting
+  tail failed; do not rerun the solver.
+- [x] Confirm exact reconstruction and complete shared perimeters for the best
+  diagnostic candidate.
+- [ ] Find a stack with zero retained-width/orphan-core failures; current best
+  has seven failing sheets and must remain labeled REJECTED.
+- [ ] Preserve geometry-oracle telemetry incrementally and evaluate a sound
+  minimal structural-core conflict cut only after user approval.
+
+## Turtle physical-mask width-failure verification
+
+- [x] Verify retained/cutout polarity directly from every saved binary mask.
+- [x] Reproduce all seven original orphan-core results with the unchanged
+  validator and original run scale.
+- [x] Trace representative orphan cores through the 3x3 surviving path to the
+  exact neck removed by 5x5 erosion.
+- [x] Produce per-sheet overlays and enlarged representative neck crops.
+- [x] Separate six verified near-threshold failures from one coarse-raster false
+  positive and document the 200 mm artwork/outer-sheet scale conflict.
+- [ ] Implement no validator correction until the supersampled/vector-width
+  recommendation is explicitly approved.
+
+## Turtle post-layer retained-width repair
+
+- [x] Reuse the saved 12-sheet assignment and preserve layer order/colors.
+- [x] Validate at 200 mm artwork scale with the existing perimeter yielding a
+  225 mm outer sheet.
+- [x] Widen deficient retained paths, preferring hidden additions.
+- [x] Widen four remaining one-pixel decorative retained strokes locally.
+- [x] Verify shared perimeter, 4-neighbor connectivity, 1.2 mm retained width,
+  zero orphan cores, mask-derived reconstruction, and cutout polarity.
+- [ ] Obtain user visual approval for the 6,336 changed visible pixels before
+  treating the repaired composite as the new artwork target.
+
+## Uniform-contour turtle stack rebuild
+
+- [x] Reject the blob-producing structural-neck dilation candidate.
+- [x] Rebuild complete black and navy strokes from their centerlines at a
+  consistent path-local width of at least 1.2 mm.
+- [x] Propagate contour additions through real retained masks and foreground
+  cutouts without visible connector bridges.
+- [x] Reopen all masks and validate cutout polarity, shared perimeter,
+  connectivity, retained width, orphan cores, and mask-derived reconstruction.
+- [x] Add focused straight/curved contour and complete-stack regression tests.
+- [ ] Obtain user approval for the uniform-contour visual target.
+
+## Per-cell reveal-closure planner PoC (2026-10-21)
+
+- [x] Run H1-H5 diagnostics on the saved rejected stack.
+- [x] Implement per-cell reveal-closure planner reusing the existing validator.
+- [x] Synthetic regression: indivisible stuck, per-cell exact 6-sheet PASS.
+- [x] Turtle run: closure feasible, 18 sheets, exact, 17/18 PASS.
+- [x] Rerun the turtle with the nub/orphan alignment fix: 18 sheets, all PASS at 4x.
+- [ ] Reduce sheet count (seam smoothing, wider beam) once all sheets PASS.
+- [ ] Extrude passing masks through the existing STEP/STL path and read back.
