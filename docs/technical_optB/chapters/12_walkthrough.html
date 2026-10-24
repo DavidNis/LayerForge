@@ -1,0 +1,90 @@
+<h1>הרצה מלאה: Option B מהתמונה ועד STL</h1>
+<p>כל המספרים בפרק נקראו מקבצים קיימים ב־<code>artifacts/l1_van_gogh_v1/</code> (<span class="tag obs">OBSERVED_IN_FILE</span>). לצורך המסמך לא הורצה שום אופטימיזציה מחדש. האיור הוא קניין רוחני של צד שלישי, ולכן אסור לפרסם את המסמך הזה ברבים.</p>
+
+<h2>קלט והכנה</h2>
+<div class="row">
+<figure><img src="fig/orig.jpg" style="height:72mm"><figcaption>קלט: <code>van_gogh_p.jfif</code> בגודל 1856 × 2268</figcaption></figure>
+<figure><img src="fig/flat_optB.png" style="height:72mm"><figcaption>יעד Option B: 2048 × 2048, עם 9 צבעים ומסגרת magenta</figcaption></figure>
+</div>
+<table class="t small">
+<tr><th>שלב</th><th>קריאה</th><th>תוצאה</th></tr>
+<tr><td>פלטה</td><td class="l">extract_palette(original)</td><td>10 צבעים: ‎#97CCE5 ‎#EAC007 ‎#000100 ‎#8AA1A2 ‎#3D7033 ‎#FCFEFE ‎#7CAE49 ‎#609337 ‎#BF3934 ‎#354043</td></tr>
+<tr><td>הקטנה ומיפוי</td><td class="l">resize(INTER_AREA) + snap_to_palette</td><td>1676 × 2048 (163.7 × 200 מ"מ), במרכז קנבס של 2048, עם x₀ = 186</td></tr>
+<tr><td>Option A</td><td>ידני (פתיחה של 17 פיקסלים בחלון הלחי)</td><td>173 פיקסלים צהובים ← שחור (1.65 מ"מ²)</td></tr>
+<tr><td>Option B</td><td>ידני</td><td>13,154 פיקסלים ‎#354043 → ‎#000100 (125.4 מ"מ²)</td></tr>
+<tr><td>אינדוקס</td><td class="l">exact_index</td><td>10 תוויות, frame_label = 9 (‎#FF00FF), 35 אזורים</td></tr>
+</table>
+<div class="row">
+<figure><img src="fig/optA_cheek_before_change_after.png" style="width:118mm"><figcaption>Option A: לפני / הפיקסלים שהשתנו (magenta) / אחרי</figcaption></figure>
+</div>
+<div class="row"><figure><img src="fig/optB_hat_before_after.png" style="width:118mm"><figcaption>Option B: פס הכובע לפני ואחרי ההמרה לשחור</figcaption></figure></div>
+
+<h2>רצף הקריאות במתכנן</h2>
+<pre class="plain">main()                                            scripts/run_turtle_reveal_planner_poc.py:158
+ ├─ exact_index(rgb)                              -> labels[2048,2048], palette[10]
+ └─ run_variant("per_cell", labels, palette, RevealConfig(tile 2.0, beam 8, "colors", frame 9))
+     ├─ RevealPlanner.__init__
+     │    physical_grid -> 2048/2304/128 @225 mm ; width_kernel -> 13x13 ellipse
+     │    build_cells   -> 11,498 cells ; embed -> cell_map[2304,2304] ; nub_steps = 5
+     ├─ closure()          feasible=True, round-robin 12 sheets, 15.8 s
+     ├─ beam_search()      COMPLETE, 10 sheets, 553 maximal_reveal evaluations
+     ├─ eliminate_sheets() no merge possible -> 10 sheets
+     ├─ materialize()      10 x {physical_mask, visible_mask}
+     ├─ audit_edge_connectivity / audit_connection_width   (x4 only; x8 skipped)
+     ├─ composite vs target -> 0 mismatched pixels
+     └─ seam_report()      171 px = 16.7 mm, 1 of 35 regions split          total 304.3 s</pre>
+
+<h2>הלוחות שנוצרו</h2>
+<table class="t small">
+<tr><th>עומק (קדמי=0)</th><th>קובץ</th><th>צבע</th><th>4-neighbor</th><th>width</th><th>חומר</th><th>פתחים &lt;0.8</th><th>חורים ב־CAD</th><th>קודקודים</th></tr>
+<tr><td>0</td><td class="l">layer_09_000100</td><td class="l">#000100</td><td>PASS</td><td>PASS</td><td>42.3%</td><td>1</td><td>18</td><td>10,595</td></tr>
+<tr><td>1</td><td class="l">layer_08_eac007</td><td class="l">#EAC007</td><td>PASS</td><td>PASS</td><td>64.5%</td><td>1</td><td>24</td><td>9,665</td></tr>
+<tr><td>2</td><td class="l">layer_07_97cce5</td><td class="l">#97CCE5</td><td>PASS</td><td>PASS</td><td>79.5%</td><td>1</td><td>22</td><td>7,427</td></tr>
+<tr><td>3</td><td class="l">layer_06_8aa1a2</td><td class="l">#8AA1A2</td><td>PASS</td><td>PASS</td><td>85.1%</td><td>1</td><td>24</td><td>6,071</td></tr>
+<tr><td>4</td><td class="l">layer_05_3d7033</td><td class="l">#3D7033</td><td>PASS</td><td>PASS</td><td>90.5%</td><td>0</td><td>19</td><td>4,699</td></tr>
+<tr><td>5</td><td class="l">layer_04_000100</td><td class="l">#000100</td><td>PASS</td><td>PASS</td><td>92.0%</td><td>0</td><td>10</td><td>2,741</td></tr>
+<tr><td>6</td><td class="l">layer_03_fcfefe</td><td class="l">#FCFEFE</td><td>PASS</td><td>PASS</td><td>94.9%</td><td>0</td><td>6</td><td>1,735</td></tr>
+<tr><td>7</td><td class="l">layer_02_7cae49</td><td class="l">#7CAE49</td><td>PASS</td><td>PASS</td><td>97.5%</td><td>0</td><td>4</td><td>994</td></tr>
+<tr><td>8</td><td class="l">layer_01_609337</td><td class="l">#609337</td><td>PASS</td><td>PASS</td><td>99.1%</td><td>0</td><td>2</td><td>461</td></tr>
+<tr><td>9</td><td class="l">layer_00_bf3934</td><td class="l">#BF3934</td><td>PASS</td><td>PASS</td><td>100%</td><td>0</td><td>0</td><td>5</td></tr>
+</table>
+<div class="layers">
+<figure><img src="fig/layer_09_000100.png"><figcaption>0 · layer_09 #000100</figcaption></figure>
+<figure><img src="fig/layer_08_eac007.png"><figcaption>1 · layer_08 #EAC007</figcaption></figure>
+<figure><img src="fig/layer_07_97cce5.png"><figcaption>2 · layer_07 #97CCE5</figcaption></figure>
+<figure><img src="fig/layer_06_8aa1a2.png"><figcaption>3 · layer_06 #8AA1A2</figcaption></figure>
+<figure><img src="fig/layer_05_3d7033.png"><figcaption>4 · layer_05 #3D7033</figcaption></figure>
+<figure><img src="fig/layer_04_000100.png"><figcaption>5 · layer_04 #000100</figcaption></figure>
+<figure><img src="fig/layer_03_fcfefe.png"><figcaption>6 · layer_03 #FCFEFE</figcaption></figure>
+<figure><img src="fig/layer_02_7cae49.png"><figcaption>7 · layer_02 #7CAE49</figcaption></figure>
+<figure><img src="fig/layer_01_609337.png"><figcaption>8 · layer_01 #609337</figcaption></figure>
+<figure><img src="fig/layer_00_bf3934.png"><figcaption>9 · layer_00 #BF3934</figcaption></figure>
+</div>
+<p class="small">איור: <code>physical_sheet_preview.png</code> של כל לוח (לבן = חור). מספר = עומק מלפנים.</p>
+<div class="box derived"><span class="tag derived">DERIVED</span> <b>קריאת הסדר:</b> השחור הקדמי הוא המתאר הראשי. אחריו הצהוב, שבזכות המתאר שלפניו יכול להחזיק "שלד" נסתר. השחור השני (עומק 5) מכיל פרטים פנימיים: עיניים, אף, פה, קווי הלחיים, קווים בגוף ופרטי הכובע. אלה פרטים מוקפים בצבעים אחרים, שאפשר לתמוך בהם רק אחרי שהלוחות שלפניהם חשפו מספיק כדי שיהיה מאחוריהם חומר נסתר. קטע מקו המתאר השחור הראשי (אזור 0) פוצל בין שני העומקים, וזה כל התפר: 171 זוגות פיקסלים.</div>
+<figure><img src="fig/two_blacks.png" style="width:80mm"><figcaption>הפיקסלים הגלויים של שני לוחות השחור: שחור = עומק 0, אדום = עומק 5 (הופק מ־<code>source_visible_region_mask.png</code>)</figcaption></figure>
+
+<h2>הרכבה, עומק והשוואה אחרי CAD</h2>
+<div class="row">
+<figure><img src="fig/composite.png" style="width:56mm"><figcaption><code>mask_derived_composite.png</code>: הרכבה מהמסכות</figcaption></figure>
+<figure><img src="fig/stack_from_cad.png" style="width:56mm"><figcaption><code>stack_from_cad.png</code>: הרכבה מהגאומטריה שנכנסה ל־CAD</figcaption></figure>
+<figure><img src="fig/depth.png" style="width:56mm"><figcaption><code>visible_depth_map.png</code> (כהה = קדמי)</figcaption></figure>
+</div>
+<p>הרכבה מהמסכות לעומת היעד: 0 פיקסלים שונים. הרכבה מה־CAD לעומת הרכבה מהמסכות: 0 פיקסלים שונים. התמונה השמאלית: באזור התמונה הצבעים כמעט אחידים, כי רוב התאים של כל צבע נחשפו באותו עומק.</p>
+
+<h2>תוצאות ה־CAD</h2>
+<table class="t small">
+<tr><th>שכבה</th><th>פוליגונים</th><th>חורים</th><th>STEP solids</th><th>משולשי STL</th><th>watertight</th><th>רכיבים</th><th>ΔA %</th><th>ΔV %</th><th>זמן (trace/CAD/read)</th></tr>
+<tr><td class="l">layer_00</td><td>1</td><td>0</td><td>1</td><td>12</td><td>✓</td><td>1</td><td>0.0</td><td>0.0</td><td>0.05/0.06/0.05</td></tr>
+<tr><td class="l">layer_01</td><td>1</td><td>2</td><td>1</td><td>1,836</td><td>✓</td><td>1</td><td>0.0016</td><td>0.0</td><td>0.03/0.28/0.60</td></tr>
+<tr><td class="l">layer_02</td><td>1</td><td>4</td><td>1</td><td>3,968</td><td>✓</td><td>1</td><td>0.0035</td><td>0.0</td><td>0.03/0.61/1.31</td></tr>
+<tr><td class="l">layer_03</td><td>1</td><td>6</td><td>1</td><td>6,932</td><td>✓</td><td>1</td><td>0.0063</td><td>0.0</td><td>0.05/1.16/2.12</td></tr>
+<tr><td class="l">layer_04</td><td>1</td><td>10</td><td>1</td><td>10,956</td><td>✓</td><td>1</td><td>0.0101</td><td>0.0</td><td>0.04/1.90/3.15</td></tr>
+<tr><td class="l">layer_05</td><td>1</td><td>19</td><td>1</td><td>18,788</td><td>✓</td><td>1</td><td>0.0169</td><td>0.0</td><td>0.06/3.34/5.20</td></tr>
+<tr><td class="l">layer_06</td><td>1</td><td>24</td><td>1</td><td>24,276</td><td>✓</td><td>1</td><td>0.0231</td><td>0.0</td><td>0.07/4.51/7.14</td></tr>
+<tr><td class="l">layer_07</td><td>1</td><td>22</td><td>1</td><td>29,700</td><td>✓</td><td>1</td><td>0.0292</td><td>0.0</td><td>0.08/5.97/13.21</td></tr>
+<tr><td class="l">layer_08</td><td>1</td><td>24</td><td>1</td><td>38,652</td><td>✓</td><td>1</td><td>0.0485</td><td>0.0</td><td>0.11/8.49/19.99</td></tr>
+<tr><td class="l">layer_09</td><td>1</td><td>18</td><td>1</td><td>42,372</td><td>✓</td><td>1</td><td>0.085</td><td>0.0</td><td>0.12/10.70/32.52</td></tr>
+</table>
+<p>כל הקבצים בגבולות <span class="m">[0,225]\times[0,225]\times[0,1.6]</span> מ"מ. סך הכול 122.9 שניות. רוב הזמן הלך לקריאה החוזרת, ובעיקר ל־<code>importStep</code> ול־trimesh.</p>
+<div class="box derived"><span class="tag derived">DERIVED</span> <b>מספר המשולשים:</b> ללוח עם V קודקודים (בכל הטבעות) ו־h חורים, הפאה העליונה והתחתונה תורמות כ־<span class="m">2(V+2h-2)</span> משולשים, והדפנות <span class="m">2V</span>. יחד: <span class="m">\approx 4V+4h-4</span>. בדיקה: ב־layer_00 (V=5 כולל קודקוד סוגר, כלומר 4 ייחודיים, h=0): <span class="m">4\cdot4-4=12</span> ✓. ב־layer_01 (461 כולל 3 קודקודים סוגרים, כלומר 458 ייחודיים, h=2): <span class="m">4\cdot458+8-4=1836</span> ✓.</div>

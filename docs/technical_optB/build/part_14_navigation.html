@@ -1,0 +1,69 @@
+<!doctype html><html lang="he" dir="rtl"><head><meta charset="utf-8">
+<title>LayerForge Technical Architecture</title><link rel="stylesheet" href="style.css"></head><body><section class="chapter" data-name="14_navigation"><h1 id="c14">14. מדריך ניווט למפתח ואינדקס מקורות</h1>
+
+<h2 id="c14s1">14.1 איפה לשנות מה</h2>
+<table class="t small">
+<tr><th>אם רוצים לשנות…</th><th>המקום</th><th>שים לב</th></tr>
+<tr><td>רוחב מינימלי (1.2 מ"מ)</td><td class="l">layer_optimization.OptimizationConfig</td><td>משפיע גם על ה־validator וגם על המתכנן (שניהם קוראים ל־<code>_width_parameters</code>). לפי AGENTS.md אסור להוריד סף.</td></tr>
+<tr><td>גודל לוח או מסגרת</td><td class="l">RevealConfig.outer_sheet_mm; PocConfig (512/576/32)</td><td>היחס 512:576 קובע מסגרת של 12.5 מ"מ.</td></tr>
+<tr><td>גודל תאים</td><td class="l">--tile-mm / RevealConfig.cell_tile_mm</td><td>קטן יותר: יותר גמישות, יותר תאים וזמן ריצה ארוך יותר.</td></tr>
+<tr><td>אורך בליטות</td><td class="l">RevealConfig.nub_tolerance_mm</td><td>המתכנן בלבד. ה־validator לא מגביל אותן.</td></tr>
+<tr><td>איכות החיפוש</td><td class="l">--beam, --score</td><td>זיכרון וזמן גדלים בערך ליניארית עם B.</td></tr>
+<tr><td>עובי לוח ופישוט</td><td class="l">--thickness-mm, --simplify-mm</td><td>סקריפט הייצוא בלבד.</td></tr>
+<tr><td>פלטה</td><td class="l">extract_palette(max_colors, merge_delta, min_share)</td><td>לא נחשף כ־CLI.</td></tr>
+</table>
+
+<h2 id="c14s2">14.2 איך לשחזר את Option B מהקבצים</h2>
+<ol>
+<li>היעד המוכן כבר שמור: <code>artifacts/l1_van_gogh_v1/flat_2048_framed_optB.png</code>.</li>
+<li>הרצת המתכנן: הפקודה בסעיף 3.6 (כ־5 דקות. דורשת כמה ג'יגה־בייט פנויים).</li>
+<li>ייצוא: הפקודה בסעיף 3.7 (כ־2 דקות).</li>
+<li>לבנות את ה־PDF הזה מחדש: <code>PYTHONPATH=src .venv/Scripts/python.exe docs/technical_optB/compute_examples.py</code>, אחריו <code>make_figures.py</code>, ואחריו <code>build_pdf.py</code>.</li>
+</ol>
+
+<h2 id="c14s3">14.3 אינדקס מקורות</h2>
+<table class="t small">
+<tr><th>סמל</th><th>מיקום</th><th>פרק</th></tr>
+<tr><td class="l">FlattenConfig</td><td><span class="ref" data-sym="class FlattenConfig">src/layerforge_l1/fullres_flatten.py:26</span></td><td>4</td></tr>
+<tr><td class="l">snap_to_palette</td><td><span class="ref" data-sym="def snap_to_palette">src/layerforge_l1/fullres_flatten.py:34</span></td><td>4</td></tr>
+<tr><td class="l">majority_filter</td><td><span class="ref" data-sym="def majority_filter">src/layerforge_l1/fullres_flatten.py:46</span></td><td>4</td></tr>
+<tr><td class="l">merge_small_fragments</td><td><span class="ref" data-sym="def merge_small_fragments">src/layerforge_l1/fullres_flatten.py:53</span></td><td>4</td></tr>
+<tr><td class="l">extract_palette</td><td><span class="ref" data-sym="def extract_palette">src/layerforge_l1/fullres_flatten.py:76</span></td><td>4</td></tr>
+<tr><td class="l">exact_index</td><td><span class="ref" data-sym="def exact_index">src/layerforge_l1/experimental_global_planner.py:73</span></td><td>4</td></tr>
+<tr><td class="l">RevealConfig</td><td><span class="ref" data-sym="class RevealConfig">src/layerforge_l1/reveal_planner.py:38</span></td><td>5</td></tr>
+<tr><td class="l">physical_grid</td><td><span class="ref" data-sym="def physical_grid">src/layerforge_l1/reveal_planner.py:65</span></td><td>6</td></tr>
+<tr><td class="l">width_kernel</td><td><span class="ref" data-sym="def width_kernel">src/layerforge_l1/reveal_planner.py:74</span></td><td>6</td></tr>
+<tr><td class="l">build_cells</td><td><span class="ref" data-sym="def build_cells">src/layerforge_l1/reveal_planner.py:85</span></td><td>6</td></tr>
+<tr><td class="l">_merge_small_cells</td><td><span class="ref" data-sym="def _merge_small_cells">src/layerforge_l1/reveal_planner.py:130</span></td><td>6</td></tr>
+<tr><td class="l">embed</td><td><span class="ref" data-sym="def embed">src/layerforge_l1/reveal_planner.py:161</span></td><td>6</td></tr>
+<tr><td class="l">structural_support</td><td><span class="ref" data-sym="def structural_support">src/layerforge_l1/reveal_planner.py:171</span></td><td>7</td></tr>
+<tr><td class="l">_orphan_cores</td><td><span class="ref" data-sym="def _orphan_cores">src/layerforge_l1/reveal_planner.py:211</span></td><td>7, 8</td></tr>
+<tr><td class="l">_anchored</td><td><span class="ref" data-sym="def _anchored">src/layerforge_l1/reveal_planner.py:216</span></td><td>7</td></tr>
+<tr><td class="l">_CROSS</td><td><span class="ref" data-sym="_CROSS = ">src/layerforge_l1/reveal_planner.py:224</span></td><td>7</td></tr>
+<tr><td class="l">_geodesic_reach</td><td><span class="ref" data-sym="def _geodesic_reach">src/layerforge_l1/reveal_planner.py:227</span></td><td>7</td></tr>
+<tr><td class="l">RevealPlanner</td><td><span class="ref" data-sym="class RevealPlanner">src/layerforge_l1/reveal_planner.py:237</span></td><td>5, 8</td></tr>
+<tr><td class="l">cells_mask / covered_mask</td><td><span class="ref" data-sym="def cells_mask">src/layerforge_l1/reveal_planner.py:264</span></td><td>5</td></tr>
+<tr><td class="l">unsupported_pixels</td><td><span class="ref" data-sym="def unsupported_pixels">src/layerforge_l1/reveal_planner.py:273</span></td><td>8</td></tr>
+<tr><td class="l">maximal_reveal</td><td><span class="ref" data-sym="def maximal_reveal">src/layerforge_l1/reveal_planner.py:290</span></td><td>8</td></tr>
+<tr><td class="l">eliminate_sheets</td><td><span class="ref" data-sym="def eliminate_sheets">src/layerforge_l1/reveal_planner.py:306</span></td><td>8</td></tr>
+<tr><td class="l">sheet_mask</td><td><span class="ref" data-sym="def sheet_mask">src/layerforge_l1/reveal_planner.py:348</span></td><td>8, 9</td></tr>
+<tr><td class="l">closure</td><td><span class="ref" data-sym="def closure">src/layerforge_l1/reveal_planner.py:353</span></td><td>8</td></tr>
+<tr><td class="l">beam_search / _beam_key</td><td><span class="ref" data-sym="def beam_search">src/layerforge_l1/reveal_planner.py:374</span></td><td>8</td></tr>
+<tr><td class="l">materialize</td><td><span class="ref" data-sym="def materialize">src/layerforge_l1/reveal_planner.py:423</span></td><td>8</td></tr>
+<tr><td class="l">seam_report</td><td><span class="ref" data-sym="def seam_report">src/layerforge_l1/reveal_planner.py:440</span></td><td>8</td></tr>
+<tr><td class="l">PocConfig / _outer_and_perimeter</td><td><span class="ref" data-sym="def _outer_and_perimeter">src/layerforge_l1/subtractive_poc.py:412</span></td><td>5</td></tr>
+<tr><td class="l">WidthRepairConfig</td><td><span class="ref" data-sym="class WidthRepairConfig">src/layerforge_l1/hidden_width_repair.py:28</span></td><td>5</td></tr>
+<tr><td class="l">OptimizationConfig</td><td><span class="ref" data-sym="class OptimizationConfig">src/layerforge_l1/layer_optimization.py:38</span></td><td>5</td></tr>
+<tr><td class="l">audit_edge_connectivity</td><td><span class="ref" data-sym="def audit_edge_connectivity">src/layerforge_l1/connectivity_repair.py:82</span></td><td>10</td></tr>
+<tr><td class="l">_width_parameters</td><td><span class="ref" data-sym="def _width_parameters">src/layerforge_l1/connectivity_repair.py:114</span></td><td>6</td></tr>
+<tr><td class="l">audit_connection_width</td><td><span class="ref" data-sym="def audit_connection_width">src/layerforge_l1/connectivity_repair.py:227</span></td><td>10</td></tr>
+<tr><td class="l">_narrow_openings</td><td><span class="ref" data-sym="def _narrow_openings">scripts/run_turtle_reveal_planner_poc.py:43</span></td><td>10</td></tr>
+<tr><td class="l">run_variant / main</td><td><span class="ref" data-sym="def run_variant">scripts/run_turtle_reveal_planner_poc.py:52</span></td><td>3</td></tr>
+<tr><td class="l">mask_to_geometry</td><td><span class="ref" data-sym="def mask_to_geometry">scripts/export_reveal_stack_cad.py:29</span></td><td>11</td></tr>
+<tr><td class="l">polygons / _face / extrude_geometry</td><td><span class="ref" data-sym="def polygons">src/layerforge_l1/geometry.py:72</span></td><td>11</td></tr>
+<tr><td class="l">_fixture (test)</td><td><span class="ref" data-sym="def _fixture">tests/test_reveal_planner.py:20</span></td><td>8</td></tr>
+</table>
+</section><script src="vendor/katex.min.js"></script><script>
+for (const e of document.querySelectorAll('.m')) katex.render(e.textContent, e, {output:'mathml', throwOnError:true});
+for (const e of document.querySelectorAll('.mb')) katex.render(e.textContent, e, {output:'mathml', displayMode:true, throwOnError:true});
+</script></body></html>

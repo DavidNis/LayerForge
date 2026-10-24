@@ -49,6 +49,9 @@ class RevealConfig:
     # Fragments smaller than this merge into a same-region neighbor cell.
     min_cell_mm2: float = 0.9
     split_regions: bool = True
+    # Label of artwork-grid pixels that belong to the frame (e.g. side strips of
+    # a portrait image on the square grid): solid on every sheet, never visible.
+    frame_label: int | None = None
     # The planner's footprint exceeds the validator's by this many pixels so a
     # one-pixel diagonal step in the eroded core (which the 4-connected
     # validator treats as a break) cannot sit exactly at the threshold.
@@ -250,7 +253,13 @@ class RevealPlanner:
         self.nub_steps = max(
             1, int(round(config.nub_tolerance_mm / self.width_parameters["mm_per_pixel"]))
         )
-        self.colors = sorted(int(value) for value in np.unique(self.cell_color))
+        self.start_covered = (
+            self.cell_color == config.frame_label
+            if config.frame_label is not None
+            else np.zeros(self.cell_count, dtype=bool)
+        )
+        self.perimeter = self.perimeter | self.cells_mask(self.start_covered)
+        self.colors = sorted(int(v) for v in np.unique(self.cell_color[~self.start_covered]))
 
     def cells_mask(self, cells: np.ndarray) -> np.ndarray:
         lookup = np.zeros(self.cell_count + 1, dtype=bool)
@@ -316,7 +325,7 @@ class RevealPlanner:
                     trial = [r.copy() for r in reveals]
                     trial[target] |= trial[source]
                     trial[source][:] = False
-                    covered = np.zeros(self.cell_count, dtype=bool)
+                    covered = self.start_covered.copy()
                     valid = True
                     for depth in range(len(trial)):
                         if depth >= source and trial[depth].any():
@@ -344,7 +353,7 @@ class RevealPlanner:
     def closure(self) -> dict[str, Any]:
         """Order-independent feasibility decision (round-robin maximal reveals)."""
 
-        covered = np.zeros(self.cell_count, dtype=bool)
+        covered = self.start_covered.copy()
         sequence: list[int] = []
         progress = True
         while progress and not covered.all():
@@ -365,7 +374,7 @@ class RevealPlanner:
     def beam_search(self) -> dict[str, Any]:
         """Shortest color sequence of maximal reveals, bounded beam."""
 
-        start = np.zeros(self.cell_count, dtype=bool)
+        start = self.start_covered.copy()
         beam: list[tuple[np.ndarray, list[int], list[np.ndarray]]] = [(start, [], [])]
         evaluations = 0
         for _ in range(self.config.max_sheets):
@@ -414,7 +423,7 @@ class RevealPlanner:
     def materialize(self, reveals: list[np.ndarray]) -> list[dict[str, Any]]:
         """Physical sheet masks, front to back, from the reveal sequence."""
 
-        covered = np.zeros(self.cell_count, dtype=bool)
+        covered = self.start_covered.copy()
         sheets = []
         for reveal in reveals:
             physical = self.sheet_mask(covered, reveal)

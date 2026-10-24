@@ -1,0 +1,138 @@
+<!doctype html><html lang="he" dir="rtl"><head><meta charset="utf-8">
+<title>LayerForge Technical Architecture</title><link rel="stylesheet" href="style.css"></head><body><section class="chapter" data-name="10_validation"><h1 id="c10">10. אימות פיזי</h1>
+<p>ה־validator <b>לא נכתב מחדש</b>. בכל לוח שהמתכנן מייצר, הסקריפט קורא לפונקציות הקיימות מ־<code>connectivity_repair.py</code> בלי שינוי (<span class="ref" data-sym="edge, _ = audit_edge_connectivity(physical)">scripts/run_turtle_reveal_planner_poc.py:94</span>). המתכנן משתמש באותו גרעין ובאותה הגדרת עיגון, כך שה־validator הוא בדיקה בלתי תלויה של אותה הגדרה ולא של הגדרה אחרת.</p>
+
+<h2 id="c10s1">10.1 תרשים 7: זרימת האימות והטיפול בכשל</h2>
+<div class="flow">
+ <div class="n"><code>physical_mask</code> (2304²) + <code>visible_mask</code> של כל לוח</div><div class="a">▼</div>
+ <div class="split"><div class="n dec">4-neighbor: רכיב אחד?</div><div class="n dec">width: אין ליבות יתומות?</div><div class="n dec">perimeter: <code>M[P]</code> כולו 1?</div></div><div class="a">▼</div>
+ <div class="n dec">composite: האם הרכבת המסכות שווה ליעד בכל פיקסל (מחוץ ל־P)?</div><div class="a">▼</div>
+ <div class="split"><div class="n out"><code>all_sheets_pass_x4 = true</code> ו־mismatch = 0</div><div class="n fail">כשל מדווח ב־JSON. הסקריפט <b>לא</b> מתקן ולא עוצר: הלוחות נכתבים כפי שהם</div></div>
+ <div class="n">אבחון בלבד: <code>narrow_openings_under_0_8mm</code> · <code>thin_decorative_warnings</code> · ‏x8 (לא הורץ ב־Option B)</div>
+</div>
+
+<h2 id="c10s2">10.2 בדיקה 1: קשירות 4 (audit_edge_connectivity)</h2>
+<p><span class="ref" data-sym="def audit_edge_connectivity">src/layerforge_l1/connectivity_repair.py:82</span></p>
+<pre class="code" dir="ltr"><span class="src">src/layerforge_l1/connectivity_repair.py:85-108</span>
+<span class="ln">  85</span>      binary = mask.astype(np.uint8)
+<span class="ln">  86</span>      count4, labels4, stats4, _ = cv2.connectedComponentsWithStats(
+<span class="ln">  87</span>          binary, connectivity=4
+<span class="ln">  88</span>      )
+<span class="ln">  89</span>      border4 = set(
+<span class="ln">  90</span>          int(value)
+<span class="ln">  91</span>          for value in np.unique(
+<span class="ln">  92</span>              np.concatenate(
+<span class="ln">  93</span>                  (labels4[0], labels4[-1], labels4[:, 0], labels4[:, -1])
+<span class="ln">  94</span>              )
+<span class="ln">  95</span>          )
+<span class="ln">  96</span>          if value
+<span class="ln">  97</span>      )
+<span class="ln">  98</span>      orphans4 = [component for component in range(1, count4) if component not in border4]
+<span class="ln">  99</span>      count8, _, _, _ = cv2.connectedComponentsWithStats(binary, connectivity=8)
+<span class="ln"> 100</span>      report = {
+<span class="ln"> 101</span>          &quot;eight_neighbor_components&quot;: count8 - 1,
+<span class="ln"> 102</span>          &quot;four_neighbor_components&quot;: count4 - 1,
+<span class="ln"> 103</span>          &quot;four_neighbor_perimeter_components&quot;: len(border4),
+<span class="ln"> 104</span>          &quot;four_neighbor_orphan_components&quot;: len(orphans4),
+<span class="ln"> 105</span>          &quot;four_neighbor_orphan_pixels&quot;: int(
+<span class="ln"> 106</span>              sum(stats4[component, cv2.CC_STAT_AREA] for component in orphans4)
+<span class="ln"> 107</span>          ),
+<span class="ln"> 108</span>          &quot;four_neighbor_status&quot;: &quot;PASS&quot; if count4 - 1 == 1 else &quot;FAIL&quot;,</pre>
+<div class="box impl"><span class="tag impl">IMPLEMENTED MATHEMATICS</span>
+<div class="mb">\text{PASS}\iff \#\{\text{4-connected components of } M\}=1</div>
+<p><b>מה זה מודד:</b> אם כל החומר בלוח הוא חתיכה אחת. שני פיקסלים שנוגעים רק בפינה (אלכסון) לא נחשבים מחוברים. זו הגדרה שמרנית, כי בהדפסה מגע בפינה הוא נקודה בלי שטח. הדוח מוסיף ספירה ב־8 שכנים ו"יתומים", כלומר רכיבים שלא נוגעים בשולי התמונה, למטרות אבחון בלבד.</p>
+<p><b>מה זה לא מוכיח:</b> חוזק. חתיכה אחת יכולה להיות מחוברת בצוואר של פיקסל אחד. את זה תופסת בדיקה 2.</p></div>
+
+<h2 id="c10s3">10.3 בדיקה 2: רוחב מבני (audit_connection_width)</h2>
+<p><span class="ref" data-sym="def audit_connection_width">src/layerforge_l1/connectivity_repair.py:227</span> ו־<span class="ref" data-sym="def _core_connectivity">src/layerforge_l1/connectivity_repair.py:152</span></p>
+<pre class="code" dir="ltr"><span class="src">src/layerforge_l1/connectivity_repair.py:152-165</span>
+<span class="ln"> 152</span>  def _core_connectivity(
+<span class="ln"> 153</span>      material: np.ndarray, perimeter: np.ndarray, kernel_size: int
+<span class="ln"> 154</span>  ) -&gt; tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, list[int]]:
+<span class="ln"> 155</span>      kernel = cv2.getStructuringElement(
+<span class="ln"> 156</span>          cv2.MORPH_ELLIPSE, (kernel_size, kernel_size)
+<span class="ln"> 157</span>      )
+<span class="ln"> 158</span>      core = cv2.erode(material, kernel, iterations=1).astype(bool)
+<span class="ln"> 159</span>      count, labels, stats, _ = cv2.connectedComponentsWithStats(
+<span class="ln"> 160</span>          core.astype(np.uint8), connectivity=4
+<span class="ln"> 161</span>      )
+<span class="ln"> 162</span>      anchored = set(int(value) for value in np.unique(labels[core &amp; perimeter]) if value)
+<span class="ln"> 163</span>      orphan_ids = [component for component in range(1, count) if component not in anchored]
+<span class="ln"> 164</span>      connected = np.isin(labels, list(anchored))
+<span class="ln"> 165</span>      return core, connected, labels, stats, orphan_ids</pre>
+<pre class="code" dir="ltr"><span class="src">src/layerforge_l1/connectivity_repair.py:247-257</span>
+<span class="ln"> 247</span>      kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_size, kernel_size))
+<span class="ln"> 248</span>      material = physical_mask.astype(np.uint8)
+<span class="ln"> 249</span>      _, perimeter = _outer_and_perimeter(poc)
+<span class="ln"> 250</span>      core, connected_core, core_labels, stats, orphan_core = _core_connectivity(
+<span class="ln"> 251</span>          material, perimeter, kernel_size
+<span class="ln"> 252</span>      )
+<span class="ln"> 253</span>      anchored = set(int(value) for value in np.unique(core_labels[connected_core]) if value)
+<span class="ln"> 254</span>      restored_support = (
+<span class="ln"> 255</span>          cv2.dilate(connected_core.astype(np.uint8), kernel, iterations=1).astype(bool)
+<span class="ln"> 256</span>          &amp; physical_mask
+<span class="ln"> 257</span>      )</pre>
+<div class="box impl"><span class="tag impl">IMPLEMENTED MATHEMATICS</span>
+<div class="mb">\mathrm{core}=M\ominus K_{13},\qquad \mathrm{Orph}=\mathrm{core}\setminus\mathrm{Anch}_{P_0}(\mathrm{core}),\qquad \text{PASS}\iff \mathrm{Orph}=\emptyset</div>
+<p><span class="m">P_0</span> כאן היא הטבעת בלבד (<code>_outer_and_perimeter(poc)</code>). פסי ה־magenta לא כלולים בה, אבל הם מחוברים לטבעת ונשחקים לליבה מחוברת, ולכן התוצאה זהה. <span class="ref" data-sym="passed = not orphan_core">src/layerforge_l1/connectivity_repair.py:301</span>. הסטטוס בכשל הוא <code>CONFLICT_REQUIRES_USER_DECISION</code>.</p></div>
+<div class="box derived"><span class="tag derived">DERIVED</span> <b>מה PASS מוכיח:</b> כל חלק בלוח שמספיק עבה כדי להכיל אליפסה של 1.27 מ"מ מחובר למסגרת דרך מסדרון ברוחב האליפסה (מסלול ליבה 4־קשיר, פרק 7.2). יחד עם בדיקה 1, החלקים הדקים (שאין בהם ליבה) מחוברים פיזית, אבל לא בהכרח במסדרון רחב.<br>
+<b>מה PASS לא מוכיח:</b> (א) שחלקים דקים, בלי ליבה, קצרים. ה־validator רק מסווג אותם כ־<code>thin_decorative</code> (אזהרה). ה<b>מתכנן</b> הוא שמגביל אותם ל־0.5 מ"מ גאודזית. (ב) חוזק מכני, עיוות או התאמה לחומר ההדפסה. (ג) פתחים צרים בחומר (ראה בדיקה 5).</div>
+<h3>סיווג רכיבים גלויים (אבחון)</h3>
+<pre class="code" dir="ltr"><span class="src">src/layerforge_l1/connectivity_repair.py:270-281</span>
+<span class="ln"> 270</span>      orphan_core_mask = np.isin(core_labels, orphan_core)
+<span class="ln"> 271</span>      thin_decorative: list[int] = []
+<span class="ln"> 272</span>      structural_bottleneck_visible: list[int] = []
+<span class="ln"> 273</span>      structurally_supported_visible: list[int] = []
+<span class="ln"> 274</span>      for component in range(1, visible_count):
+<span class="ln"> 275</span>          component_mask = visible_labels == component
+<span class="ln"> 276</span>          if not np.any(core &amp; component_mask):
+<span class="ln"> 277</span>              thin_decorative.append(component)
+<span class="ln"> 278</span>          elif np.any(orphan_core_mask &amp; component_mask):
+<span class="ln"> 279</span>              structural_bottleneck_visible.append(component)
+<span class="ln"> 280</span>          else:
+<span class="ln"> 281</span>              structurally_supported_visible.append(component)</pre>
+<p>כל רכיב 4־קשיר של <span class="m">V</span> מסווג לאחת משלוש קטגוריות: <b>thin_decorative</b> (אין בו אף פיקסל ליבה), <b>structural_bottleneck_visible</b> (חלק מליבה יתומה) או <b>structurally_supported</b>. ב־Option B: 0 אזהרות thin_decorative בכל 10 הלוחות (<span class="tag obs">OBSERVED</span>).</p>
+<h3>מדידת "צוואר הבקבוק" ליתומים (אבחון)</h3>
+<p><span class="ref" data-sym="def _measure_orphan_bottlenecks">src/layerforge_l1/connectivity_repair.py:168</span>: לכל ליבה יתומה הפונקציה בודקת את כל הגרעינים האי־זוגיים מ־1 עד 13, ומדווחת על הגדול ביותר שבו האזור עדיין מחובר. התוצאה היא "חוסר רוחב" בדיד: <span class="m">(13-k^*)\cdot s</span> מ"מ. ב־Option B לא היו יתומים, ולכן החלק הזה לא הופעל.</p>
+
+<h2 id="c10s4">10.4 בדיקה 3: מסגרת משותפת</h2>
+<pre class="code" dir="ltr"><span class="src">scripts/run_turtle_reveal_planner_poc.py:128-128</span>
+<span class="ln"> 128</span>                  &quot;shared_perimeter_complete&quot;: bool(physical[planner.perimeter].all()),</pre>
+<p>כל הפיקסלים של <code>planner.perimeter</code>, כלומר הטבעת ופסי המסגרת, חייבים להיות חומר. זה מבטיח שכל הלוחות זהים בהיקף החיצוני.</p>
+
+<h2 id="c10s5">10.5 בדיקה 4: שחזור מדויק</h2>
+<pre class="code" dir="ltr"><span class="src">scripts/run_turtle_reveal_planner_poc.py:134-136</span>
+<span class="ln"> 134</span>      target = embed(labels.astype(np.int16), planner.grid, -1)
+<span class="ln"> 135</span>      inside = ~planner.perimeter  # includes any frame padding
+<span class="ln"> 136</span>      row[&quot;reconstruction_mismatched_pixels_x4&quot;] = int((composite[inside] != target[inside]).sum())</pre>
+<div class="box impl"><span class="tag impl">IMPLEMENTED MATHEMATICS</span> ההרכבה נבנית בשורה 93: <code>composite[(composite &lt; 0) &amp; physical] = color</code>, לפי סדר מלפנים לאחור:
+<div class="mb">\mathrm{comp}(p)=c_{k^*(p)},\quad k^*(p)=\min\{k:\ p\in M_k\},\qquad \text{mismatch}=\big|\{p\notin P:\ \mathrm{comp}(p)\neq \mathrm{target}(p)\}\big|</div>
+<p>ב־Option B: <code>reconstruction_mismatched_pixels_x4 = 0</code>. זה אישור אמפירי למשפט מסעיף 8.1.</p></div>
+
+<h2 id="c10s6">10.6 בדיקה 5: פתחים צרים (אבחון בלבד)</h2>
+<pre class="code" dir="ltr"><span class="src">scripts/run_turtle_reveal_planner_poc.py:43-49</span>
+<span class="ln">  43</span>  def _narrow_openings(physical: np.ndarray, mm_per_pixel: float) -&gt; int:
+<span class="ln">  44</span>      holes = (~physical).astype(np.uint8)
+<span class="ln">  45</span>      size = int(np.ceil(OPENING_MM / mm_per_pixel))
+<span class="ln">  46</span>      size += 1 - size % 2
+<span class="ln">  47</span>      opened = cv2.morphologyEx(holes, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (size, size)))
+<span class="ln">  48</span>      count, labels = cv2.connectedComponents(holes, connectivity=4)
+<span class="ln">  49</span>      return int(sum(1 for c in range(1, count) if not opened[labels == c].any()))</pre>
+<div class="box impl"><span class="tag impl">IMPLEMENTED MATHEMATICS</span>
+<div class="mb">H=\overline{M},\quad k=\lceil 0.8/s\rceil=9\ (\text{odd}),\quad \text{count}=\big|\{Q\ \text{4-comp of } H:\ Q\cap(H\circ E_9)=\emptyset\}\big|</div>
+<p>סופר חורים שאי אפשר להכניס לתוכם דיסקה של 0.88 מ"מ, כלומר חור צר שעלול להיסגר בהדפסה. ב־Option B היה חור אחד כזה בכל אחד מ־4 הלוחות הקדמיים. <span class="tag gap">NOT INVESTIGATED</span> זה רק דיווח, לא חלק מ־PASS/FAIL, ולא נבדק אילו חורים אלה.</p></div>
+
+<h2 id="c10s7">10.7 אימות ברזולוציה כפולה (x8): לא הורץ</h2>
+<p>הסקריפט יכול להריץ את אותם validators אחרי הגדלה של פי 2 בשיטת nearest (<span class="ref" data-sym="def audit_mask_at_physical_scale">src/layerforge_l1/hidden_width_repair.py:65</span>). ב־Option B הוא הורץ עם <code>--skip-x8</code> כדי לחסוך זמן וזיכרון, ולכן בדוח מופיע <code>NOT_RUN</code>. <span class="tag gap">GAP</span></p>
+
+<h2 id="c10s8">10.8 דיוק, דיסקרטיזציה וטולרנסים</h2>
+<ul>
+<li>כל המדידות בדידות, ברזולוציה של <span class="m">s=0.0977</span> מ"מ. רוחב "1.2 מ"מ" נאכף בפועל כ־13 פיקסלים, כלומר 1.27 מ"מ.</li>
+<li>הגרעין האליפטי מקרב דיסקה. בכיוונים אלכסוניים הוא מעט צר יותר (פרק 6.2).</li>
+<li>הקשר בין רשת היעד לרשת הפיזית הוא 1:1, ולכן אין שגיאת דגימה בין התכנון לאימות.</li>
+<li>המעבר ל־CAD מוסיף עיגול של 0.03 מ"מ (פשטות פוליגונים). לפי בדיקת הרסטור החוזר, ההשפעה עליו היא 0 פיקסלים (פרק 11).</li>
+</ul>
+</section><script src="vendor/katex.min.js"></script><script>
+for (const e of document.querySelectorAll('.m')) katex.render(e.textContent, e, {output:'mathml', throwOnError:true});
+for (const e of document.querySelectorAll('.mb')) katex.render(e.textContent, e, {output:'mathml', displayMode:true, throwOnError:true});
+</script></body></html>

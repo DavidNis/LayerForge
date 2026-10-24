@@ -1,0 +1,159 @@
+<!doctype html><html lang="he" dir="rtl"><head><meta charset="utf-8">
+<title>LayerForge Technical Architecture</title><link rel="stylesheet" href="style.css"></head><body><section class="chapter" data-name="04_image"><h1 id="c4">4. עיבוד תמונה והכנת היעד</h1>
+<p>כל האלגוריתמים בפרק נמצאים ב־<code>src/layerforge_l1/fullres_flatten.py</code> (113 שורות) ונקראים רק מקטעי קוד חד־פעמיים (פרק 3). המטרה: להפוך JPEG עם גרדיאנטים ורעש למפת תוויות (label map) שבה לכל פיקסל יש אחד מ־P צבעים, <b>בלי להזיז קצוות של קווים ובלי לעבות אותם</b>. זו הייתה הדרישה המפורשת שלך אחרי שה־flattening הישן הפך קווים אחידים ללא־אחידים.</p>
+
+<h2 id="c4s1">4.1 FlattenConfig: הפרמטרים</h2>
+<pre class="code" dir="ltr"><span class="src">src/layerforge_l1/fullres_flatten.py:25-31</span>
+<span class="ln">  25</span>  @dataclass(frozen=True)
+<span class="ln">  26</span>  class FlattenConfig:
+<span class="ln">  27</span>      bilateral_diameter: int = 9
+<span class="ln">  28</span>      bilateral_sigma_color: float = 24.0
+<span class="ln">  29</span>      bilateral_sigma_space: float = 5.0
+<span class="ln">  30</span>      majority_window: int = 5
+<span class="ln">  31</span>      min_fragment_pixels: int = 40  # ~0.4 mm2 at 0.098 mm/px</pre>
+<p>הערה בקוד: 40 פיקסלים ≈ 0.4 מ"מ² ב־0.098 מ"מ/פיקסל. ההערה נכונה לרשת היעד (2048 פיקסלים = 200 מ"מ). בשלב 1, שבו הפלטה חושבה על התמונה המקורית, אותו ערך מתאים לשטח פיזי מעט שונה, כי שם המיפוי לא שימש לייצור.</p>
+
+<h2 id="c4s2">4.2 extract_palette: פלטה אוטומטית</h2>
+<p><span class="ref" data-sym="def extract_palette">src/layerforge_l1/fullres_flatten.py:76</span>. <b>מטרה:</b> למצוא את הצבעים "האמיתיים" של האיור בלי שגווני מעבר (anti-aliasing) בין שני צבעים ייהפכו לצבע נפרד. בלי הסינון הזה היו נוספים צבעי ביניים, כמו ירוק־שחור לאורך כל קו מתאר, וכל אחד מהם היה דורש לוח נוסף.</p>
+<pre class="code" dir="ltr"><span class="src">src/layerforge_l1/fullres_flatten.py:91-113</span>
+<span class="ln">  91</span>      smooth = cv2.bilateralFilter(
+<span class="ln">  92</span>          rgb, config.bilateral_diameter, config.bilateral_sigma_color, config.bilateral_sigma_space
+<span class="ln">  93</span>      )
+<span class="ln">  94</span>      lab = cv2.cvtColor(smooth, cv2.COLOR_RGB2LAB).astype(np.float32)
+<span class="ln">  95</span>      gray = cv2.cvtColor(smooth, cv2.COLOR_RGB2GRAY).astype(np.float32)
+<span class="ln">  96</span>      gradient = np.hypot(cv2.Sobel(gray, cv2.CV_32F, 1, 0), cv2.Sobel(gray, cv2.CV_32F, 0, 1))
+<span class="ln">  97</span>      interior = cv2.erode((gradient &lt; 40).astype(np.uint8), np.ones((5, 5), np.uint8)).astype(bool)
+<span class="ln">  98</span>      samples = lab[interior][:: max(1, interior.sum() // 200_000)]
+<span class="ln">  99</span>      criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 50, 0.5)
+<span class="ln"> 100</span>      _, assignment, centers = cv2.kmeans(samples, max_colors, None, criteria, 4, cv2.KMEANS_PP_CENTERS)
+<span class="ln"> 101</span>      shares = np.bincount(assignment.ravel(), minlength=max_colors) / len(samples)
+<span class="ln"> 102</span>      clusters = [(centers[i], shares[i]) for i in np.argsort(-shares) if shares[i] &gt;= min_share]
+<span class="ln"> 103</span>      merged: list[tuple[np.ndarray, float]] = []
+<span class="ln"> 104</span>      for center, share in clusters:
+<span class="ln"> 105</span>          for index, (kept, kept_share) in enumerate(merged):
+<span class="ln"> 106</span>              if np.linalg.norm(center - kept) &lt; merge_delta:
+<span class="ln"> 107</span>                  total = kept_share + share
+<span class="ln"> 108</span>                  merged[index] = ((kept * kept_share + center * share) / total, total)
+<span class="ln"> 109</span>                  break
+<span class="ln"> 110</span>          else:
+<span class="ln"> 111</span>              merged.append((center, share))
+<span class="ln"> 112</span>      lab_centers = np.clip(np.array([c for c, _ in merged]), 0, 255).astype(np.uint8)
+<span class="ln"> 113</span>      return cv2.cvtColor(lab_centers[None], cv2.COLOR_LAB2RGB)[0]</pre>
+<h3>שלב א: החלקה משמרת קצוות (bilateral)</h3>
+<div class="box theory"><span class="tag theory">THEORETICAL BACKGROUND</span> הגדרת <code>cv2.bilateralFilter</code> עם <span class="m">d=9,\ \sigma_c=24,\ \sigma_s=5</span>:
+<div class="mb">\tilde I(p)=\frac{\sum_{q\in N_9(p)} w_s(p,q)\,w_c(p,q)\,I(q)}{\sum_{q\in N_9(p)} w_s(p,q)\,w_c(p,q)},\quad w_s=e^{-\frac{\|p-q\|^2}{2\sigma_s^2}},\quad w_c=e^{-\frac{\delta(I(p),I(q))^2}{2\sigma_c^2}}</div>
+<p><span class="m">N_9(p)</span> היא סביבה בקוטר 9 פיקסלים. <span class="m">\delta</span> הוא מרחק הצבע. ב־OpenCV, בתמונה בת 3 ערוצים, זהו סכום ההפרשים המוחלטים בין הערוצים (יחידות 0–255). שכן שצבעו שונה מאוד (למשל שחור ליד הצהוב <code>#EAC007</code>, עם <span class="m">\delta=234+191+7=432</span>) מקבל משקל <span class="m">e^{-432^2/(2\cdot 24^2)}\approx 0</span>, ולכן הקצה לא מטושטש. רעש JPEG קטן (<span class="m">\delta\approx 10</span>) מקבל משקל <span class="m">e^{-100/1152}\approx 0.92</span> ומתמצע.</p></div>
+<h3>שלב ב: מעבר ל־Lab וזיהוי פיקסלי פנים</h3>
+<div class="box impl"><span class="tag impl">IMPLEMENTED MATHEMATICS</span> שורות 94–97:
+<div class="mb">G(p)=\sqrt{(S_x * g)(p)^2+(S_y * g)(p)^2},\qquad \text{interior}=\big[\,G<40\,\big]\ominus B_{5\times5}</div>
+<p><span class="m">g</span> היא תמונת האפור של התמונה המוחלקת. <span class="m">S_x,S_y</span> הם גרעיני Sobel בגודל 3×3, והפלט ב־float32. <span class="m">\ominus B_{5\times5}</span> היא שחיקה (erosion) בריבוע 5×5: פיקסל נחשב "פנימי" רק אם בכל ריבוע ה־5×5 סביבו הגרדיאנט נמוך מ־40. כך מוסרים גם פיקסלים שנמצאים עד 2 פיקסלים מקצה.</p></div>
+<h3>שלב ג: דגימה ו־k-means</h3>
+<div class="box impl"><span class="tag impl">IMPLEMENTED MATHEMATICS</span>
+<div class="mb">\text{stride}=\max\!\Big(1,\ \Big\lfloor \tfrac{N_{\text{int}}}{200000}\Big\rfloor\Big),\qquad \min_{\mu_1..\mu_{12}}\ \sum_{x\in X}\ \min_j \|x-\mu_j\|_2^2</div>
+<p><span class="m">X</span> היא קבוצת דגימות Lab בגודל כ־200 אלף. <code>cv2.kmeans</code> רץ עם K=12, אתחול k-means++, 4 ניסיונות (נשמר הניסיון עם הקומפקטיות הטובה ביותר) ותנאי עצירה של 50 איטרציות או תזוזה קטנה מ־0.5.</p>
+<p><b>דוגמה אמיתית</b> <span class="tag obs">OBSERVED</span>: בתמונה המקורית 4,209,408 פיקסלים. מתוכם <span class="m">N_{\text{int}}=3{,}888{,}812</span> פנימיים, ולכן stride = 19 ונלקחו 204,675 דגימות.</p></div>
+<h3>שלב ד: סינון ומיזוג אשכולות</h3>
+<div class="box impl"><span class="tag impl">IMPLEMENTED MATHEMATICS</span> השורות 101–111. נתח (share) של אשכול: <span class="m">w_j=|\{x: a(x)=j\}|/|X|</span>. אשכולות עם <span class="m">w_j&lt;0.001</span> נזרקים. השאר נסרקים בסדר יורד של <span class="m">w</span>, וכל אחד מתמזג לאשכול הראשון שכבר נשמר ושקרוב אליו מספיק:
+<div class="mb">\|\mu-\kappa\|_2&lt;14\ \Rightarrow\ \kappa\leftarrow\frac{w_\kappa\,\kappa+w_\mu\,\mu}{w_\kappa+w_\mu},\quad w_\kappa\leftarrow w_\kappa+w_\mu</div>
+<p>זהו ממוצע משוקלל. התוצאה מומרת חזרה ל־RGB. ב־van_gogh_p התקבלו 10 צבעים.</p></div>
+<div class="box derived"><span class="tag derived">DERIVED</span> המרחק נמדד ביחידות Lab של OpenCV ל־8 ביט: <span class="m">L_8=2.55\,L^*</span>, <span class="m">a_8=a^*+128</span>, <span class="m">b_8=b^*+128</span>. לכן סף של 14 יחידות שקול ל־<span class="m">\Delta L^*\approx 5.5</span> בציר הבהירות, אבל ל־14 יחידות שלמות בצירי הצבע. ציר הבהירות "מתוח" פי 2.55.</div>
+<div class="box gap"><span class="tag gap">LIMITATION</span> <code>cv2.kmeans</code> נקרא בלי לקבע seed, ולכן הרצה חוזרת עשויה להחזיר פלטה מעט שונה. Option B משתמש בפלטה ששמורה ב־<code>palette.npy</code>, ולכן הוא ניתן לשחזור מהקובץ, אבל לא מחישוב מחדש.</div>
+
+<h2 id="c4s3">4.3 snap_to_palette: מיפוי כל פיקסל לצבע בפלטה</h2>
+<p><span class="ref" data-sym="def snap_to_palette">src/layerforge_l1/fullres_flatten.py:34</span></p>
+<pre class="code" dir="ltr"><span class="src">src/layerforge_l1/fullres_flatten.py:34-43</span>
+<span class="ln">  34</span>  def snap_to_palette(rgb: np.ndarray, palette: np.ndarray, config: FlattenConfig = FlattenConfig()) -&gt; np.ndarray:
+<span class="ln">  35</span>      smooth = cv2.bilateralFilter(
+<span class="ln">  36</span>          rgb, config.bilateral_diameter, config.bilateral_sigma_color, config.bilateral_sigma_space
+<span class="ln">  37</span>      )
+<span class="ln">  38</span>      lab = cv2.cvtColor(smooth, cv2.COLOR_RGB2LAB).astype(np.float32)
+<span class="ln">  39</span>      palette_lab = cv2.cvtColor(palette[None].astype(np.uint8), cv2.COLOR_RGB2LAB)[0].astype(np.float32)
+<span class="ln">  40</span>      distance = ((lab[:, :, None, :] - palette_lab[None, None]) ** 2).sum(-1)
+<span class="ln">  41</span>      labels = distance.argmin(-1).astype(np.uint8)
+<span class="ln">  42</span>      labels = majority_filter(labels, len(palette), config.majority_window)
+<span class="ln">  43</span>      return merge_small_fragments(labels, config.min_fragment_pixels)</pre>
+<div class="box impl"><span class="tag impl">IMPLEMENTED MATHEMATICS</span> שורות 40–41:
+<div class="mb">\ell(p)=\arg\min_{i\in\{0..P-1\}}\ \big\|\,\mathrm{Lab}(\tilde I(p))-\mathrm{Lab}(c_i)\,\big\|_2^2</div>
+<p><b>דוגמה מספרית</b> עם ערכי הפלטה האמיתיים (Lab של OpenCV): השחור <code>#000100</code> הוא (1, 126, 129), ופס הכובע <code>#354043</code> הוא (67, 124, 125). לפיקסל מוחלק (60, 124, 126):</p>
+<div class="mb">d^2_{\text{black}}=59^2+2^2+3^2=3494,\qquad d^2_{\text{band}}=7^2+0^2+1^2=50\ \Rightarrow\ \ell=\text{band}</div>
+<p>זה גם מסביר למה פס הכובע נשאר צבע נפרד: המרחק שלו מהשחור הוא <span class="m">\sqrt{66^2+2^2+4^2}\approx 66.2 \gg 14</span>, ולכן שלב המיזוג לא איחד אותם. Option B איחד אותם ידנית.</p></div>
+<div class="box derived"><span class="tag derived">DERIVED</span> <b>זיכרון:</b> המערך <code>distance</code> הוא בגודל <span class="m">H\times W\times P\times 3</span> בפורמט float32. ל־2048 × 1676 × 10 צבעים זה כ־412 מגה־בייט ביניים. זו אחת הסיבות שהרצות על המחשב הזה נעצרו לפעמים בגלל זיכרון.</div>
+
+<h2 id="c4s4">4.4 majority_filter: הצבעת רוב</h2>
+<p><span class="ref" data-sym="def majority_filter">src/layerforge_l1/fullres_flatten.py:46</span></p>
+<pre class="code" dir="ltr"><span class="src">src/layerforge_l1/fullres_flatten.py:46-50</span>
+<span class="ln">  46</span>  def majority_filter(labels: np.ndarray, count: int, window: int) -&gt; np.ndarray:
+<span class="ln">  47</span>      votes = np.stack(
+<span class="ln">  48</span>          [cv2.boxFilter((labels == i).astype(np.float32), -1, (window, window)) for i in range(count)]
+<span class="ln">  49</span>      )
+<span class="ln">  50</span>      return votes.argmax(0).astype(np.uint8)</pre>
+<div class="box impl"><span class="tag impl">IMPLEMENTED MATHEMATICS</span>
+<div class="mb">v_i(p)=\frac{1}{25}\sum_{q\in W_5(p)}[\ell(q)=i],\qquad \ell'(p)=\arg\max_i v_i(p)</div>
+<p><code>cv2.boxFilter</code> מנרמל כברירת מחדל, ולכן <span class="m">v_i</span> הוא שבר הפיקסלים מצבע i בחלון 5×5. בתיקו <code>argmax</code> מחזיר את האינדקס הנמוך. בשולי התמונה <code>boxFilter</code> משתמש בשיקוף (BORDER_REFLECT_101).</p></div>
+<div class="box derived"><span class="tag derived">DERIVED</span> <b>למה זה לא מזיז קצה ישר:</b> בקצה ישר בין שני צבעים, לפיקסל שנמצא צעד אחד בתוך צבע A יש 15 שכנים מ־A ו־10 מ־B בחלון 5×5. A מנצח, והקצה נשאר במקומו. מנגד, "חוד" דק מפיקסל אחד או שניים בולט פחות מ־13 קולות ונמחק. לכן גם קו ברוחב 2 פיקסלים בלבד (0.2 מ"מ) שעובר בתוך שטח בצבע אחד יימחק (10 קולות מול 15). קווי המתאר באיור הזה רחבים בהרבה.</div>
+
+<h2 id="c4s5">4.5 merge_small_fragments: מיזוג שברים קטנים</h2>
+<p><span class="ref" data-sym="def merge_small_fragments">src/layerforge_l1/fullres_flatten.py:53</span></p>
+<pre class="code" dir="ltr"><span class="src">src/layerforge_l1/fullres_flatten.py:53-73</span>
+<span class="ln">  53</span>  def merge_small_fragments(labels: np.ndarray, min_pixels: int) -&gt; np.ndarray:
+<span class="ln">  54</span>      &quot;&quot;&quot;Relabel each 4-connected fragment below ``min_pixels`` to its dominant neighbor.&quot;&quot;&quot;
+<span class="ln">  55</span>  
+<span class="ln">  56</span>      labels = labels.copy()
+<span class="ln">  57</span>      for color in np.unique(labels):
+<span class="ln">  58</span>          components, count = ndimage.label(labels == color)
+<span class="ln">  59</span>          if not count:
+<span class="ln">  60</span>              continue
+<span class="ln">  61</span>          areas = np.bincount(components.ravel())
+<span class="ln">  62</span>          for index, region in enumerate(ndimage.find_objects(components), start=1):
+<span class="ln">  63</span>              if areas[index] &gt;= min_pixels:
+<span class="ln">  64</span>                  continue
+<span class="ln">  65</span>              y0, y1 = max(region[0].start - 1, 0), region[0].stop + 1
+<span class="ln">  66</span>              x0, x1 = max(region[1].start - 1, 0), region[1].stop + 1
+<span class="ln">  67</span>              window = labels[y0:y1, x0:x1]
+<span class="ln">  68</span>              mask = components[y0:y1, x0:x1] == index
+<span class="ln">  69</span>              ring = ndimage.binary_dilation(mask) &amp; ~mask
+<span class="ln">  70</span>              neighbors = window[ring]
+<span class="ln">  71</span>              if neighbors.size:
+<span class="ln">  72</span>                  window[mask] = np.bincount(neighbors).argmax()
+<span class="ln">  73</span>      return labels</pre>
+<p>לכל צבע, <code>ndimage.label</code> (קשירות 4, ברירת המחדל של scipy) מוצא רכיבים. לכל רכיב F עם <span class="m">|F|&lt;40</span> מחושבת "טבעת" <span class="m">\partial F=(F\oplus C)\setminus F</span>, כאשר C הוא צלב 3×3, וכל F מקבל את הצבע הנפוץ ביותר בטבעת (<code>bincount().argmax()</code>). העדכון נעשה במקום, ולכן מיזוג מוקדם משפיע על הטבעות של שברים שנבדקים אחריו.</p>
+<h3>דוגמה A1: שני המסננים על מערך 7×7 (הופק מהפונקציות האמיתיות)</h3>
+<div class="bitsrow">
+<div><table class="bits" dir="ltr"><tr><td class="b0">0</td><td class="b0">0</td><td class="b0">0</td><td class="b0">0</td><td class="b1">1</td><td class="b1">1</td><td class="b1">1</td></tr><tr><td class="b0">0</td><td class="b1">1</td><td class="b0">0</td><td class="b0">0</td><td class="b1">1</td><td class="b1">1</td><td class="b1">1</td></tr><tr><td class="b0">0</td><td class="b0">0</td><td class="b0">0</td><td class="b0">0</td><td class="b1">1</td><td class="b1">1</td><td class="b1">1</td></tr><tr><td class="b0">0</td><td class="b0">0</td><td class="b0">0</td><td class="b2">2</td><td class="b1">1</td><td class="b1">1</td><td class="b1">1</td></tr><tr><td class="b0">0</td><td class="b0">0</td><td class="b0">0</td><td class="b0">0</td><td class="b1">1</td><td class="b1">1</td><td class="b1">1</td></tr><tr><td class="b0">0</td><td class="b0">0</td><td class="b0">0</td><td class="b0">0</td><td class="b1">1</td><td class="b0">0</td><td class="b1">1</td></tr><tr><td class="b0">0</td><td class="b0">0</td><td class="b0">0</td><td class="b0">0</td><td class="b1">1</td><td class="b1">1</td><td class="b1">1</td></tr></table>קלט: 0, 1 ו־2 (רעש: (1,1), (3,3) ו־(5,5))</div>
+<div><table class="bits" dir="ltr"><tr><td class="b0">0</td><td class="b0">0</td><td class="b0">0</td><td class="b0">0</td><td class="b1">1</td><td class="b1">1</td><td class="b1">1</td></tr><tr><td class="b0">0</td><td class="b0">0</td><td class="b0">0</td><td class="b0">0</td><td class="b1">1</td><td class="b1">1</td><td class="b1">1</td></tr><tr><td class="b0">0</td><td class="b0">0</td><td class="b0">0</td><td class="b0">0</td><td class="b1">1</td><td class="b1">1</td><td class="b1">1</td></tr><tr><td class="b0">0</td><td class="b0">0</td><td class="b0">0</td><td class="b0">0</td><td class="b1">1</td><td class="b1">1</td><td class="b1">1</td></tr><tr><td class="b0">0</td><td class="b0">0</td><td class="b0">0</td><td class="b0">0</td><td class="b1">1</td><td class="b1">1</td><td class="b1">1</td></tr><tr><td class="b0">0</td><td class="b0">0</td><td class="b0">0</td><td class="b0">0</td><td class="b1">1</td><td class="b1">1</td><td class="b1">1</td></tr><tr><td class="b0">0</td><td class="b0">0</td><td class="b0">0</td><td class="b0">0</td><td class="b1">1</td><td class="b1">1</td><td class="b1">1</td></tr></table><code>majority_filter(w=5)</code></div>
+<div><table class="bits" dir="ltr"><tr><td class="b0">0</td><td class="b0">0</td><td class="b0">0</td><td class="b0">0</td><td class="b1">1</td><td class="b1">1</td><td class="b1">1</td></tr><tr><td class="b0">0</td><td class="b0">0</td><td class="b0">0</td><td class="b0">0</td><td class="b1">1</td><td class="b1">1</td><td class="b1">1</td></tr><tr><td class="b0">0</td><td class="b0">0</td><td class="b0">0</td><td class="b0">0</td><td class="b1">1</td><td class="b1">1</td><td class="b1">1</td></tr><tr><td class="b0">0</td><td class="b0">0</td><td class="b0">0</td><td class="b0">0</td><td class="b1">1</td><td class="b1">1</td><td class="b1">1</td></tr><tr><td class="b0">0</td><td class="b0">0</td><td class="b0">0</td><td class="b0">0</td><td class="b1">1</td><td class="b1">1</td><td class="b1">1</td></tr><tr><td class="b0">0</td><td class="b0">0</td><td class="b0">0</td><td class="b0">0</td><td class="b1">1</td><td class="b1">1</td><td class="b1">1</td></tr><tr><td class="b0">0</td><td class="b0">0</td><td class="b0">0</td><td class="b0">0</td><td class="b1">1</td><td class="b1">1</td><td class="b1">1</td></tr></table><code>merge_small_fragments(min=2)</code></div>
+</div>
+<p>שני המסננים מסירים כאן את שלושת הפיקסלים הבודדים, והקצה האנכי בין 0 ל־1 (בין עמודות 3 ו־4) לא זז. הערכים נוצרו בהרצה של <code>docs/technical_optB/compute_examples.py</code>.</p>
+
+<h2 id="c4s6">4.6 הקטנה ומסגור <span class="tag man">AD HOC</span></h2>
+<div class="box impl"><span class="tag impl">IMPLEMENTED MATHEMATICS</span> (בקטע החד־פעמי)
+<div class="mb">w=\mathrm{round}\Big(1856\cdot\tfrac{2048}{2268}\Big)=1676,\qquad x_0=\Big\lfloor\tfrac{2048-1676}{2}\Big\rfloor=186</div>
+<p><code>INTER_AREA</code> מחשב לכל פיקסל יעד ממוצע משוקלל לפי שטח, ביחס הקטנה <span class="m">0.903</span>. הפסים <span class="m">[0,186)</span> ו־<span class="m">[1862,2048)</span> נצבעים ב־<code>#FF00FF</code>. בסך הכול <span class="m">2\cdot186\cdot2048=761{,}856</span> פיקסלים, וזה בדיוק מה שנספר בקובץ.</p></div>
+
+<h2 id="c4s7">4.7 תיקוני Option A ו־B: מתמטיקה</h2>
+<div class="box impl"><span class="tag impl">IMPLEMENTED MATHEMATICS</span> (בקטע החד־פעמי)
+<div class="mb">T=Y\ \cap\ \overline{(Y\ominus E_{17})\oplus E_{17}}\ \cap\ W,\qquad \text{opt}_A=\text{target}\ \text{with}\ T\to\text{black}</div>
+<p><span class="m">Y</span> היא מסכת הצהוב <code>#EAC007</code>. <span class="m">E_{17}</span> היא אליפסה בקוטר 17 פיקסלים (1.66 מ"מ). <span class="m">(Y\ominus E)\oplus E</span> היא פתיחה (opening) מורפולוגית: כל החלקים של Y שאפשר "לצבוע" באמצעות דיסקה של 1.66 מ"מ שנמצאת כולה בתוך Y. <span class="m">T</span> הוא מה שנשאר מחוץ לפתיחה, כלומר הקוצים הדקים. <span class="m">W</span> הוא חלון סביב רכיב הלחי האדום השמאלי, עם שוליים של 60 פיקסלים. ב־Option B כל פיקסל <code>#354043</code> הפך ל־<code>#000100</code>.</p></div>
+
+<h2 id="c4s8">4.8 exact_index: מתמונה לתוויות</h2>
+<p><span class="ref" data-sym="def exact_index">src/layerforge_l1/experimental_global_planner.py:73</span></p>
+<pre class="code" dir="ltr"><span class="src">src/layerforge_l1/experimental_global_planner.py:73-77</span>
+<span class="ln">  73</span>  def exact_index(rgb: np.ndarray) -&gt; tuple[np.ndarray, np.ndarray]:
+<span class="ln">  74</span>      &quot;&quot;&quot;Losslessly map exact RGB triplets to deterministic palette indices.&quot;&quot;&quot;
+<span class="ln">  75</span>  
+<span class="ln">  76</span>      palette, inverse = np.unique(rgb.reshape(-1, 3), axis=0, return_inverse=True)
+<span class="ln">  77</span>      return inverse.reshape(rgb.shape[:2]).astype(np.uint8), palette.astype(np.uint8)</pre>
+<p>זה מיפוי ללא איבוד מידע: כל שלשת RGB ייחודית מקבלת אינדקס, והפלטה ממוינת לקסיקוגרפית. ב־Option B יש 10 ערכים, ואינדקס 9 הוא <code>#FF00FF</code>, ולכן <code>frame_label=9</code>. שים לב שמספר הצבעים מוגבל ל־256 (uint8).</p>
+<table class="t small">
+<tr><th>אינדקס</th><th>צבע</th><th>פיקסלים</th><th>אינדקס</th><th>צבע</th><th>פיקסלים</th></tr>
+<tr><td>0</td><td class="l">#000100</td><td>447,051</td><td>5</td><td class="l">#97CCE5</td><td>791,533</td></tr>
+<tr><td>1</td><td class="l">#3D7033</td><td>285,450</td><td>6</td><td class="l">#BF3934</td><td>46,521</td></tr>
+<tr><td>2</td><td class="l">#609337</td><td>88,193</td><td>7</td><td class="l">#EAC007</td><td>1,179,526</td></tr>
+<tr><td>3</td><td class="l">#7CAE49</td><td>138,296</td><td>8</td><td class="l">#FCFEFE</td><td>153,757</td></tr>
+<tr><td>4</td><td class="l">#8AA1A2</td><td>302,121</td><td>9</td><td class="l">#FF00FF (frame)</td><td>761,856</td></tr>
+</table>
+<p class="small"><span class="tag obs">OBSERVED</span> נספר על <code>flat_2048_framed_optB.png</code>. היעד מכיל 35 אזורים 4־קשירים, כולל שני פסי המסגרת.</p>
+</section><script src="vendor/katex.min.js"></script><script>
+for (const e of document.querySelectorAll('.m')) katex.render(e.textContent, e, {output:'mathml', throwOnError:true});
+for (const e of document.querySelectorAll('.mb')) katex.render(e.textContent, e, {output:'mathml', displayMode:true, throwOnError:true});
+</script></body></html>

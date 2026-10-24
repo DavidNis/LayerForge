@@ -1,0 +1,1614 @@
+<!doctype html><html lang="he" dir="rtl"><head><meta charset="utf-8">
+<title>LayerForge Technical Architecture</title><link rel="stylesheet" href="style.css"></head><body><div class="cover">
+  <div class="t1">LayerForge V3</div>
+  <div class="t2">ארכיטקטורה טכנית מוסברת: הקוד שבאמת יצר את Option B</div>
+  <div class="t2" style="font-size:12pt">מתמונה שטוחה ועד לוחות STEP/STL: אלגוריתמים, מתמטיקה ומיקום בקוד</div>
+  <div class="t3">
+    היקף: רק המודולים, הפונקציות והפקודות שהשתתפו בהפקת <code>artifacts/l1_van_gogh_v1/cad_optB/</code><br>
+    מצב המאגר: ענף <code>main</code>, commit <code>1491fbb</code> + שינויים שעוד לא בוצע להם commit (נבדק ב־2026-10-22)<br>
+    אבן דרך: L-1 · מצב: <code>AWAITING_PHYSICAL_TEST</code> · הדפסה פיזית: PENDING<br>
+    המסמך נוצר מקוד המקור: כל הפניה <code>path:line</code> ונתוני הדוגמאות הופקו ונבדקו אוטומטית בזמן הבנייה
+  </div>
+</div>
+
+<section class="chapter" style="break-before:page">
+<h1 class="nonum" style="font-size:17pt">איך לקרוא את המסמך</h1>
+<p>המסמך מתאר <b>רק</b> את מסלול הביצוע שהפיק את Option B של התמונה <code>van_gogh_p.jfif</code>: עשרה לוחות פיזיים בגודל 225 × 225 × 1.6 מ"מ, כל אחד בצבע אחד, עם קובצי STEP ו־STL. במאגר יש עוד הרבה קוד ישן, כמו מתכנני שכבות קודמים, מסלולי flattening ישנים ומתכנן CP-SAT. לבקשתך הקוד הזה <b>לא מוסבר כאן</b>. הוא מופיע רק ברשימת המודולים שלא השתתפו (פרק 2), כדי שתדע שהוא קיים.</p>
+<h3>סימוני אמינות</h3>
+<table class="t">
+<tr><th style="width:30%">סימון</th><th>משמעות</th></tr>
+<tr><td><span class="tag impl">IMPLEMENTED MATHEMATICS</span></td><td>נוסחה שמתארת ישירות פעולה שהקוד מבצע. לכל נוסחה כזאת מצוינים הקובץ והשורה.</td></tr>
+<tr><td><span class="tag derived">DERIVED EXPLANATION</span></td><td>פרשנות מתמטית שהסקתי מהקוד. היא לא כתובה בקוד כנוסחה. כשמופיע נימוק נכונות, הוא מתאר את ההנחות ולא מהווה הוכחה פורמלית מלאה.</td></tr>
+<tr><td><span class="tag theory">THEORETICAL BACKGROUND</span></td><td>רקע שעוזר להבין את הקוד. אינו פונקציונליות שמומשה ב־LayerForge, אלא, למשל, ההגדרה של פונקציה מ־OpenCV.</td></tr>
+<tr><td><span class="tag obs">OBSERVED_IN_FILE</span></td><td>מספר או תוצאה שנקראו מקובץ ממצאים קיים (JSON או PNG) או מהרצה קצרה שבוצעה לצורך המסמך.</td></tr>
+<tr><td><span class="tag man">MANUAL / AD HOC</span></td><td>שלב שבוצע בקטע קוד חד־פעמי שהעוזר (AI) הריץ. הוא לא קיים כקובץ במאגר.</td></tr>
+<tr><td><span class="tag gap">GAP</span></td><td>פער, חוסר שילוב או דבר שלא אומת.</td></tr>
+<tr><td><span class="tag unv">UNVERIFIED</span></td><td>טענה שהקוד אינו מוכיח. לדוגמה, אופטימליות של מספר השכבות.</td></tr>
+</table>
+<h3>מוסכמות</h3>
+<ul>
+<li><b>Front-to-back:</b> המתכנן מתכנן מהלוח הקדמי (עומק 0) אל האחורי. בתיקיות הפלט המספור הפוך: <code>layer_00</code> הוא הלוח <b>האחורי</b> ו־<code>layer_09</code> הוא הקדמי.</li>
+<li><b>פיקסל פיזי:</b> ברשת הפיזית של Option B כל פיקסל הוא <span class="m">s = 225/2304 = 0.09765625</span> מ"מ.</li>
+<li>שמות מזהים, נוסחאות, קוד ונתיבים נשארים משמאל לימין.</li>
+<li>הפניה כמו <span class="ref" data-sym="def structural_support">src/layerforge_l1/reveal_planner.py:171</span> נבדקה בזמן הבנייה: בשורה הזאת אכן מופיע הסמל הנזכר.</li>
+</ul>
+</section>
+<section class="chapter toc" id="toc"><h1 class="nonum">תוכן עניינים</h1><div class="toc1"><a href="#c1">1. מטרת המערכת והיקף המסמך</a><span class="dots"></span><span class="pg">5</span></div><div class="toc2"><a href="#c1s1">1.1 הבעיה הפיזית</a><span class="dots"></span><span class="pg">5</span></div><div class="toc2"><a href="#c1s2">1.2 מה המערכת עושה, בשורה אחת לכל שלב</a><span class="dots"></span><span class="pg">5</span></div><div class="toc2"><a href="#c1s3">1.3 מה כלול ומה לא</a><span class="dots"></span><span class="pg">5</span></div><div class="toc2"><a href="#c1s4">1.4 תשובות קצרות לשאלות המרכזיות</a><span class="dots"></span><span class="pg">5</span></div><div class="toc1"><a href="#c2">2. ארכיטקטורת המאגר בפועל</a><span class="dots"></span><span class="pg">6</span></div><div class="toc2"><a href="#c2s1">2.1 שיטת הזיהוי</a><span class="dots"></span><span class="pg">6</span></div><div class="toc2"><a href="#c2s2">2.2 תרשים 1: ארכיטקטורת המערכת שבשימוש</a><span class="dots"></span><span class="pg">6</span></div><div class="toc2"><a href="#c2s3">2.3 מודולים ששימשו, לפי תפקיד</a><span class="dots"></span><span class="pg">6</span></div><div class="toc2"><a href="#c2s4">2.4 מודולים שלא השתתפו ב־Option B</a><span class="dots"></span><span class="pg">6</span></div><div class="toc2"><a href="#c2s5">2.5 טבלת מיפוי: מושג → קובץ → פונקציה</a><span class="dots"></span><span class="pg">7</span></div><div class="toc1"><a href="#c3">3. נקודות כניסה ורצף הביצוע של Option B</a><span class="dots"></span><span class="pg">8</span></div><div class="toc2"><a href="#c3s1">3.1 אין נקודת כניסה אחת</a><span class="dots"></span><span class="pg">8</span></div><div class="toc2"><a href="#c3s2">3.2 תרשים 2: צינור העיבוד מקלט לפלט</a><span class="dots"></span><span class="pg">8</span></div><div class="toc2"><a href="#c3s3">3.3 שלב 1: חילוץ פלטה <span class="tag man">AD HOC</span></a><span class="dots"></span><span class="pg">8</span></div><div class="toc2"><a href="#c3s4">3.4 שלב 2: הקטנה, מיפוי ומסגור <span class="tag man">AD HOC</span></a><span class="dots"></span><span class="pg">8</span></div><div class="toc2"><a href="#c3s5">3.5 שלב 3: תיקוני Option A ו־Option B <span class="tag man">AD HOC · USER-REQUESTED</span></a><span class="dots"></span><span class="pg">9</span></div><div class="toc2"><a href="#c3s6">3.6 שלב 4: המתכנן (סקריפט שנשמר)</a><span class="dots"></span><span class="pg">9</span></div><div class="toc2"><a href="#c3s7">3.7 שלב 5: ייצוא CAD (סקריפט שנשמר)</a><span class="dots"></span><span class="pg">9</span></div><div class="toc2"><a href="#c3s8">3.8 שלב 6: אימות חוזר של ה־CAD <span class="tag man">AD HOC</span></a><span class="dots"></span><span class="pg">10</span></div><div class="toc2"><a href="#c3s9">3.9 זמני ריצה <span class="tag obs">OBSERVED_IN_FILE</span></a><span class="dots"></span><span class="pg">10</span></div><div class="toc1"><a href="#c4">4. עיבוד תמונה והכנת היעד</a><span class="dots"></span><span class="pg">11</span></div><div class="toc2"><a href="#c4s1">4.1 FlattenConfig: הפרמטרים</a><span class="dots"></span><span class="pg">11</span></div><div class="toc2"><a href="#c4s2">4.2 extract_palette: פלטה אוטומטית</a><span class="dots"></span><span class="pg">11</span></div><div class="toc2"><a href="#c4s3">4.3 snap_to_palette: מיפוי כל פיקסל לצבע בפלטה</a><span class="dots"></span><span class="pg">12</span></div><div class="toc2"><a href="#c4s4">4.4 majority_filter: הצבעת רוב</a><span class="dots"></span><span class="pg">13</span></div><div class="toc2"><a href="#c4s5">4.5 merge_small_fragments: מיזוג שברים קטנים</a><span class="dots"></span><span class="pg">13</span></div><div class="toc2"><a href="#c4s6">4.6 הקטנה ומסגור <span class="tag man">AD HOC</span></a><span class="dots"></span><span class="pg">14</span></div><div class="toc2"><a href="#c4s7">4.7 תיקוני Option A ו־B: מתמטיקה</a><span class="dots"></span><span class="pg">14</span></div><div class="toc2"><a href="#c4s8">4.8 exact_index: מתמונה לתוויות</a><span class="dots"></span><span class="pg">15</span></div><div class="toc1"><a href="#c5">5. מודלי הנתונים</a><span class="dots"></span><span class="pg">16</span></div><div class="toc2"><a href="#c5s1">5.1 תרשים 4: מבני הנתונים והקשרים ביניהם</a><span class="dots"></span><span class="pg">16</span></div><div class="toc2"><a href="#c5s2">5.2 RevealConfig</a><span class="dots"></span><span class="pg">16</span></div><div class="toc2"><a href="#c5s3">5.3 PocConfig והרשת הפיזית</a><span class="dots"></span><span class="pg">17</span></div><div class="toc2"><a href="#c5s4">5.4 OptimizationConfig: מרכיבי הרוחב</a><span class="dots"></span><span class="pg">17</span></div><div class="toc2"><a href="#c5s5">5.5 מצב המתכנן (RevealPlanner)</a><span class="dots"></span><span class="pg">18</span></div><div class="toc2"><a href="#c5s6">5.6 מבני הפלט של התכנון</a><span class="dots"></span><span class="pg">19</span></div><div class="toc2"><a href="#c5s7">5.7 קבצים על הדיסק</a><span class="dots"></span><span class="pg">19</span></div><div class="toc1"><a href="#c6">6. רשת פיזית, יחידות, גרעין הרוחב ותאים</a><span class="dots"></span><span class="pg">20</span></div><div class="toc2"><a href="#c6s1">6.1 מערכת הקואורדינטות והיחידות</a><span class="dots"></span><span class="pg">20</span></div><div class="toc2"><a href="#c6s2">6.2 מדרישת 1.2 מ"מ לגרעין של 13 פיקסלים</a><span class="dots"></span><span class="pg">20</span></div><div class="toc2"><a href="#c6s3">6.3 build_cells: חלוקת אזורים לתאים</a><span class="dots"></span><span class="pg">21</span></div><div class="toc1"><a href="#c7">7. אופרטור התמיכה המבנית</a><span class="dots"></span><span class="pg">23</span></div><div class="toc2"><a href="#c7s1">7.1 הגדרות: שחיקה, התפשטות ועיגון</a><span class="dots"></span><span class="pg">23</span></div><div class="toc2"><a href="#c7s2">7.2 האופרטור הבסיסי</a><span class="dots"></span><span class="pg">23</span></div><div class="toc2"><a href="#c7s3">7.3 מונוטוניות: הבסיס לכל המתכנן</a><span class="dots"></span><span class="pg">24</span></div><div class="toc2"><a href="#c7s4">7.4 לולאת הגשרים (bridge loop)</a><span class="dots"></span><span class="pg">24</span></div><div class="toc2"><a href="#c7s5">7.5 לולאת החיתוך (growing-cut prune)</a><span class="dots"></span><span class="pg">25</span></div><div class="toc2"><a href="#c7s6">7.6 הגעה גאודזית: הגבול ל"בליטות" (nubs)</a><span class="dots"></span><span class="pg">25</span></div><div class="toc2"><a href="#c7s7">7.7 דוגמה A2: הפונקציה האמיתית על רשת 9×12</a><span class="dots"></span><span class="pg">25</span></div><div class="toc2"><a href="#c7s8">7.8 סיבוכיות</a><span class="dots"></span><span class="pg">26</span></div><div class="toc1"><a href="#c8">8. המתכנן הפעיל: RevealPlanner</a><span class="dots"></span><span class="pg">27</span></div><div class="toc2"><a href="#c8s1">8.1 המודל: חשיפה מלפנים לאחור</a><span class="dots"></span><span class="pg">28</span></div><div class="toc2"><a href="#c8s2">8.2 unsupported_pixels: האם לוח מסוים בנוי היטב?</a><span class="dots"></span><span class="pg">28</span></div><div class="toc2"><a href="#c8s3">8.3 maximal_reveal: החשיפה הגדולה ביותר (נקודת שבת)</a><span class="dots"></span><span class="pg">28</span></div><div class="toc2"><a href="#c8s4">8.4 closure: בדיקת היתכנות שלא תלויה בסדר</a><span class="dots"></span><span class="pg">29</span></div><div class="toc2"><a href="#c8s5">8.5 beam_search: מספר לוחות קטן</a><span class="dots"></span><span class="pg">30</span></div><div class="toc2"><a href="#c8s6">8.6 eliminate_sheets: מחיקת לוחות בדיעבד</a><span class="dots"></span><span class="pg">31</span></div><div class="toc2"><a href="#c8s7">8.7 materialize ו־seam_report</a><span class="dots"></span><span class="pg">31</span></div><div class="toc2"><a href="#c8s8">8.8 תרשים 3: זרימת יצירת השכבות</a><span class="dots"></span><span class="pg">32</span></div><div class="toc2"><a href="#c8s9">8.9 דוגמת ריצה: הפיקסטורה הסינתטית מהבדיקות</a><span class="dots"></span><span class="pg">32</span></div><div class="toc2"><a href="#c8s10">8.10 תשובות לשאלות היסוד מתוך הקוד</a><span class="dots"></span><span class="pg">33</span></div><div class="toc2"><a href="#c8s11">8.11 סיבוכיות ומקורות העלות</a><span class="dots"></span><span class="pg">34</span></div><div class="toc2"><a href="#c8s12">8.12 תנאי כשל</a><span class="dots"></span><span class="pg">34</span></div><div class="toc1"><a href="#c9">9. מסכות פיזיות: חומר, חורים וחומר נסתר</a><span class="dots"></span><span class="pg">35</span></div><div class="toc2"><a href="#c9s1">9.1 שלושה סוגי פיקסלים בכל לוח</a><span class="dots"></span><span class="pg">35</span></div><div class="toc2"><a href="#c9s2">9.2 האנטומיה של לוח אמיתי מ־Option B</a><span class="dots"></span><span class="pg">35</span></div><div class="toc2"><a href="#c9s3">9.3 האינווריאנטים שמבטיחים לוח תקין</a><span class="dots"></span><span class="pg">35</span></div><div class="toc2"><a href="#c9s4">9.4 האם המסכות מאבדות חומר נסתר שהיה יכול לחזק?</a><span class="dots"></span><span class="pg">35</span></div><div class="toc2"><a href="#c9s5">9.5 הלוח האחורי</a><span class="dots"></span><span class="pg">36</span></div><div class="toc1"><a href="#c10">10. אימות פיזי</a><span class="dots"></span><span class="pg">37</span></div><div class="toc2"><a href="#c10s1">10.1 תרשים 7: זרימת האימות והטיפול בכשל</a><span class="dots"></span><span class="pg">37</span></div><div class="toc2"><a href="#c10s2">10.2 בדיקה 1: קשירות 4 (audit_edge_connectivity)</a><span class="dots"></span><span class="pg">37</span></div><div class="toc2"><a href="#c10s3">10.3 בדיקה 2: רוחב מבני (audit_connection_width)</a><span class="dots"></span><span class="pg">38</span></div><div class="toc2"><a href="#c10s4">10.4 בדיקה 3: מסגרת משותפת</a><span class="dots"></span><span class="pg">39</span></div><div class="toc2"><a href="#c10s5">10.5 בדיקה 4: שחזור מדויק</a><span class="dots"></span><span class="pg">39</span></div><div class="toc2"><a href="#c10s6">10.6 בדיקה 5: פתחים צרים (אבחון בלבד)</a><span class="dots"></span><span class="pg">39</span></div><div class="toc2"><a href="#c10s7">10.7 אימות ברזולוציה כפולה (x8): לא הורץ</a><span class="dots"></span><span class="pg">39</span></div><div class="toc2"><a href="#c10s8">10.8 דיוק, דיסקרטיזציה וטולרנסים</a><span class="dots"></span><span class="pg">39</span></div><div class="toc1"><a href="#c11">11. בניית CAD וייצוא</a><span class="dots"></span><span class="pg">40</span></div><div class="toc2"><a href="#c11s1">11.1 תרשים 5: מסכה → מוצק</a><span class="dots"></span><span class="pg">40</span></div><div class="toc2"><a href="#c11s2">11.2 mask_to_geometry: ממסכה לפוליגונים</a><span class="dots"></span><span class="pg">40</span></div><div class="toc2"><a href="#c11s3">11.3 extrude_geometry: CadQuery / OpenCascade</a><span class="dots"></span><span class="pg">41</span></div><div class="toc2"><a href="#c11s4">11.4 ייצוא ובדיקת קריאה חוזרת</a><span class="dots"></span><span class="pg">42</span></div><div class="toc2"><a href="#c11s5">11.5 קואורדינטות הרכבה וקואורדינטות הדפסה</a><span class="dots"></span><span class="pg">42</span></div><div class="toc2"><a href="#c11s6">11.6 אימות חוזר אחרי CAD <span class="tag man">AD HOC</span></a><span class="dots"></span><span class="pg">43</span></div><div class="toc1"><a href="#c12">12. הרצה מלאה: Option B מהתמונה ועד STL</a><span class="dots"></span><span class="pg">44</span></div><div class="toc2"><a href="#c12s1">12.1 קלט והכנה</a><span class="dots"></span><span class="pg">44</span></div><div class="toc2"><a href="#c12s2">12.2 רצף הקריאות במתכנן</a><span class="dots"></span><span class="pg">45</span></div><div class="toc2"><a href="#c12s3">12.3 הלוחות שנוצרו</a><span class="dots"></span><span class="pg">45</span></div><div class="toc2"><a href="#c12s4">12.4 הרכבה, עומק והשוואה אחרי CAD</a><span class="dots"></span><span class="pg">46</span></div><div class="toc2"><a href="#c12s5">12.5 תוצאות ה־CAD</a><span class="dots"></span><span class="pg">47</span></div><div class="toc1"><a href="#c13">13. בדיקות, מגבלות ומצב המימוש</a><span class="dots"></span><span class="pg">48</span></div><div class="toc2"><a href="#c13s1">13.1 בדיקות אוטומטיות</a><span class="dots"></span><span class="pg">48</span></div><div class="toc2"><a href="#c13s2">13.2 מגבלות ידועות</a><span class="dots"></span><span class="pg">48</span></div><div class="toc2"><a href="#c13s3">13.3 השוואה ל־MILESTONES.md</a><span class="dots"></span><span class="pg">49</span></div><div class="toc2"><a href="#c13s4">13.4 קוד ישן וניסיוני שלא תועד</a><span class="dots"></span><span class="pg">49</span></div><div class="toc1"><a href="#c14">14. מדריך ניווט למפתח ואינדקס מקורות</a><span class="dots"></span><span class="pg">50</span></div><div class="toc2"><a href="#c14s1">14.1 איפה לשנות מה</a><span class="dots"></span><span class="pg">50</span></div><div class="toc2"><a href="#c14s2">14.2 איך לשחזר את Option B מהקבצים</a><span class="dots"></span><span class="pg">50</span></div><div class="toc2"><a href="#c14s3">14.3 אינדקס מקורות</a><span class="dots"></span><span class="pg">51</span></div><div class="toc1"><a href="#c15">15. מילון מונחים</a><span class="dots"></span><span class="pg">52</span></div><div class="toc2"><a href="#c15s1">15.1 אימות המסמך</a><span class="dots"></span><span class="pg">52</span></div></section><section class="chapter" data-name="01_overview"><h1 id="c1">1. מטרת המערכת והיקף המסמך</h1>
+
+<h2 id="c1s1">1.1 הבעיה הפיזית</h2>
+<p>LayerForge הופך איור בצבעים שטוחים לערימה (stack) של לוחות מודפסים. כל לוח מודפס בחומר אחד בצבע אחד. כשמסתכלים מלפנים, כל נקודה בתמונה מקבלת את הצבע של <b>הלוח הקדמי ביותר שיש בו חומר בנקודה הזאת</b>. לכן כדי שצבע מלוח אחורי ייראה, כל הלוחות שלפניו חייבים להיות חלולים (חור) באותה נקודה.</p>
+<p>הדרישות שהקוד אוכף בפועל ב־Option B (<span class="tag obs">OBSERVED_IN_FILE</span> בדוח <code>poc_report.json</code> ובקוד):</p>
+<ul>
+<li><b>היקף משותף:</b> לכל הלוחות מסגרת חיצונית זהה ברוחב 128 פיקסלים (12.5 מ"מ) סביב שטח יצירה של 200 × 200 מ"מ. גודל הלוח הכולל: 225 × 225 מ"מ.</li>
+<li><b>חיבור למסגרת:</b> כל לוח הוא רכיב 4־קשיר (4-connected) אחד. אין "איים" צפים.</li>
+<li><b>רוחב מבני מינימלי:</b> החלק הנושא של כל לוח מחובר למסגרת דרך מעברים ברוחב של 13 פיקסלים לפחות (1.27 מ"מ, כלומר 1.2 מ"מ אחרי עיגול כלפי מעלה; פרק 6).</li>
+<li><b>שחזור מדויק:</b> כשמרכיבים את הלוחות, התמונה המתקבלת זהה פיקסל־לפיקסל לתמונת היעד השטוחה, ללא "גשרים" נראים.</li>
+<li><b>צבעים חוזרים מותרים:</b> אותו צבע יכול להופיע בכמה לוחות. ב־Option B השחור מופיע פעמיים.</li>
+<li><b>מינימום לוחות:</b> מטרה משנית שמושגת בחיפוש beam. אין לה הוכחת אופטימליות (פרק 8).</li>
+</ul>
+
+<h2 id="c1s2">1.2 מה המערכת עושה, בשורה אחת לכל שלב</h2>
+<ol>
+<li>מחלצת פלטה אוטומטית מהתמונה המקורית (k-means במרחב CIELAB) וממפה כל פיקסל לצבע הקרוב בפלטה (פרק 4).</li>
+<li>מקטינה את התמונה לגובה 2048 פיקסלים (200 מ"מ) וממלאת את הצדדים בצבע מסגרת (magenta). <span class="tag man">AD HOC</span></li>
+<li>לפי בקשת המשתמש, מתקנת את האיור באופן ידני וממוקד. ב־Option B: קוצים צהובים דקים בלחי, ופס הכובע שהומר לשחור. <span class="tag man">AD HOC</span></li>
+<li>מחלקת את האזורים ל"תאים" (cells) קטנים ומחליטה לכל תא באיזה עומק (לוח) הוא ייחשף (פרקים 6–8).</li>
+<li>בונה לכל לוח מסכת חומר פיזית: החלק הגלוי שלו ועוד חומר נסתר שתומך בו (פרקים 7 ו־9).</li>
+<li>מאמתת כל לוח עם ה־validator הקיים: קשירות ורוחב (פרק 10).</li>
+<li>הופכת כל מסכה לפוליגונים, מבצעת extrusion ל־1.6 מ"מ ב־CadQuery ומייצאת STEP ו־STL. אחר כך קוראת את הקבצים בחזרה ובודקת אותם (פרק 11).</li>
+</ol>
+
+<h2 id="c1s3">1.3 מה כלול ומה לא</h2>
+<div class="box note">
+<p><b>כלול:</b> <code>fullres_flatten.py</code>, <code>reveal_planner.py</code>, הסקריפטים <code>run_turtle_reveal_planner_poc.py</code> ו־<code>export_reveal_stack_cad.py</code>, והפונקציות המשותפות שהם קוראים להן: ה־validator מ־<code>connectivity_repair.py</code>, הגדרות הרשת מ־<code>subtractive_poc.py</code>, <code>hidden_width_repair.py</code> ו־<code>layer_optimization.py</code>, ה־extrusion מ־<code>geometry.py</code> ו־<code>exact_index</code> מ־<code>experimental_global_planner.py</code>.</p>
+<p><b>לא כלול:</b> כל אלגוריתם שלא רץ ב־Option B. ביניהם מתכנן ה־CP-SAT (הפונקציה <code>exact_index</code> שבקובץ שלו כן שימשה, אבל ה־solver עצמו לא הורץ), מתכנני beam ישנים, ה־flattening הישן, נרמול קווי מתאר ותיקוני רוחב ישנים.</p>
+</div>
+
+<h2 id="c1s4">1.4 תשובות קצרות לשאלות המרכזיות</h2>
+<table class="t">
+<tr><th style="width:34%">שאלה</th><th>תשובה לפי הקוד</th></tr>
+<tr><td>מהו המתכנן הפעיל?</td><td><code>RevealPlanner</code> במצב <code>split_regions=True</code> ("per_cell"). זהו מתכנן beam שעובד על תאים, עם "maximal reveal" כנקודת שבת.</td></tr>
+<tr><td>האם נעשה שימוש ב־CP-SAT או ב־AI?</td><td>לא. אין solver חיצוני ואין מודל לומד. יש מורפולוגיה של OpenCV, חיפוש beam, ו־k-means (שהוא clustering דטרמיניסטי־סטטיסטי, לא AI).</td></tr>
+<tr><td>האם המסלול כולו הוא פקודה אחת?</td><td>לא. <span class="tag gap">GAP</span> ה־flattening, המסגור, התיקונים הידניים והאימות החוזר של ה־CAD הורצו כקטעי קוד חד־פעמיים. ראה פרק 3.</td></tr>
+<tr><td>האם המתכנן משנה את האיור?</td><td>לא. הוא רק מחליט עומק לכל תא וכמה חומר נסתר לשמור. השינויים באיור (Option A/B) נעשו ידנית לפני התכנון.</td></tr>
+</table>
+</section><section class="chapter" data-name="02_architecture"><h1 id="c2">2. ארכיטקטורת המאגר בפועל</h1>
+
+<h2 id="c2s1">2.1 שיטת הזיהוי</h2>
+<p>כדי לזהות מה פעיל, חישבתי את סגור הייבוא (transitive import closure) של המודולים שהסקריפטים של Option B טוענים, באמצעות ניתוח AST של כל קובץ ב־<code>src/layerforge_l1/</code>. רשימת הפקודות שהורצו בפועל נלקחה מהרישום המלא של השיחה, והושוותה לקבצי הממצאים שנוצרו (<code>run.log</code>, <code>poc_report.json</code>, <code>cad_manifest.json</code>, <code>cad_revalidation.json</code>).</p>
+
+<h2 id="c2s2">2.2 תרשים 1: ארכיטקטורת המערכת שבשימוש</h2>
+<div class="arch">
+ <div class="col"><h4>קוד חדש (פעיל)</h4>
+  <span class="chip new">reveal_planner.py · RevealPlanner</span>
+  <span class="chip new">fullres_flatten.py</span>
+  <span class="chip script">scripts/run_turtle_reveal_planner_poc.py</span>
+  <span class="chip script">scripts/export_reveal_stack_cad.py</span>
+  <span class="chip adhoc">ad hoc: palette / resize / frame</span>
+  <span class="chip adhoc">ad hoc: Option A/B edits</span>
+  <span class="chip adhoc">ad hoc: CAD re-validation</span>
+ </div>
+ <div class="col"><h4>קוד קיים שעשו בו שימוש חוזר</h4>
+  <span class="chip reuse">connectivity_repair.audit_edge_connectivity</span>
+  <span class="chip reuse">connectivity_repair.audit_connection_width</span>
+  <span class="chip reuse">connectivity_repair._width_parameters</span>
+  <span class="chip reuse">subtractive_poc.PocConfig / _outer_and_perimeter</span>
+  <span class="chip reuse">hidden_width_repair.validation_poc_config</span>
+  <span class="chip reuse">layer_optimization.OptimizationConfig</span>
+  <span class="chip reuse">geometry.extrude_geometry / polygons</span>
+  <span class="chip reuse">experimental_global_planner.exact_index</span>
+ </div>
+ <div class="col"><h4>ספריות חיצוניות</h4>
+  <span class="chip lib">opencv-python 4.10.0</span>
+  <span class="chip lib">numpy 2.2.6 · scipy 1.14.0</span>
+  <span class="chip lib">shapely 2.0.6</span>
+  <span class="chip lib">cadquery 2.6.1 (OCCT)</span>
+  <span class="chip lib">trimesh 4.8.3</span>
+  <span class="chip lib">Pillow 10.3.0 · Python 3.12.1</span>
+ </div>
+</div>
+<p class="legend small"><span class="chip new" style="display:inline">חדש</span> <span class="chip reuse" style="display:inline">שימוש חוזר</span> <span class="chip script" style="display:inline">סקריפט CLI</span> <span class="chip adhoc" style="display:inline">חד־פעמי, לא במאגר</span></p>
+<p class="small">איור: התרשים מבוסס על ייבואים אמיתיים. מ־<code>experimental_global_planner.py</code> נטענת רק הפונקציה <code>exact_index</code>. לטעינת המודול אין תלות ב־OR-Tools, כי ה־CP-SAT נטען שם רק בתוך פונקציות שלא נקראו.</p>
+
+<h2 id="c2s3">2.3 מודולים ששימשו, לפי תפקיד</h2>
+<table class="t">
+<tr><th>מודול</th><th>מה נלקח ממנו</th><th>תפקיד במסלול</th></tr>
+<tr><td class="l">reveal_planner.py</td><td class="l">כל הקובץ</td><td>התכנון: תאים, תמיכה מבנית, maximal reveal, beam, materialize</td></tr>
+<tr><td class="l">fullres_flatten.py</td><td class="l">extract_palette, snap_to_palette</td><td>פלטה ו־flattening ברזולוציה מלאה</td></tr>
+<tr><td class="l">connectivity_repair.py</td><td class="l">_width_parameters, audit_edge_connectivity, audit_connection_width</td><td>יחידות, גרעין הרוחב וה־validator</td></tr>
+<tr><td class="l">subtractive_poc.py</td><td class="l">PocConfig, DEFAULT_CONFIG, _outer_and_perimeter</td><td>מידות הרשת הבסיסית (512/576/32) ומסכת המסגרת</td></tr>
+<tr><td class="l">hidden_width_repair.py</td><td class="l">WidthRepairConfig, validation_poc_config</td><td>הגדלת הרשת פי 4 לגודל הפיזי (225 מ"מ)</td></tr>
+<tr><td class="l">layer_optimization.py</td><td class="l">OptimizationConfig</td><td>שלושת מרכיבי הרוחב: 0.8 + 0.2 + 0.2 מ"מ</td></tr>
+<tr><td class="l">geometry.py</td><td class="l">polygons, extrude_geometry (+_face, _wire)</td><td>בניית מוצק CadQuery</td></tr>
+<tr><td class="l">experimental_global_planner.py</td><td class="l">exact_index בלבד</td><td>מיפוי RGB מדויק לאינדקסים</td></tr>
+</table>
+
+<h2 id="c2s4">2.4 מודולים שלא השתתפו ב־Option B</h2>
+<p>14 מתוך 22 המודולים בחבילה לא נטענו כלל (כ־9,000 שורות): <code>auto_pipeline</code>, <code>cli</code>, <code>pipeline</code>, <code>flat_color_workflow</code>, <code>width_aware_planner</code>, <code>width_diagnostics</code>, <code>shadowbox_simplification</code>, <code>object_simplification_poc</code>, <code>suitability</code>, <code>contour_normalization</code>, <code>contour_consistency</code>, <code>local_contour_correction</code>, <code>tiny_region_cleanup</code>, <code>raster</code>. מתוך 25 הסקריפטים השתתפו שניים. מתוך 23 קובצי הבדיקות רק <code>tests/test_reveal_planner.py</code> בודק את המסלול הזה. גם במודולים שבשימוש חוזר רוב הקוד לא נקרא. למשל, <code>layer_optimization.py</code> מכיל 859 שורות, וממנו נלקחה רק מחלקת הקונפיגורציה.</p>
+
+<h2 id="c2s5">2.5 טבלת מיפוי: מושג → קובץ → פונקציה</h2>
+<table class="t small">
+<tr><th>מושג</th><th>מקור</th><th>קלט</th><th>פלט</th><th>נקרא על ידי</th></tr>
+<tr><td>פלטה אוטומטית</td><td><span class="ref" data-sym="def extract_palette">src/layerforge_l1/fullres_flatten.py:76</span></td><td>RGB uint8</td><td>(P,3) RGB</td><td>ad hoc</td></tr>
+<tr><td>מיפוי לפלטה</td><td><span class="ref" data-sym="def snap_to_palette">src/layerforge_l1/fullres_flatten.py:34</span></td><td>RGB, palette</td><td>labels uint8</td><td>ad hoc</td></tr>
+<tr><td>אינדוקס מדויק</td><td><span class="ref" data-sym="def exact_index">src/layerforge_l1/experimental_global_planner.py:73</span></td><td>RGB</td><td>labels, palette</td><td><code>main</code> בסקריפט</td></tr>
+<tr><td>רשת פיזית</td><td><span class="ref" data-sym="def physical_grid">src/layerforge_l1/reveal_planner.py:65</span></td><td>RevealConfig</td><td>PocConfig ×4</td><td>RevealPlanner.__init__</td></tr>
+<tr><td>גרעין רוחב</td><td><span class="ref" data-sym="def width_kernel">src/layerforge_l1/reveal_planner.py:74</span></td><td>PocConfig</td><td>13×13 ellipse</td><td>RevealPlanner.__init__</td></tr>
+<tr><td>תאים</td><td><span class="ref" data-sym="def build_cells">src/layerforge_l1/reveal_planner.py:85</span></td><td>labels</td><td>cell_map, cell_color, cell_region</td><td>RevealPlanner.__init__</td></tr>
+<tr><td>תמיכה מבנית</td><td><span class="ref" data-sym="def structural_support">src/layerforge_l1/reveal_planner.py:171</span></td><td>covered, perimeter, K</td><td>support mask</td><td>unsupported_pixels, sheet_mask</td></tr>
+<tr><td>פיקסלים לא נתמכים</td><td><span class="ref" data-sym="def unsupported_pixels">src/layerforge_l1/reveal_planner.py:273</span></td><td>covered cells, reveal</td><td>bad mask</td><td>maximal_reveal, eliminate_sheets</td></tr>
+<tr><td>חשיפה מקסימלית</td><td><span class="ref" data-sym="def maximal_reveal">src/layerforge_l1/reveal_planner.py:290</span></td><td>covered, color</td><td>reveal, iterations</td><td>closure, beam_search</td></tr>
+<tr><td>סגור היתכנות</td><td><span class="ref" data-sym="def closure">src/layerforge_l1/reveal_planner.py:353</span></td><td>–</td><td>feasible, obstruction</td><td><code>run_variant</code></td></tr>
+<tr><td>חיפוש beam</td><td><span class="ref" data-sym="def beam_search">src/layerforge_l1/reveal_planner.py:374</span></td><td>–</td><td>colors, reveals</td><td><code>run_variant</code></td></tr>
+<tr><td>מסכת לוח</td><td><span class="ref" data-sym="def materialize">src/layerforge_l1/reveal_planner.py:423</span></td><td>reveals</td><td>physical/visible masks</td><td><code>run_variant</code></td></tr>
+<tr><td>קשירות 4</td><td><span class="ref" data-sym="def audit_edge_connectivity">src/layerforge_l1/connectivity_repair.py:82</span></td><td>mask</td><td>report</td><td><code>run_variant</code>, ad hoc</td></tr>
+<tr><td>רוחב 1.2 מ"מ</td><td><span class="ref" data-sym="def audit_connection_width">src/layerforge_l1/connectivity_repair.py:227</span></td><td>mask, visible, grid</td><td>report, maps</td><td><code>run_variant</code>, ad hoc</td></tr>
+<tr><td>מסכה → פוליגון</td><td><span class="ref" data-sym="def mask_to_geometry">scripts/export_reveal_stack_cad.py:29</span></td><td>mask, mm/px</td><td>shapely geometry</td><td><code>main</code> בסקריפט ה־CAD</td></tr>
+<tr><td>Extrusion</td><td><span class="ref" data-sym="def extrude_geometry">src/layerforge_l1/geometry.py:97</span></td><td>geometry, t</td><td>cq.Shape</td><td><code>main</code> בסקריפט ה־CAD</td></tr>
+</table>
+</section><section class="chapter" data-name="03_entrypoints"><h1 id="c3">3. נקודות כניסה ורצף הביצוע של Option B</h1>
+
+<h2 id="c3s1">3.1 אין נקודת כניסה אחת</h2>
+<div class="box gap"><span class="tag gap">GAP</span> אין במאגר פקודה אחת שהופכת תמונה ל־STL. ל־<code>python -m layerforge_l1</code> (<code>cli.py</code>) אין קשר למסלול הזה. Option B הופק בשש פקודות. שתיים מהן סקריפטים שנשמרו במאגר, וארבע הן קטעי Python חד־פעמיים שהעוזר הריץ. הקוד המדויק של הקטעים החד־פעמיים מופיע בפרק הזה, כי אין לו עותק אחר במאגר.</div>
+
+<h2 id="c3s2">3.2 תרשים 2: צינור העיבוד מקלט לפלט</h2>
+<div class="flow">
+ <div class="n"><b>קלט:</b> <code>van_gogh_p.jfif</code>: JPEG בגודל 1856 × 2268 (רוחב × גובה), RGB, עם גרדיאנטים ורעש דחיסה</div><div class="a">▼</div>
+ <div class="n adhoc"><b>שלב 1 (ad hoc):</b> <code>extract_palette(original)</code> → 10 צבעים → <code>palette.npy</code></div><div class="a">▼</div>
+ <div class="n adhoc"><b>שלב 2 (ad hoc):</b> <code>cv2.resize(INTER_AREA)</code> ל־1676 × 2048, אחר כך <code>snap_to_palette</code> ומסגור magenta ל־2048 × 2048 → <code>flat_2048_framed.png</code></div><div class="a">▼</div>
+ <div class="n adhoc"><b>שלב 3 (ad hoc, ידני):</b> Option A (קוצים צהובים בלחי → שחור), ואחריו Option B (פס הכובע ‎#354043 → שחור) → <code>flat_2048_framed_optB.png</code></div><div class="a">▼</div>
+ <div class="n"><b>שלב 4:</b> <code>scripts/run_turtle_reveal_planner_poc.py</code>: <code>exact_index</code>, <code>RevealPlanner</code>, <code>closure</code>, <code>beam_search</code>, <code>eliminate_sheets</code>, <code>materialize</code> ו־validators → <code>planner_optB/</code></div><div class="a">▼</div>
+ <div class="n"><b>שלב 5:</b> <code>scripts/export_reveal_stack_cad.py</code>: מסכה → פוליגונים → CadQuery → STEP/STL → קריאה חוזרת → <code>cad_optB/{stl,step}/</code></div><div class="a">▼</div>
+ <div class="n adhoc"><b>שלב 6 (ad hoc):</b> רסטור מחדש של הפוליגונים (supersampled ×4), validators והשוואת הערימה → <code>cad_revalidation.json</code>, <code>stack_from_cad.png</code></div>
+</div>
+
+<h2 id="c3s3">3.3 שלב 1: חילוץ פלטה <span class="tag man">AD HOC</span></h2>
+<pre class="plain">o = np.asarray(Image.open('van_gogh_p.jfif').convert('RGB'))
+pal = extract_palette(o)                 # k-means in Lab on the full 1856x2268 image
+lab = snap_to_palette(o, pal)            # used only for the preview flat_native.png
+np.save('artifacts/l1_van_gogh_v1/palette.npy', pal)</pre>
+
+<h2 id="c3s4">3.4 שלב 2: הקטנה, מיפוי ומסגור <span class="tag man">AD HOC</span></h2>
+<pre class="plain">pal = np.load('artifacts/l1_van_gogh_v1/palette.npy')
+w = round(o.shape[1]*2048/o.shape[0])            # 1676 px = 163.7 mm
+small = cv2.resize(o, (w, 2048), interpolation=cv2.INTER_AREA)
+lab = snap_to_palette(small, pal)
+out = np.full((2048, 2048, 3), (255, 0, 255), np.uint8); x0 = (2048 - w)//2   # x0 = 186
+out[:, x0:x0+w] = pal[lab]
+Image.fromarray(out).save('artifacts/l1_van_gogh_v1/flat_2048_framed.png')</pre>
+<p>שים לב: הפלטה חושבה ברזולוציה המקורית, אבל המיפוי הסופי בוצע על התמונה המוקטנת. 2048 פיקסלים מייצגים 200 מ"מ, ולכן בתמונת היעד כל פיקסל הוא <span class="m">200/2048 = 0.09765625</span> מ"מ, בדיוק כמו ברשת הפיזית. הסבר מלא בפרק 6.</p>
+
+<h2 id="c3s5">3.5 שלב 3: תיקוני Option A ו־Option B <span class="tag man">AD HOC · USER-REQUESTED</span></h2>
+<pre class="plain">red = (t == RED).all(-1); left = leftmost 4-connected red component; window = its bbox + 60 px
+Y = (t == YELLOW).all(-1)
+k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (17, 17))           # 17 px = 1.66 mm
+thin = Y & ~cv2.morphologyEx(Y, cv2.MORPH_OPEN, k) & window
+a = t.copy(); a[thin] = BLACK                                         # Option A
+b = a.copy(); b[(b == BAND).all(-1)] = BLACK                          # Option B (BAND = #354043)</pre>
+<p>ההסבר המתמטי מופיע בפרק 4.7. מספרים מהקבצים (<span class="tag obs">OBSERVED_IN_FILE</span>): Option A שינה 173 פיקסלים (1.65 מ"מ²), ו־Option B שינה עוד 13,154 פיקסלים (125.4 מ"מ²).</p>
+
+<h2 id="c3s6">3.6 שלב 4: המתכנן (סקריפט שנשמר)</h2>
+<pre class="plain">PYTHONPATH=src .venv/Scripts/python.exe scripts/run_turtle_reveal_planner_poc.py \
+  --variants per_cell --skip-x8 --beam 8 --tile-mm 2.0 --score colors \
+  --frame-hex "#FF00FF" --target artifacts/l1_van_gogh_v1/flat_2048_framed_optB.png \
+  --output artifacts/l1_van_gogh_v1/planner_optB</pre>
+<p>למרות השם "turtle", זה הסקריפט הכללי. היעד מגיע מ־<code>--target</code>. סדר הקריאות בתוך <span class="ref" data-sym="def run_variant">scripts/run_turtle_reveal_planner_poc.py:52</span>:</p>
+<pre class="code" dir="ltr"><span class="src">scripts/run_turtle_reveal_planner_poc.py:174-189</span>
+<span class="ln"> 174</span>      target = Path(args.target)
+<span class="ln"> 175</span>      rgb = np.asarray(Image.open(target).convert(&quot;RGB&quot;))
+<span class="ln"> 176</span>      labels, palette = exact_index(rgb)
+<span class="ln"> 177</span>      frame_label = None
+<span class="ln"> 178</span>      if args.frame_hex:
+<span class="ln"> 179</span>          frame_label = [_hex(c) for c in palette].index(args.frame_hex.upper())
+<span class="ln"> 180</span>      OUTPUT.mkdir(parents=True, exist_ok=True)
+<span class="ln"> 181</span>      results = {&quot;target&quot;: str(target.resolve().relative_to(ROOT)), &quot;palette&quot;: [_hex(c) for c in palette], &quot;variants&quot;: []}
+<span class="ln"> 182</span>      for name in args.variants.split(&quot;,&quot;):
+<span class="ln"> 183</span>          config = RevealConfig(
+<span class="ln"> 184</span>              split_regions=name == &quot;per_cell&quot;, beam_width=args.beam, planning_margin_pixels=args.margin,
+<span class="ln"> 185</span>              cell_tile_mm=args.tile_mm, beam_score=args.score, frame_label=frame_label
+<span class="ln"> 186</span>          )
+<span class="ln"> 187</span>          results[&quot;config&quot;] = config.__dict__
+<span class="ln"> 188</span>          results[&quot;variants&quot;].append(run_variant(name, labels, palette, config))
+<span class="ln"> 189</span>          (OUTPUT / &quot;poc_report.json&quot;).write_text(json.dumps(results, indent=2) + &quot;\n&quot;, encoding=&quot;utf-8&quot;)</pre>
+<pre class="code" dir="ltr"><span class="src">scripts/run_turtle_reveal_planner_poc.py:54-60</span>
+<span class="ln">  54</span>      started = time.perf_counter()
+<span class="ln">  55</span>      planner = RevealPlanner(labels, config)
+<span class="ln">  56</span>      row: dict = {&quot;variant&quot;: name, &quot;cells&quot;: planner.cell_count}
+<span class="ln">  57</span>      closure = planner.closure()
+<span class="ln">  58</span>      row[&quot;closure_feasible&quot;] = closure[&quot;feasible&quot;]
+<span class="ln">  59</span>      row[&quot;closure_round_robin_sheets&quot;] = closure[&quot;round_robin_sheet_count&quot;]
+<span class="ln">  60</span>      row[&quot;closure_seconds&quot;] = round(time.perf_counter() - started, 1)</pre>
+<pre class="code" dir="ltr"><span class="src">scripts/run_turtle_reveal_planner_poc.py:76-87</span>
+<span class="ln">  76</span>      plan = planner.beam_search()
+<span class="ln">  77</span>      row[&quot;search_status&quot;] = plan[&quot;status&quot;]
+<span class="ln">  78</span>      row[&quot;search_reveal_evaluations&quot;] = plan[&quot;evaluations&quot;]
+<span class="ln">  79</span>      row[&quot;beam_sheet_count&quot;] = len(plan[&quot;front_to_back_colors&quot;])
+<span class="ln">  80</span>      colors, reveals, eliminated = planner.eliminate_sheets(plan[&quot;front_to_back_colors&quot;], plan[&quot;reveals&quot;])
+<span class="ln">  81</span>      plan[&quot;reveals&quot;] = reveals
+<span class="ln">  82</span>      row[&quot;eliminated_sheets&quot;] = eliminated
+<span class="ln">  83</span>      print(name, &quot;beam&quot;, row[&quot;beam_sheet_count&quot;], &quot;after elimination&quot;, len(colors), flush=True)
+<span class="ln">  84</span>      row[&quot;sheet_count&quot;] = len(colors)
+<span class="ln">  85</span>      row[&quot;front_to_back_colors&quot;] = [_hex(palette[c]) for c in colors]
+<span class="ln">  86</span>      sheets = planner.materialize(plan[&quot;reveals&quot;])
+<span class="ln">  87</span>      p = planner.grid.perimeter_pixels</pre>
+
+<h2 id="c3s7">3.7 שלב 5: ייצוא CAD (סקריפט שנשמר)</h2>
+<pre class="plain">PYTHONPATH=src .venv/Scripts/python.exe scripts/export_reveal_stack_cad.py \
+  --layers artifacts/l1_van_gogh_v1/planner_optB/per_cell/layers \
+  --output artifacts/l1_van_gogh_v1/cad_optB              # defaults: 225 mm, 1.6 mm, simplify 0.03 mm</pre>
+<p>הקבצים ב־<code>cad_optB</code> נוצרו לפני שהסקריפט קיבל את מבנה התיקיות <code>stl/</code> ו־<code>step/</code>. לכן הם הועברו לתיקיות האלה ידנית, ונתיבי ה־manifest עודכנו. הקוד הנוכחי של הסקריפט כבר כותב ישירות למבנה הזה.</p>
+
+<h2 id="c3s8">3.8 שלב 6: אימות חוזר של ה־CAD <span class="tag man">AD HOC</span></h2>
+<p>קטע הקוד מופיע במלואו בפרק 11.6, כי זה האימות היחיד שבדק שהפוליגונים שנשלחו ל־CAD זהים למסכות. <span class="tag gap">GAP</span> השלב הזה אינו חלק מהסקריפט במאגר.</p>
+
+<h2 id="c3s9">3.9 זמני ריצה <span class="tag obs">OBSERVED_IN_FILE</span></h2>
+<table class="t">
+<tr><th>שלב</th><th>זמן</th><th>מקור</th></tr>
+<tr><td>closure (בדיקת היתכנות)</td><td>15.8 שניות</td><td class="l">poc_report.json · closure_seconds</td></tr>
+<tr><td>כל המתכנן (closure + beam + materialize + validators + PNG)</td><td>304.3 שניות</td><td class="l">poc_report.json · total_seconds</td></tr>
+<tr><td>ייצוא STEP/STL וקריאה חוזרת</td><td>122.9 שניות</td><td class="l">cad_manifest.json · total_seconds</td></tr>
+<tr><td>אימות חוזר של ה־CAD</td><td>10.4 שניות</td><td>פלט הקטע החד־פעמי (STATUS.md)</td></tr>
+</table>
+</section><section class="chapter" data-name="04_image"><h1 id="c4">4. עיבוד תמונה והכנת היעד</h1>
+<p>כל האלגוריתמים בפרק נמצאים ב־<code>src/layerforge_l1/fullres_flatten.py</code> (113 שורות) ונקראים רק מקטעי קוד חד־פעמיים (פרק 3). המטרה: להפוך JPEG עם גרדיאנטים ורעש למפת תוויות (label map) שבה לכל פיקסל יש אחד מ־P צבעים, <b>בלי להזיז קצוות של קווים ובלי לעבות אותם</b>. זו הייתה הדרישה המפורשת שלך אחרי שה־flattening הישן הפך קווים אחידים ללא־אחידים.</p>
+
+<h2 id="c4s1">4.1 FlattenConfig: הפרמטרים</h2>
+<pre class="code" dir="ltr"><span class="src">src/layerforge_l1/fullres_flatten.py:25-31</span>
+<span class="ln">  25</span>  @dataclass(frozen=True)
+<span class="ln">  26</span>  class FlattenConfig:
+<span class="ln">  27</span>      bilateral_diameter: int = 9
+<span class="ln">  28</span>      bilateral_sigma_color: float = 24.0
+<span class="ln">  29</span>      bilateral_sigma_space: float = 5.0
+<span class="ln">  30</span>      majority_window: int = 5
+<span class="ln">  31</span>      min_fragment_pixels: int = 40  # ~0.4 mm2 at 0.098 mm/px</pre>
+<p>הערה בקוד: 40 פיקסלים ≈ 0.4 מ"מ² ב־0.098 מ"מ/פיקסל. ההערה נכונה לרשת היעד (2048 פיקסלים = 200 מ"מ). בשלב 1, שבו הפלטה חושבה על התמונה המקורית, אותו ערך מתאים לשטח פיזי מעט שונה, כי שם המיפוי לא שימש לייצור.</p>
+
+<h2 id="c4s2">4.2 extract_palette: פלטה אוטומטית</h2>
+<p><span class="ref" data-sym="def extract_palette">src/layerforge_l1/fullres_flatten.py:76</span>. <b>מטרה:</b> למצוא את הצבעים "האמיתיים" של האיור בלי שגווני מעבר (anti-aliasing) בין שני צבעים ייהפכו לצבע נפרד. בלי הסינון הזה היו נוספים צבעי ביניים, כמו ירוק־שחור לאורך כל קו מתאר, וכל אחד מהם היה דורש לוח נוסף.</p>
+<pre class="code" dir="ltr"><span class="src">src/layerforge_l1/fullres_flatten.py:91-113</span>
+<span class="ln">  91</span>      smooth = cv2.bilateralFilter(
+<span class="ln">  92</span>          rgb, config.bilateral_diameter, config.bilateral_sigma_color, config.bilateral_sigma_space
+<span class="ln">  93</span>      )
+<span class="ln">  94</span>      lab = cv2.cvtColor(smooth, cv2.COLOR_RGB2LAB).astype(np.float32)
+<span class="ln">  95</span>      gray = cv2.cvtColor(smooth, cv2.COLOR_RGB2GRAY).astype(np.float32)
+<span class="ln">  96</span>      gradient = np.hypot(cv2.Sobel(gray, cv2.CV_32F, 1, 0), cv2.Sobel(gray, cv2.CV_32F, 0, 1))
+<span class="ln">  97</span>      interior = cv2.erode((gradient &lt; 40).astype(np.uint8), np.ones((5, 5), np.uint8)).astype(bool)
+<span class="ln">  98</span>      samples = lab[interior][:: max(1, interior.sum() // 200_000)]
+<span class="ln">  99</span>      criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 50, 0.5)
+<span class="ln"> 100</span>      _, assignment, centers = cv2.kmeans(samples, max_colors, None, criteria, 4, cv2.KMEANS_PP_CENTERS)
+<span class="ln"> 101</span>      shares = np.bincount(assignment.ravel(), minlength=max_colors) / len(samples)
+<span class="ln"> 102</span>      clusters = [(centers[i], shares[i]) for i in np.argsort(-shares) if shares[i] &gt;= min_share]
+<span class="ln"> 103</span>      merged: list[tuple[np.ndarray, float]] = []
+<span class="ln"> 104</span>      for center, share in clusters:
+<span class="ln"> 105</span>          for index, (kept, kept_share) in enumerate(merged):
+<span class="ln"> 106</span>              if np.linalg.norm(center - kept) &lt; merge_delta:
+<span class="ln"> 107</span>                  total = kept_share + share
+<span class="ln"> 108</span>                  merged[index] = ((kept * kept_share + center * share) / total, total)
+<span class="ln"> 109</span>                  break
+<span class="ln"> 110</span>          else:
+<span class="ln"> 111</span>              merged.append((center, share))
+<span class="ln"> 112</span>      lab_centers = np.clip(np.array([c for c, _ in merged]), 0, 255).astype(np.uint8)
+<span class="ln"> 113</span>      return cv2.cvtColor(lab_centers[None], cv2.COLOR_LAB2RGB)[0]</pre>
+<h3>שלב א: החלקה משמרת קצוות (bilateral)</h3>
+<div class="box theory"><span class="tag theory">THEORETICAL BACKGROUND</span> הגדרת <code>cv2.bilateralFilter</code> עם <span class="m">d=9,\ \sigma_c=24,\ \sigma_s=5</span>:
+<div class="mb">\tilde I(p)=\frac{\sum_{q\in N_9(p)} w_s(p,q)\,w_c(p,q)\,I(q)}{\sum_{q\in N_9(p)} w_s(p,q)\,w_c(p,q)},\quad w_s=e^{-\frac{\|p-q\|^2}{2\sigma_s^2}},\quad w_c=e^{-\frac{\delta(I(p),I(q))^2}{2\sigma_c^2}}</div>
+<p><span class="m">N_9(p)</span> היא סביבה בקוטר 9 פיקסלים. <span class="m">\delta</span> הוא מרחק הצבע. ב־OpenCV, בתמונה בת 3 ערוצים, זהו סכום ההפרשים המוחלטים בין הערוצים (יחידות 0–255). שכן שצבעו שונה מאוד (למשל שחור ליד הצהוב <code>#EAC007</code>, עם <span class="m">\delta=234+191+7=432</span>) מקבל משקל <span class="m">e^{-432^2/(2\cdot 24^2)}\approx 0</span>, ולכן הקצה לא מטושטש. רעש JPEG קטן (<span class="m">\delta\approx 10</span>) מקבל משקל <span class="m">e^{-100/1152}\approx 0.92</span> ומתמצע.</p></div>
+<h3>שלב ב: מעבר ל־Lab וזיהוי פיקסלי פנים</h3>
+<div class="box impl"><span class="tag impl">IMPLEMENTED MATHEMATICS</span> שורות 94–97:
+<div class="mb">G(p)=\sqrt{(S_x * g)(p)^2+(S_y * g)(p)^2},\qquad \text{interior}=\big[\,G<40\,\big]\ominus B_{5\times5}</div>
+<p><span class="m">g</span> היא תמונת האפור של התמונה המוחלקת. <span class="m">S_x,S_y</span> הם גרעיני Sobel בגודל 3×3, והפלט ב־float32. <span class="m">\ominus B_{5\times5}</span> היא שחיקה (erosion) בריבוע 5×5: פיקסל נחשב "פנימי" רק אם בכל ריבוע ה־5×5 סביבו הגרדיאנט נמוך מ־40. כך מוסרים גם פיקסלים שנמצאים עד 2 פיקסלים מקצה.</p></div>
+<h3>שלב ג: דגימה ו־k-means</h3>
+<div class="box impl"><span class="tag impl">IMPLEMENTED MATHEMATICS</span>
+<div class="mb">\text{stride}=\max\!\Big(1,\ \Big\lfloor \tfrac{N_{\text{int}}}{200000}\Big\rfloor\Big),\qquad \min_{\mu_1..\mu_{12}}\ \sum_{x\in X}\ \min_j \|x-\mu_j\|_2^2</div>
+<p><span class="m">X</span> היא קבוצת דגימות Lab בגודל כ־200 אלף. <code>cv2.kmeans</code> רץ עם K=12, אתחול k-means++, 4 ניסיונות (נשמר הניסיון עם הקומפקטיות הטובה ביותר) ותנאי עצירה של 50 איטרציות או תזוזה קטנה מ־0.5.</p>
+<p><b>דוגמה אמיתית</b> <span class="tag obs">OBSERVED</span>: בתמונה המקורית 4,209,408 פיקסלים. מתוכם <span class="m">N_{\text{int}}=3{,}888{,}812</span> פנימיים, ולכן stride = 19 ונלקחו 204,675 דגימות.</p></div>
+<h3>שלב ד: סינון ומיזוג אשכולות</h3>
+<div class="box impl"><span class="tag impl">IMPLEMENTED MATHEMATICS</span> השורות 101–111. נתח (share) של אשכול: <span class="m">w_j=|\{x: a(x)=j\}|/|X|</span>. אשכולות עם <span class="m">w_j&lt;0.001</span> נזרקים. השאר נסרקים בסדר יורד של <span class="m">w</span>, וכל אחד מתמזג לאשכול הראשון שכבר נשמר ושקרוב אליו מספיק:
+<div class="mb">\|\mu-\kappa\|_2&lt;14\ \Rightarrow\ \kappa\leftarrow\frac{w_\kappa\,\kappa+w_\mu\,\mu}{w_\kappa+w_\mu},\quad w_\kappa\leftarrow w_\kappa+w_\mu</div>
+<p>זהו ממוצע משוקלל. התוצאה מומרת חזרה ל־RGB. ב־van_gogh_p התקבלו 10 צבעים.</p></div>
+<div class="box derived"><span class="tag derived">DERIVED</span> המרחק נמדד ביחידות Lab של OpenCV ל־8 ביט: <span class="m">L_8=2.55\,L^*</span>, <span class="m">a_8=a^*+128</span>, <span class="m">b_8=b^*+128</span>. לכן סף של 14 יחידות שקול ל־<span class="m">\Delta L^*\approx 5.5</span> בציר הבהירות, אבל ל־14 יחידות שלמות בצירי הצבע. ציר הבהירות "מתוח" פי 2.55.</div>
+<div class="box gap"><span class="tag gap">LIMITATION</span> <code>cv2.kmeans</code> נקרא בלי לקבע seed, ולכן הרצה חוזרת עשויה להחזיר פלטה מעט שונה. Option B משתמש בפלטה ששמורה ב־<code>palette.npy</code>, ולכן הוא ניתן לשחזור מהקובץ, אבל לא מחישוב מחדש.</div>
+
+<h2 id="c4s3">4.3 snap_to_palette: מיפוי כל פיקסל לצבע בפלטה</h2>
+<p><span class="ref" data-sym="def snap_to_palette">src/layerforge_l1/fullres_flatten.py:34</span></p>
+<pre class="code" dir="ltr"><span class="src">src/layerforge_l1/fullres_flatten.py:34-43</span>
+<span class="ln">  34</span>  def snap_to_palette(rgb: np.ndarray, palette: np.ndarray, config: FlattenConfig = FlattenConfig()) -&gt; np.ndarray:
+<span class="ln">  35</span>      smooth = cv2.bilateralFilter(
+<span class="ln">  36</span>          rgb, config.bilateral_diameter, config.bilateral_sigma_color, config.bilateral_sigma_space
+<span class="ln">  37</span>      )
+<span class="ln">  38</span>      lab = cv2.cvtColor(smooth, cv2.COLOR_RGB2LAB).astype(np.float32)
+<span class="ln">  39</span>      palette_lab = cv2.cvtColor(palette[None].astype(np.uint8), cv2.COLOR_RGB2LAB)[0].astype(np.float32)
+<span class="ln">  40</span>      distance = ((lab[:, :, None, :] - palette_lab[None, None]) ** 2).sum(-1)
+<span class="ln">  41</span>      labels = distance.argmin(-1).astype(np.uint8)
+<span class="ln">  42</span>      labels = majority_filter(labels, len(palette), config.majority_window)
+<span class="ln">  43</span>      return merge_small_fragments(labels, config.min_fragment_pixels)</pre>
+<div class="box impl"><span class="tag impl">IMPLEMENTED MATHEMATICS</span> שורות 40–41:
+<div class="mb">\ell(p)=\arg\min_{i\in\{0..P-1\}}\ \big\|\,\mathrm{Lab}(\tilde I(p))-\mathrm{Lab}(c_i)\,\big\|_2^2</div>
+<p><b>דוגמה מספרית</b> עם ערכי הפלטה האמיתיים (Lab של OpenCV): השחור <code>#000100</code> הוא (1, 126, 129), ופס הכובע <code>#354043</code> הוא (67, 124, 125). לפיקסל מוחלק (60, 124, 126):</p>
+<div class="mb">d^2_{\text{black}}=59^2+2^2+3^2=3494,\qquad d^2_{\text{band}}=7^2+0^2+1^2=50\ \Rightarrow\ \ell=\text{band}</div>
+<p>זה גם מסביר למה פס הכובע נשאר צבע נפרד: המרחק שלו מהשחור הוא <span class="m">\sqrt{66^2+2^2+4^2}\approx 66.2 \gg 14</span>, ולכן שלב המיזוג לא איחד אותם. Option B איחד אותם ידנית.</p></div>
+<div class="box derived"><span class="tag derived">DERIVED</span> <b>זיכרון:</b> המערך <code>distance</code> הוא בגודל <span class="m">H\times W\times P\times 3</span> בפורמט float32. ל־2048 × 1676 × 10 צבעים זה כ־412 מגה־בייט ביניים. זו אחת הסיבות שהרצות על המחשב הזה נעצרו לפעמים בגלל זיכרון.</div>
+
+<h2 id="c4s4">4.4 majority_filter: הצבעת רוב</h2>
+<p><span class="ref" data-sym="def majority_filter">src/layerforge_l1/fullres_flatten.py:46</span></p>
+<pre class="code" dir="ltr"><span class="src">src/layerforge_l1/fullres_flatten.py:46-50</span>
+<span class="ln">  46</span>  def majority_filter(labels: np.ndarray, count: int, window: int) -&gt; np.ndarray:
+<span class="ln">  47</span>      votes = np.stack(
+<span class="ln">  48</span>          [cv2.boxFilter((labels == i).astype(np.float32), -1, (window, window)) for i in range(count)]
+<span class="ln">  49</span>      )
+<span class="ln">  50</span>      return votes.argmax(0).astype(np.uint8)</pre>
+<div class="box impl"><span class="tag impl">IMPLEMENTED MATHEMATICS</span>
+<div class="mb">v_i(p)=\frac{1}{25}\sum_{q\in W_5(p)}[\ell(q)=i],\qquad \ell'(p)=\arg\max_i v_i(p)</div>
+<p><code>cv2.boxFilter</code> מנרמל כברירת מחדל, ולכן <span class="m">v_i</span> הוא שבר הפיקסלים מצבע i בחלון 5×5. בתיקו <code>argmax</code> מחזיר את האינדקס הנמוך. בשולי התמונה <code>boxFilter</code> משתמש בשיקוף (BORDER_REFLECT_101).</p></div>
+<div class="box derived"><span class="tag derived">DERIVED</span> <b>למה זה לא מזיז קצה ישר:</b> בקצה ישר בין שני צבעים, לפיקסל שנמצא צעד אחד בתוך צבע A יש 15 שכנים מ־A ו־10 מ־B בחלון 5×5. A מנצח, והקצה נשאר במקומו. מנגד, "חוד" דק מפיקסל אחד או שניים בולט פחות מ־13 קולות ונמחק. לכן גם קו ברוחב 2 פיקסלים בלבד (0.2 מ"מ) שעובר בתוך שטח בצבע אחד יימחק (10 קולות מול 15). קווי המתאר באיור הזה רחבים בהרבה.</div>
+
+<h2 id="c4s5">4.5 merge_small_fragments: מיזוג שברים קטנים</h2>
+<p><span class="ref" data-sym="def merge_small_fragments">src/layerforge_l1/fullres_flatten.py:53</span></p>
+<pre class="code" dir="ltr"><span class="src">src/layerforge_l1/fullres_flatten.py:53-73</span>
+<span class="ln">  53</span>  def merge_small_fragments(labels: np.ndarray, min_pixels: int) -&gt; np.ndarray:
+<span class="ln">  54</span>      &quot;&quot;&quot;Relabel each 4-connected fragment below ``min_pixels`` to its dominant neighbor.&quot;&quot;&quot;
+<span class="ln">  55</span>  
+<span class="ln">  56</span>      labels = labels.copy()
+<span class="ln">  57</span>      for color in np.unique(labels):
+<span class="ln">  58</span>          components, count = ndimage.label(labels == color)
+<span class="ln">  59</span>          if not count:
+<span class="ln">  60</span>              continue
+<span class="ln">  61</span>          areas = np.bincount(components.ravel())
+<span class="ln">  62</span>          for index, region in enumerate(ndimage.find_objects(components), start=1):
+<span class="ln">  63</span>              if areas[index] &gt;= min_pixels:
+<span class="ln">  64</span>                  continue
+<span class="ln">  65</span>              y0, y1 = max(region[0].start - 1, 0), region[0].stop + 1
+<span class="ln">  66</span>              x0, x1 = max(region[1].start - 1, 0), region[1].stop + 1
+<span class="ln">  67</span>              window = labels[y0:y1, x0:x1]
+<span class="ln">  68</span>              mask = components[y0:y1, x0:x1] == index
+<span class="ln">  69</span>              ring = ndimage.binary_dilation(mask) &amp; ~mask
+<span class="ln">  70</span>              neighbors = window[ring]
+<span class="ln">  71</span>              if neighbors.size:
+<span class="ln">  72</span>                  window[mask] = np.bincount(neighbors).argmax()
+<span class="ln">  73</span>      return labels</pre>
+<p>לכל צבע, <code>ndimage.label</code> (קשירות 4, ברירת המחדל של scipy) מוצא רכיבים. לכל רכיב F עם <span class="m">|F|&lt;40</span> מחושבת "טבעת" <span class="m">\partial F=(F\oplus C)\setminus F</span>, כאשר C הוא צלב 3×3, וכל F מקבל את הצבע הנפוץ ביותר בטבעת (<code>bincount().argmax()</code>). העדכון נעשה במקום, ולכן מיזוג מוקדם משפיע על הטבעות של שברים שנבדקים אחריו.</p>
+<h3>דוגמה A1: שני המסננים על מערך 7×7 (הופק מהפונקציות האמיתיות)</h3>
+<div class="bitsrow">
+<div><table class="bits" dir="ltr"><tr><td class="b0">0</td><td class="b0">0</td><td class="b0">0</td><td class="b0">0</td><td class="b1">1</td><td class="b1">1</td><td class="b1">1</td></tr><tr><td class="b0">0</td><td class="b1">1</td><td class="b0">0</td><td class="b0">0</td><td class="b1">1</td><td class="b1">1</td><td class="b1">1</td></tr><tr><td class="b0">0</td><td class="b0">0</td><td class="b0">0</td><td class="b0">0</td><td class="b1">1</td><td class="b1">1</td><td class="b1">1</td></tr><tr><td class="b0">0</td><td class="b0">0</td><td class="b0">0</td><td class="b2">2</td><td class="b1">1</td><td class="b1">1</td><td class="b1">1</td></tr><tr><td class="b0">0</td><td class="b0">0</td><td class="b0">0</td><td class="b0">0</td><td class="b1">1</td><td class="b1">1</td><td class="b1">1</td></tr><tr><td class="b0">0</td><td class="b0">0</td><td class="b0">0</td><td class="b0">0</td><td class="b1">1</td><td class="b0">0</td><td class="b1">1</td></tr><tr><td class="b0">0</td><td class="b0">0</td><td class="b0">0</td><td class="b0">0</td><td class="b1">1</td><td class="b1">1</td><td class="b1">1</td></tr></table>קלט: 0, 1 ו־2 (רעש: (1,1), (3,3) ו־(5,5))</div>
+<div><table class="bits" dir="ltr"><tr><td class="b0">0</td><td class="b0">0</td><td class="b0">0</td><td class="b0">0</td><td class="b1">1</td><td class="b1">1</td><td class="b1">1</td></tr><tr><td class="b0">0</td><td class="b0">0</td><td class="b0">0</td><td class="b0">0</td><td class="b1">1</td><td class="b1">1</td><td class="b1">1</td></tr><tr><td class="b0">0</td><td class="b0">0</td><td class="b0">0</td><td class="b0">0</td><td class="b1">1</td><td class="b1">1</td><td class="b1">1</td></tr><tr><td class="b0">0</td><td class="b0">0</td><td class="b0">0</td><td class="b0">0</td><td class="b1">1</td><td class="b1">1</td><td class="b1">1</td></tr><tr><td class="b0">0</td><td class="b0">0</td><td class="b0">0</td><td class="b0">0</td><td class="b1">1</td><td class="b1">1</td><td class="b1">1</td></tr><tr><td class="b0">0</td><td class="b0">0</td><td class="b0">0</td><td class="b0">0</td><td class="b1">1</td><td class="b1">1</td><td class="b1">1</td></tr><tr><td class="b0">0</td><td class="b0">0</td><td class="b0">0</td><td class="b0">0</td><td class="b1">1</td><td class="b1">1</td><td class="b1">1</td></tr></table><code>majority_filter(w=5)</code></div>
+<div><table class="bits" dir="ltr"><tr><td class="b0">0</td><td class="b0">0</td><td class="b0">0</td><td class="b0">0</td><td class="b1">1</td><td class="b1">1</td><td class="b1">1</td></tr><tr><td class="b0">0</td><td class="b0">0</td><td class="b0">0</td><td class="b0">0</td><td class="b1">1</td><td class="b1">1</td><td class="b1">1</td></tr><tr><td class="b0">0</td><td class="b0">0</td><td class="b0">0</td><td class="b0">0</td><td class="b1">1</td><td class="b1">1</td><td class="b1">1</td></tr><tr><td class="b0">0</td><td class="b0">0</td><td class="b0">0</td><td class="b0">0</td><td class="b1">1</td><td class="b1">1</td><td class="b1">1</td></tr><tr><td class="b0">0</td><td class="b0">0</td><td class="b0">0</td><td class="b0">0</td><td class="b1">1</td><td class="b1">1</td><td class="b1">1</td></tr><tr><td class="b0">0</td><td class="b0">0</td><td class="b0">0</td><td class="b0">0</td><td class="b1">1</td><td class="b1">1</td><td class="b1">1</td></tr><tr><td class="b0">0</td><td class="b0">0</td><td class="b0">0</td><td class="b0">0</td><td class="b1">1</td><td class="b1">1</td><td class="b1">1</td></tr></table><code>merge_small_fragments(min=2)</code></div>
+</div>
+<p>שני המסננים מסירים כאן את שלושת הפיקסלים הבודדים, והקצה האנכי בין 0 ל־1 (בין עמודות 3 ו־4) לא זז. הערכים נוצרו בהרצה של <code>docs/technical_optB/compute_examples.py</code>.</p>
+
+<h2 id="c4s6">4.6 הקטנה ומסגור <span class="tag man">AD HOC</span></h2>
+<div class="box impl"><span class="tag impl">IMPLEMENTED MATHEMATICS</span> (בקטע החד־פעמי)
+<div class="mb">w=\mathrm{round}\Big(1856\cdot\tfrac{2048}{2268}\Big)=1676,\qquad x_0=\Big\lfloor\tfrac{2048-1676}{2}\Big\rfloor=186</div>
+<p><code>INTER_AREA</code> מחשב לכל פיקסל יעד ממוצע משוקלל לפי שטח, ביחס הקטנה <span class="m">0.903</span>. הפסים <span class="m">[0,186)</span> ו־<span class="m">[1862,2048)</span> נצבעים ב־<code>#FF00FF</code>. בסך הכול <span class="m">2\cdot186\cdot2048=761{,}856</span> פיקסלים, וזה בדיוק מה שנספר בקובץ.</p></div>
+
+<h2 id="c4s7">4.7 תיקוני Option A ו־B: מתמטיקה</h2>
+<div class="box impl"><span class="tag impl">IMPLEMENTED MATHEMATICS</span> (בקטע החד־פעמי)
+<div class="mb">T=Y\ \cap\ \overline{(Y\ominus E_{17})\oplus E_{17}}\ \cap\ W,\qquad \text{opt}_A=\text{target}\ \text{with}\ T\to\text{black}</div>
+<p><span class="m">Y</span> היא מסכת הצהוב <code>#EAC007</code>. <span class="m">E_{17}</span> היא אליפסה בקוטר 17 פיקסלים (1.66 מ"מ). <span class="m">(Y\ominus E)\oplus E</span> היא פתיחה (opening) מורפולוגית: כל החלקים של Y שאפשר "לצבוע" באמצעות דיסקה של 1.66 מ"מ שנמצאת כולה בתוך Y. <span class="m">T</span> הוא מה שנשאר מחוץ לפתיחה, כלומר הקוצים הדקים. <span class="m">W</span> הוא חלון סביב רכיב הלחי האדום השמאלי, עם שוליים של 60 פיקסלים. ב־Option B כל פיקסל <code>#354043</code> הפך ל־<code>#000100</code>.</p></div>
+
+<h2 id="c4s8">4.8 exact_index: מתמונה לתוויות</h2>
+<p><span class="ref" data-sym="def exact_index">src/layerforge_l1/experimental_global_planner.py:73</span></p>
+<pre class="code" dir="ltr"><span class="src">src/layerforge_l1/experimental_global_planner.py:73-77</span>
+<span class="ln">  73</span>  def exact_index(rgb: np.ndarray) -&gt; tuple[np.ndarray, np.ndarray]:
+<span class="ln">  74</span>      &quot;&quot;&quot;Losslessly map exact RGB triplets to deterministic palette indices.&quot;&quot;&quot;
+<span class="ln">  75</span>  
+<span class="ln">  76</span>      palette, inverse = np.unique(rgb.reshape(-1, 3), axis=0, return_inverse=True)
+<span class="ln">  77</span>      return inverse.reshape(rgb.shape[:2]).astype(np.uint8), palette.astype(np.uint8)</pre>
+<p>זה מיפוי ללא איבוד מידע: כל שלשת RGB ייחודית מקבלת אינדקס, והפלטה ממוינת לקסיקוגרפית. ב־Option B יש 10 ערכים, ואינדקס 9 הוא <code>#FF00FF</code>, ולכן <code>frame_label=9</code>. שים לב שמספר הצבעים מוגבל ל־256 (uint8).</p>
+<table class="t small">
+<tr><th>אינדקס</th><th>צבע</th><th>פיקסלים</th><th>אינדקס</th><th>צבע</th><th>פיקסלים</th></tr>
+<tr><td>0</td><td class="l">#000100</td><td>447,051</td><td>5</td><td class="l">#97CCE5</td><td>791,533</td></tr>
+<tr><td>1</td><td class="l">#3D7033</td><td>285,450</td><td>6</td><td class="l">#BF3934</td><td>46,521</td></tr>
+<tr><td>2</td><td class="l">#609337</td><td>88,193</td><td>7</td><td class="l">#EAC007</td><td>1,179,526</td></tr>
+<tr><td>3</td><td class="l">#7CAE49</td><td>138,296</td><td>8</td><td class="l">#FCFEFE</td><td>153,757</td></tr>
+<tr><td>4</td><td class="l">#8AA1A2</td><td>302,121</td><td>9</td><td class="l">#FF00FF (frame)</td><td>761,856</td></tr>
+</table>
+<p class="small"><span class="tag obs">OBSERVED</span> נספר על <code>flat_2048_framed_optB.png</code>. היעד מכיל 35 אזורים 4־קשירים, כולל שני פסי המסגרת.</p>
+</section><section class="chapter" data-name="05_data"><h1 id="c5">5. מודלי הנתונים</h1>
+<p>אין במסלול הזה אובייקט <code>LayerStack</code> או סכמה מפורמלת. כל הנתונים הם מערכי numpy, dataclass־ים קפואים (frozen) ומילונים (dict) שמסודרים ל־JSON. הפרק מתאר כל מבנה: מה הוא מייצג, היכן הוא נוצר ומי צורך אותו.</p>
+
+<h2 id="c5s1">5.1 תרשים 4: מבני הנתונים והקשרים ביניהם</h2>
+<div class="flow">
+ <div class="n"><b>labels</b> <code>uint8[2048,2048]</code> + <b>palette</b> <code>uint8[10,3]</code>, מתוך <code>exact_index</code></div><div class="a">▼ build_cells</div>
+ <div class="split"><div class="n"><b>native_cells</b> <code>int32[2048,2048]</code>: מזהה תא לכל פיקסל</div><div class="n"><b>cell_color / cell_region</b> <code>int32[n]</code>, n = 11,498</div></div><div class="a">▼ embed (+perimeter)</div>
+ <div class="n"><b>cell_map</b> <code>int32[2304,2304]</code>, עם 1− במסגרת · <b>perimeter</b> <code>bool[2304,2304]</code></div><div class="a">▼ planning on cell vectors</div>
+ <div class="n dec"><b>covered, reveal</b> <code>bool[n]</code>: מצב החיפוש · <b>beam state</b> <code>(covered, colors, reveals)</code></div><div class="a">▼ materialize</div>
+ <div class="n out"><b>sheet</b> dict: <code>physical_mask</code>, <code>visible_mask</code> <code>bool[2304,2304]</code>, <code>visible_cells</code> <code>bool[n]</code></div><div class="a">▼ PNG + JSON</div>
+ <div class="n out"><code>layers/layer_XX_rrggbb/*.png</code> · <code>poc_report.json</code> → <code>cad_manifest.json</code> · <code>stl/</code> · <code>step/</code></div>
+</div>
+
+<h2 id="c5s2">5.2 RevealConfig</h2>
+<p><span class="ref" data-sym="class RevealConfig">src/layerforge_l1/reveal_planner.py:38</span>: מחלקת dataclass קפואה. בהרצת Option B הסקריפט שינה ארבעה שדות: <code>cell_tile_mm=2.0</code>, <code>beam_width=8</code>, <code>beam_score="colors"</code> ו־<code>frame_label=9</code>.</p>
+<pre class="code" dir="ltr"><span class="src">src/layerforge_l1/reveal_planner.py:37-62</span>
+<span class="ln">  37</span>  @dataclass(frozen=True)
+<span class="ln">  38</span>  class RevealConfig:
+<span class="ln">  39</span>      &quot;&quot;&quot;Physical scale, cell size and search controls.&quot;&quot;&quot;
+<span class="ln">  40</span>  
+<span class="ln">  41</span>      # 512 px artwork = 200 mm; the 32 px perimeter makes the sheet 225 mm.
+<span class="ln">  42</span>      outer_sheet_mm: float = 225.0
+<span class="ln">  43</span>      scale: int = 4
+<span class="ln">  44</span>      # Visible pixels may lie outside the 1.2 mm structural set only as short
+<span class="ln">  45</span>      # nubs (convex corners, stroke ends) within this geodesic distance of it.
+<span class="ln">  46</span>      nub_tolerance_mm: float = 0.5
+<span class="ln">  47</span>      # Cells are region pieces inside square tiles of this size.
+<span class="ln">  48</span>      cell_tile_mm: float = 3.9
+<span class="ln">  49</span>      # Fragments smaller than this merge into a same-region neighbor cell.
+<span class="ln">  50</span>      min_cell_mm2: float = 0.9
+<span class="ln">  51</span>      split_regions: bool = True
+<span class="ln">  52</span>      # Label of artwork-grid pixels that belong to the frame (e.g. side strips of
+<span class="ln">  53</span>      # a portrait image on the square grid): solid on every sheet, never visible.
+<span class="ln">  54</span>      frame_label: int | None = None
+<span class="ln">  55</span>      # The planner&#x27;s footprint exceeds the validator&#x27;s by this many pixels so a
+<span class="ln">  56</span>      # one-pixel diagonal step in the eroded core (which the 4-connected
+<span class="ln">  57</span>      # validator treats as a break) cannot sit exactly at the threshold.
+<span class="ln">  58</span>      planning_margin_pixels: int = 0
+<span class="ln">  59</span>      beam_width: int = 6
+<span class="ln">  60</span>      # &quot;area&quot;: most covered area first; &quot;colors&quot;: fewest unfinished colors first.
+<span class="ln">  61</span>      beam_score: str = &quot;area&quot;
+<span class="ln">  62</span>      max_sheets: int = 24</pre>
+<table class="t small">
+<tr><th>שדה</th><th>ערך ב־Option B</th><th>למה הוא קיים</th></tr>
+<tr><td class="l">outer_sheet_mm</td><td>225.0</td><td>גודל הלוח הפיזי, כולל המסגרת. ממנו נגזר מ"מ לפיקסל.</td></tr>
+<tr><td class="l">scale</td><td>4</td><td>הכפלה של הרשת הבסיסית (512 → 2048) לפי <code>validation_poc_config</code>.</td></tr>
+<tr><td class="l">nub_tolerance_mm</td><td>0.5</td><td>כמה פיקסלים גלויים יכולים לבלוט מחוץ לליבה המבנית (פינות, קצות קווים).</td></tr>
+<tr><td class="l">cell_tile_mm</td><td>2.0</td><td>גודל אריח החיתוך של אזורים לתאים.</td></tr>
+<tr><td class="l">min_cell_mm2</td><td>0.9</td><td>תאים קטנים מזה מתמזגים לשכן מאותו אזור.</td></tr>
+<tr><td class="l">split_regions</td><td>True</td><td>True: עומק לכל תא. False: אזור שלם בעומק אחד (וריאנט ההשוואה).</td></tr>
+<tr><td class="l">frame_label</td><td>9</td><td>התווית שמסמנת את פסי המסגרת הצדדיים (magenta).</td></tr>
+<tr><td class="l">planning_margin_pixels</td><td>0</td><td>הגדלה אופציונלית של גרעין התכנון. לא שימש.</td></tr>
+<tr><td class="l">beam_width / beam_score</td><td>8 / "colors"</td><td>רוחב החיפוש ומפתח הדירוג.</td></tr>
+<tr><td class="l">max_sheets</td><td>24</td><td>גבול עליון לעומק החיפוש.</td></tr>
+</table>
+
+<h2 id="c5s3">5.3 PocConfig והרשת הפיזית</h2>
+<p><span class="ref" data-sym="class PocConfig">src/layerforge_l1/subtractive_poc.py:24</span> מגיע מ־PoC ישן. ממנו נלקחות רק ארבע מידות: <code>analysis_pixels=512</code>, <code>outer_pixels=576</code>, <code>perimeter_pixels=32</code> ו־<code>sheet_size_mm</code>. הפונקציה <span class="ref" data-sym="def validation_poc_config">src/layerforge_l1/hidden_width_repair.py:36</span> מכפילה אותן פי <code>scale</code> ומחליפה את הגודל ל־225 מ"מ:</p>
+<pre class="code" dir="ltr"><span class="src">src/layerforge_l1/hidden_width_repair.py:36-51</span>
+<span class="ln">  36</span>  def validation_poc_config(
+<span class="ln">  37</span>      native: PocConfig = DEFAULT_CONFIG,
+<span class="ln">  38</span>      repair: WidthRepairConfig = WidthRepairConfig(),
+<span class="ln">  39</span>  ) -&gt; PocConfig:
+<span class="ln">  40</span>      &quot;&quot;&quot;Return an isotropically upscaled validation grid at the final size.&quot;&quot;&quot;
+<span class="ln">  41</span>  
+<span class="ln">  42</span>      if repair.validation_scale &lt; 1:
+<span class="ln">  43</span>          raise ValueError(&quot;validation_scale must be positive&quot;)
+<span class="ln">  44</span>      scale = repair.validation_scale
+<span class="ln">  45</span>      return replace(
+<span class="ln">  46</span>          native,
+<span class="ln">  47</span>          sheet_size_mm=repair.physical_size_mm,
+<span class="ln">  48</span>          analysis_pixels=native.analysis_pixels * scale,
+<span class="ln">  49</span>          outer_pixels=native.outer_pixels * scale,
+<span class="ln">  50</span>          perimeter_pixels=native.perimeter_pixels * scale,
+<span class="ln">  51</span>      )</pre>
+<p>תוצאה ב־Option B (<span class="tag obs">OBSERVED</span>): analysis = 2048, outer = 2304, perimeter = 128, sheet = 225 מ"מ.</p>
+
+<h2 id="c5s4">5.4 OptimizationConfig: מרכיבי הרוחב</h2>
+<pre class="code" dir="ltr"><span class="src">src/layerforge_l1/layer_optimization.py:37-52</span>
+<span class="ln">  37</span>  @dataclass(frozen=True)
+<span class="ln">  38</span>  class OptimizationConfig:
+<span class="ln">  39</span>      &quot;&quot;&quot;Bounded, deterministic search and reporting controls.&quot;&quot;&quot;
+<span class="ln">  40</span>  
+<span class="ln">  41</span>      max_states_per_depth: int = 65_536
+<span class="ln">  42</span>      tiny_visible_fraction: float = 0.0005
+<span class="ln">  43</span>      near_full_retained_fraction: float = 0.95
+<span class="ln">  44</span>      region_connectivity: int = 4
+<span class="ln">  45</span>      nominal_connection_width_mm: float = 0.8
+<span class="ln">  46</span>      vectorization_safety_mm: float = 0.2
+<span class="ln">  47</span>      cad_conversion_safety_mm: float = 0.2
+<span class="ln">  48</span>      minimum_contact_pixels_override: int | None = None
+<span class="ln">  49</span>      exempt_thin_decorative_regions_from_contact_width: bool = False
+<span class="ln">  50</span>  
+<span class="ln">  51</span>  
+<span class="ln">  52</span>  DEFAULT_OPTIMIZATION_CONFIG = OptimizationConfig()</pre>
+<p>רק שלושת שדות הרוחב משמשים כאן: <span class="m">0.8+0.2+0.2=1.2</span> מ"מ (נומינלי + מרווח לווקטוריזציה + מרווח להמרת CAD).</p>
+
+<h2 id="c5s5">5.5 מצב המתכנן (RevealPlanner)</h2>
+<pre class="code" dir="ltr"><span class="src">src/layerforge_l1/reveal_planner.py:240-268</span>
+<span class="ln"> 240</span>      def __init__(self, labels: np.ndarray, config: RevealConfig = RevealConfig()):
+<span class="ln"> 241</span>          self.config = config
+<span class="ln"> 242</span>          self.labels = labels
+<span class="ln"> 243</span>          self.grid = physical_grid(config)
+<span class="ln"> 244</span>          self.kernel, self.width_parameters = width_kernel(
+<span class="ln"> 245</span>              self.grid, margin_pixels=config.planning_margin_pixels
+<span class="ln"> 246</span>          )
+<span class="ln"> 247</span>          _, self.perimeter = _outer_and_perimeter(self.grid)
+<span class="ln"> 248</span>          native_cells, self.cell_color, self.cell_region = build_cells(labels, config)
+<span class="ln"> 249</span>          self.native_cells = native_cells
+<span class="ln"> 250</span>          self.cell_map = embed(native_cells, self.grid, -1)
+<span class="ln"> 251</span>          self.cell_count = len(self.cell_color)
+<span class="ln"> 252</span>          self.cell_area = np.bincount(native_cells.ravel(), minlength=self.cell_count)
+<span class="ln"> 253</span>          self.nub_steps = max(
+<span class="ln"> 254</span>              1, int(round(config.nub_tolerance_mm / self.width_parameters[&quot;mm_per_pixel&quot;]))
+<span class="ln"> 255</span>          )
+<span class="ln"> 256</span>          self.start_covered = (
+<span class="ln"> 257</span>              self.cell_color == config.frame_label
+<span class="ln"> 258</span>              if config.frame_label is not None
+<span class="ln"> 259</span>              else np.zeros(self.cell_count, dtype=bool)
+<span class="ln"> 260</span>          )
+<span class="ln"> 261</span>          self.perimeter = self.perimeter | self.cells_mask(self.start_covered)
+<span class="ln"> 262</span>          self.colors = sorted(int(v) for v in np.unique(self.cell_color[~self.start_covered]))
+<span class="ln"> 263</span>  
+<span class="ln"> 264</span>      def cells_mask(self, cells: np.ndarray) -&gt; np.ndarray:
+<span class="ln"> 265</span>          lookup = np.zeros(self.cell_count + 1, dtype=bool)
+<span class="ln"> 266</span>          lookup[np.flatnonzero(cells)] = True
+<span class="ln"> 267</span>          # cell_map uses -1 for the perimeter; index -1 hits the trailing False.
+<span class="ln"> 268</span>          return lookup[self.cell_map]</pre>
+<table class="t small">
+<tr><th>מאפיין</th><th>טיפוס וגודל ב־Option B</th><th>משמעות</th></tr>
+<tr><td class="l">perimeter</td><td class="l">bool[2304,2304]</td><td>טבעת ברוחב 128 פיקסלים, ובנוסף פיקסלי התאים של פסי ה־magenta (שורה 261). זה ה"עוגן" שאליו כל חומר חייב להתחבר.</td></tr>
+<tr><td class="l">native_cells</td><td class="l">int32[2048,2048]</td><td>מזהה תא לכל פיקסל יעד.</td></tr>
+<tr><td class="l">cell_map</td><td class="l">int32[2304,2304]</td><td><code>native_cells</code> מוטמע ברשת הפיזית. במסגרת: 1−.</td></tr>
+<tr><td class="l">cell_color, cell_region</td><td class="l">int32[11498]</td><td>תווית הצבע ומזהה האזור המקורי של כל תא.</td></tr>
+<tr><td class="l">cell_area</td><td class="l">int64[11498]</td><td>מספר פיקסלי היעד בכל תא. משמש לדירוג ה־beam ולסדר ב־eliminate.</td></tr>
+<tr><td class="l">start_covered</td><td class="l">bool[11498]</td><td>תאי המסגרת. הם "מכוסים" מראש, אף פעם לא גלויים, ותמיד חומר.</td></tr>
+<tr><td class="l">colors</td><td class="l">list[int]</td><td>הצבעים שיש לחשוף. ב־Option B יש 9 (כולם חוץ מ־9).</td></tr>
+<tr><td class="l">kernel</td><td class="l">uint8[13,13]</td><td>גרעין הרוחב האליפטי (פרק 6).</td></tr>
+<tr><td class="l">nub_steps</td><td>5</td><td><span class="m">\mathrm{round}(0.5/0.0977)</span>.</td></tr>
+</table>
+<h3>המרה מווקטור תאים למסכה: cells_mask</h3>
+<pre class="code" dir="ltr"><span class="src">src/layerforge_l1/reveal_planner.py:264-271</span>
+<span class="ln"> 264</span>      def cells_mask(self, cells: np.ndarray) -&gt; np.ndarray:
+<span class="ln"> 265</span>          lookup = np.zeros(self.cell_count + 1, dtype=bool)
+<span class="ln"> 266</span>          lookup[np.flatnonzero(cells)] = True
+<span class="ln"> 267</span>          # cell_map uses -1 for the perimeter; index -1 hits the trailing False.
+<span class="ln"> 268</span>          return lookup[self.cell_map]
+<span class="ln"> 269</span>  
+<span class="ln"> 270</span>      def covered_mask(self, covered_cells: np.ndarray) -&gt; np.ndarray:
+<span class="ln"> 271</span>          return self.perimeter | self.cells_mask(covered_cells)</pre>
+<div class="box derived"><span class="tag derived">DERIVED</span> הטריק: טבלת lookup בגודל n+1, שהערך האחרון בה תמיד False. במסגרת <code>cell_map=-1</code>, ובפייתון <code>lookup[-1]</code> הוא האיבר האחרון. כך מתקבלת המסכה בפעולת gather אחת, <span class="m">O(N^2)</span>, בלי לולאה על תאים. <code>covered_mask</code> מוסיף את ה־perimeter: <span class="m">\mathrm{px}(C)=P\cup\{p:\ \mathrm{cell}(p)\in C\}</span>.</div>
+
+<h2 id="c5s6">5.6 מבני הפלט של התכנון</h2>
+<table class="t small">
+<tr><th>מבנה</th><th>שדות</th><th>נוצר ב</th><th>נצרך ב</th></tr>
+<tr><td>closure</td><td class="l">feasible, round_robin_sheet_count, obstruction_cells, covered_cells</td><td class="l">closure()</td><td>הסקריפט: אם False, נוצרת מפת חסימה ולא נוצרים לוחות</td></tr>
+<tr><td>plan</td><td class="l">status, front_to_back_colors, reveals, evaluations, [uncovered_cells]</td><td class="l">beam_search()</td><td class="l">eliminate_sheets, materialize, seam_report</td></tr>
+<tr><td>sheet</td><td class="l">physical_mask, visible_mask, visible_cells</td><td class="l">materialize()</td><td>validators, PNG</td></tr>
+<tr><td>seams</td><td class="l">seam_edge_length_native_pixels/mm, source_regions, ...split...</td><td class="l">seam_report()</td><td class="l">poc_report.json</td></tr>
+</table>
+
+<h2 id="c5s7">5.7 קבצים על הדיסק</h2>
+<table class="t small">
+<tr><th>קובץ</th><th>תוכן</th><th>מי כותב / קורא</th></tr>
+<tr><td class="l">layers/layer_XX_rrggbb/retained_material_mask.png</td><td>מסכת החומר הפיזית, 2304 × 2304, ‏0/255. XX הוא אינדקס אחורה־לפנים (00 = אחורי).</td><td>נכתב בשורה 109 בסקריפט המתכנן, נקרא בייצוא ה־CAD</td></tr>
+<tr><td class="l">…/source_visible_region_mask.png</td><td>הפיקסלים שהלוח הזה מראה.</td><td>נכתב בשורה 115, נקרא באימות החוזר</td></tr>
+<tr><td class="l">…/physical_sheet_preview.png</td><td>תצוגת צבע (1152 × 1152, NEAREST).</td><td>לבדיקה ויזואלית בלבד</td></tr>
+<tr><td class="l">mask_derived_composite.png</td><td>הרכבה front-to-back של מסכות החומר.</td><td>השוואה ליעד (0 פיקסלים שונים)</td></tr>
+<tr><td class="l">visible_depth_map.png</td><td>עומק החשיפה לכל פיקסל (viridis).</td><td>ויזואלי</td></tr>
+<tr><td class="l">poc_report.json</td><td>config, palette, תוצאות closure ו־beam, טבלת לוחות, seams, זמנים.</td><td>הסקריפט</td></tr>
+<tr><td class="l">cad_manifest.json</td><td>סדר הרכבה, נתיבי stl ו־step, ‏<code>assembled_z0_mm</code>, בדיקות לכל שכבה, זמנים.</td><td class="l">export_reveal_stack_cad.py</td></tr>
+<tr><td class="l">cad_revalidation.json</td><td>לכל שכבה: הפרש פיקסלים ותוצאות validators. ‏<code>stack_mismatch_px</code>.</td><td>ad hoc</td></tr>
+</table>
+</section><section class="chapter" data-name="06_grid"><h1 id="c6">6. רשת פיזית, יחידות, גרעין הרוחב ותאים</h1>
+
+<h2 id="c6s1">6.1 מערכת הקואורדינטות והיחידות</h2>
+<div class="box impl"><span class="tag impl">IMPLEMENTED MATHEMATICS</span> <span class="ref" data-sym="mm_per_pixel = poc.sheet_size_mm / poc.outer_pixels">src/layerforge_l1/connectivity_repair.py:117</span>
+<div class="mb">s=\frac{\texttt{sheet\_size\_mm}}{\texttt{outer\_pixels}}=\frac{225}{576\cdot 4}=\frac{225}{2304}=0.09765625\ \text{mm/px}</div>
+<p>הרשת הפיזית היא מערך ריבועי בגודל <span class="m">2304\times2304</span>. אינדקס <span class="m">(y,x)</span> הוא שורה ועמודה, ו־y גדל כלפי מטה, כמו בתמונה. המסגרת היא <span class="m">p=32\cdot4=128</span> פיקסלים מכל צד, כלומר <span class="m">128s=12.5</span> מ"מ, ושטח היצירה הוא <span class="m">2048s=200</span> מ"מ.</p></div>
+<div class="box derived"><span class="tag derived">DERIVED</span> התאמת היעד לרשת: היעד הוא 2048 × 2048 פיקסלים. <span class="ref" data-sym="def embed">src/layerforge_l1/reveal_planner.py:161</span> מחשב <span class="m">\texttt{scale}=2048 \mathbin{//} 2048=1</span>, ולכן כל פיקסל יעד הוא בדיוק פיקסל פיזי אחד. התכנון מתבצע ישירות ברזולוציה של 0.0977 מ"מ, בלי שום דגימה מחדש.</div>
+<pre class="code" dir="ltr"><span class="src">src/layerforge_l1/reveal_planner.py:161-168</span>
+<span class="ln"> 161</span>  def embed(native: np.ndarray, grid: PocConfig, fill: int) -&gt; np.ndarray:
+<span class="ln"> 162</span>      &quot;&quot;&quot;Nearest-upsample an artwork-sized array into the full physical grid.&quot;&quot;&quot;
+<span class="ln"> 163</span>  
+<span class="ln"> 164</span>      scale = grid.analysis_pixels // native.shape[0]
+<span class="ln"> 165</span>      p = grid.perimeter_pixels
+<span class="ln"> 166</span>      out = np.full((grid.outer_pixels, grid.outer_pixels), fill, dtype=native.dtype)
+<span class="ln"> 167</span>      out[p:-p, p:-p] = np.repeat(np.repeat(native, scale, axis=0), scale, axis=1)
+<span class="ln"> 168</span>      return out</pre>
+
+<h2 id="c6s2">6.2 מדרישת 1.2 מ"מ לגרעין של 13 פיקסלים</h2>
+<p><span class="ref" data-sym="def _width_parameters">src/layerforge_l1/connectivity_repair.py:114</span></p>
+<pre class="code" dir="ltr"><span class="src">src/layerforge_l1/connectivity_repair.py:117-130</span>
+<span class="ln"> 117</span>      mm_per_pixel = poc.sheet_size_mm / poc.outer_pixels
+<span class="ln"> 118</span>      enforced_mm = (
+<span class="ln"> 119</span>          optimization.nominal_connection_width_mm
+<span class="ln"> 120</span>          + optimization.vectorization_safety_mm
+<span class="ln"> 121</span>          + optimization.cad_conversion_safety_mm
+<span class="ln"> 122</span>      )
+<span class="ln"> 123</span>      requested_pixels = enforced_mm / mm_per_pixel
+<span class="ln"> 124</span>      enforced_pixels = math.ceil(requested_pixels)
+<span class="ln"> 125</span>      # OpenCV kernels are centred on one pixel.  A seven-pixel physical-width
+<span class="ln"> 126</span>      # requirement therefore uses a 7x7 footprint (radius three), not a 9x9
+<span class="ln"> 127</span>      # footprint (radius four).  If ceil() produces an even number, round the
+<span class="ln"> 128</span>      # footprint up once to retain a centred, conservative odd kernel.
+<span class="ln"> 129</span>      kernel_size = enforced_pixels if enforced_pixels % 2 else enforced_pixels + 1
+<span class="ln"> 130</span>      kernel_radius = (kernel_size - 1) // 2</pre>
+<div class="box impl"><span class="tag impl">IMPLEMENTED MATHEMATICS</span>
+<div class="mb">w=0.8+0.2+0.2=1.2\ \text{mm},\quad n_{\text{req}}=\frac{w}{s}=\frac{1.2}{0.09765625}=12.288,\quad n=\lceil n_{\text{req}}\rceil=13,\quad k=\begin{cases}n & n\ \text{odd}\\ n+1 & n\ \text{even}\end{cases}=13</div>
+<p>הרוחב הפיזי של הגרעין: <span class="m">13s=1.2695</span> מ"מ. העיגול כלפי מעלה תמיד שמרני, ולכן הדרישה בפועל מחמירה ב־0.07 מ"מ. גודל אי־זוגי נחוץ כי ב־OpenCV לגרעין יש פיקסל מרכזי (anchor), ורק עם גודל אי־זוגי השחיקה סימטרית לשני הצדדים.</p></div>
+<p><span class="ref" data-sym="def width_kernel">src/layerforge_l1/reveal_planner.py:74</span> בונה את אותו גרעין למתכנן. כש־<code>planning_margin_pixels=0</code>, הגרעין של המתכנן <b>זהה</b> לגרעין של ה־validator. זה מכוון: מה שהמתכנן מקבל, ה־validator יקבל.</p>
+<h3>הגרעין עצמו: <code>cv2.getStructuringElement(MORPH_ELLIPSE, (13,13))</code></h3>
+<div class="bitsrow"><div><table class="bits" dir="ltr"><tr><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b1"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td></tr><tr><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td></tr><tr><td class="b0"></td><td class="b0"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b0"></td><td class="b0"></td></tr><tr><td class="b0"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b0"></td></tr><tr><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td></tr><tr><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td></tr><tr><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td></tr><tr><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td></tr><tr><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td></tr><tr><td class="b0"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b0"></td></tr><tr><td class="b0"></td><td class="b0"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b0"></td><td class="b0"></td></tr><tr><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td></tr><tr><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b1"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td></tr></table>121 פיקסלים פעילים מתוך 169 (הופק מהקוד)</div></div>
+<div class="box derived"><span class="tag derived">DERIVED</span> <b>המשמעות הפיזית:</b> שחיקה (<span class="m">\ominus</span>) בגרעין K משאירה פיקסל p רק אם כל הגרעין, כשמרכזו ב־p, נמצא בתוך החומר. לכן פס ישר אופקי או אנכי שורד את השחיקה רק אם רוחבו 13 פיקסלים לפחות (1.27 מ"מ). פס אלכסוני צריך להכיל את האליפסה, ו"רוחב" האליפסה בכיוון 45° הוא מעט קטן מ־13 פיקסלים כי הפינות שלה חתוכות. לכן זו מדידה בדידה, לא מדידה רציפה מושלמת.</div>
+<div class="box derived"><span class="tag derived">DERIVED</span> <b>סף ה־nub:</b> <span class="ref" data-sym="self.nub_steps = max(">src/layerforge_l1/reveal_planner.py:253</span>: <span class="m">\mathrm{round}(0.5/0.09765625)=\mathrm{round}(5.12)=5</span> צעדים של 4 שכנים, כלומר 0.49 מ"מ.</div>
+
+<h2 id="c6s3">6.3 build_cells: חלוקת אזורים לתאים</h2>
+<p><span class="ref" data-sym="def build_cells">src/layerforge_l1/reveal_planner.py:85</span>. <b>מטרה:</b> לאפשר לאזור צבע אחד, למשל קו מתאר שחור שעובר בכל התמונה, להופיע בכמה עומקים. אם כל אזור מוצב בעומק אחד, נוצרים מצבים שאין להם פתרון: בדוגמת הבדיקה (פרק 8.9) הווריאנט הזה נתקע.</p>
+<pre class="code" dir="ltr"><span class="src">src/layerforge_l1/reveal_planner.py:95-127</span>
+<span class="ln">  95</span>      height, width = labels.shape
+<span class="ln">  96</span>      region_map = np.full(labels.shape, -1, dtype=np.int32)
+<span class="ln">  97</span>      region_color: list[int] = []
+<span class="ln">  98</span>      for color in np.unique(labels):
+<span class="ln">  99</span>          components, count = ndimage.label(labels == color)
+<span class="ln"> 100</span>          region_map[components &gt; 0] = components[components &gt; 0] - 1 + len(region_color)
+<span class="ln"> 101</span>          region_color.extend([int(color)] * count)
+<span class="ln"> 102</span>  
+<span class="ln"> 103</span>      if not config.split_regions:
+<span class="ln"> 104</span>          return (
+<span class="ln"> 105</span>              region_map,
+<span class="ln"> 106</span>              np.asarray(region_color, dtype=np.int32),
+<span class="ln"> 107</span>              np.arange(len(region_color), dtype=np.int32),
+<span class="ln"> 108</span>          )
+<span class="ln"> 109</span>  
+<span class="ln"> 110</span>      # Tile and fragment sizes are physical, so cells match at any resolution.
+<span class="ln"> 111</span>      mm_per_pixel = config.outer_sheet_mm * DEFAULT_CONFIG.analysis_pixels / DEFAULT_CONFIG.outer_pixels / width
+<span class="ln"> 112</span>      tile = max(2, int(round(config.cell_tile_mm / mm_per_pixel)))
+<span class="ln"> 113</span>      min_pixels = max(1, int(round(config.min_cell_mm2 / mm_per_pixel**2)))
+<span class="ln"> 114</span>      cell_map = np.full(labels.shape, -1, dtype=np.int32)
+<span class="ln"> 115</span>      cell_region: list[int] = []
+<span class="ln"> 116</span>      for y in range(0, height, tile):
+<span class="ln"> 117</span>          for x in range(0, width, tile):
+<span class="ln"> 118</span>              block = region_map[y : y + tile, x : x + tile]
+<span class="ln"> 119</span>              out = cell_map[y : y + tile, x : x + tile]
+<span class="ln"> 120</span>              for region in np.unique(block):
+<span class="ln"> 121</span>                  components, count = ndimage.label(block == region)
+<span class="ln"> 122</span>                  out[components &gt; 0] = components[components &gt; 0] - 1 + len(cell_region)
+<span class="ln"> 123</span>                  cell_region.extend([int(region)] * count)
+<span class="ln"> 124</span>  
+<span class="ln"> 125</span>      cell_map, cell_region = _merge_small_cells(cell_map, cell_region, min_pixels)
+<span class="ln"> 126</span>      cell_region_array = np.asarray(cell_region, dtype=np.int32)
+<span class="ln"> 127</span>      return cell_map, np.asarray(region_color, dtype=np.int32)[cell_region_array], cell_region_array</pre>
+<h3>שלבי האלגוריתם</h3>
+<ol>
+<li><b>אזורים (שורות 98–101):</b> לכל צבע, <code>ndimage.label</code> מוצא רכיבים 4־קשירים. כל רכיב מקבל מזהה אזור רץ, ו־<code>region_color</code> שומר את הצבע שלו.</li>
+<li><b>אריחים (שורות 110–123):</b> <span class="ref" data-sym="tile = max(2">src/layerforge_l1/reveal_planner.py:112</span>. התמונה נחתכת לרשת אריחים ריבועית. בכל אריח, לכל אזור, כל רכיב 4־קשיר של החיתוך הופך לתא נפרד.</li>
+<li><b>מיזוג תאים זעירים (שורה 125):</b> <span class="ref" data-sym="def _merge_small_cells">src/layerforge_l1/reveal_planner.py:130</span>. תא קטן מ־<code>min_pixels</code> מצורף לשכן <b>מאותו אזור</b> שהשטח שלו גדול ביותר (טבעת 3×3, 8 שכנים). חוזרים על זה עד שאין שינוי, ואז מספרי התאים נדחסים מחדש.</li>
+</ol>
+<div class="box impl"><span class="tag impl">IMPLEMENTED MATHEMATICS</span> (שורות 111–113, ערכי Option B)
+<div class="mb">s'=\frac{225\cdot 512}{576\cdot 2048}=0.09765625,\quad \text{tile}=\max\big(2,\mathrm{round}(2.0/s')\big)=\mathrm{round}(20.48)=20\ \text{px}=1.95\ \text{mm}</div>
+<div class="mb">\text{min\_pixels}=\max\big(1,\mathrm{round}(0.9/s'^2)\big)=\mathrm{round}(94.37)=94\ \text{px}\approx 0.896\ \text{mm}^2</div>
+<p>הנוסחה ל־<span class="m">s'</span> מבטאת את גודל שטח היצירה (<span class="m">225\cdot512/576=200</span> מ"מ) חלקי רוחב היעד, ולכן גודל התא <b>פיזי</b> ואינו תלוי ברזולוציה.</p></div>
+<p><b>תוצאה ב־Option B</b> <span class="tag obs">OBSERVED</span>: 35 אזורים חולקו ל־11,498 תאים.</p>
+<div class="box derived"><span class="tag derived">DERIVED</span> <b>למה חותכים לפי אריחים ולא לפי מבנה הצורה?</b> החיתוך גאומטרי ועיוור לתוכן. הוא מבטיח שכל תא קטן מ־2 × 2 מ"מ, כך שהמתכנן יכול "לפצל" כל אזור בגרנולריות הזאת. המחיר הוא "תפרים" (seams): גבול בין שני תאים של אותו אזור שהוצבו בעומקים שונים. מבחינה ויזואלית התפר כמעט לא נראה, כי שני הצדדים באותו צבע, אבל פיזית יש שם מדרגה של עובי לוח. האורך הכולל מדווח ב־<code>seam_report</code>.</div>
+<div class="box gap"><span class="tag gap">LIMITATION</span> כשאין לתא זעיר שכן מאותו אזור (למשל רכיב זעיר שכולו בתוך אריח אחד), הוא נשאר תא קטן. זה לא שגיאה, אבל המתכנן יצטרך לתמוך בו כמו בכל תא אחר.</div>
+</section><section class="chapter" data-name="07_support"><h1 id="c7">7. אופרטור התמיכה המבנית</h1>
+<p>זו הליבה המתמטית של המתכנן. הפונקציה <span class="ref" data-sym="def structural_support">src/layerforge_l1/reveal_planner.py:171</span> עונה על השאלה: <b>אם מותר לי להשתמש בחומר רק בתוך הקבוצה U, איזה חלק ממנו אפשר להשאיר כך שהוא מחובר למסגרת דרך מעברים ברוחב 1.27 מ"מ לפחות?</b></p>
+
+<h2 id="c7s1">7.1 הגדרות: שחיקה, התפשטות ועיגון</h2>
+<div class="box theory"><span class="tag theory">THEORETICAL BACKGROUND</span> מורפולוגיה בינארית. A היא קבוצת פיקסלים ו־K גרעין סימטרי שמרכזו בראשית:
+<div class="mb">A\ominus K=\{p:\ p+K\subseteq A\},\qquad A\oplus K=\{p+k:\ p\in A,\ k\in K\},\qquad A\circ K=(A\ominus K)\oplus K</div>
+<p>הפתיחה <span class="m">A\circ K</span> היא איחוד כל ההזזות של K שנמצאות כולן בתוך A, כלומר כל המקומות ש"מטבע" בצורת K יכול לכסות בלי לצאת מ־A.</p></div>
+<div class="box impl"><span class="tag impl">IMPLEMENTED MATHEMATICS</span> <code>cv2.erode</code> מחשב <span class="m">\min_{k\in K} A(p+k)</span> ו־<code>cv2.dilate</code> מחשב <span class="m">\max</span>, והם מממשים בדיוק את ההגדרות האלה. <b>פרט חשוב</b> (הודגם בדוגמה A2 בהמשך): בשחיקה OpenCV מתייחס לפיקסלים <b>מחוץ לתמונה</b> כאל חומר (ערך גבול מקסימלי). ברשת האמיתית התמונה מוקפת במסגרת ברוחב 128 פיקסלים, שרחבה בהרבה מהגרעין, ולכן לזה אין השפעה על התוצאה.</div>
+<div class="box impl"><span class="tag impl">IMPLEMENTED MATHEMATICS</span> <b>עיגון:</b> <span class="ref" data-sym="def _anchored">src/layerforge_l1/reveal_planner.py:216</span>
+<div class="mb">\mathrm{Anch}_P(C)=\bigcup\{\,Q:\ Q\ \text{is a 4-connected component of } C,\ Q\cap P\neq\emptyset\,\}</div>
+<p>הקוד מחשב את הרכיבים ב־<code>cv2.connectedComponents(connectivity=4)</code>, מסמן את התוויות שמופיעות ב־<span class="m">P\cap C</span>, ומחזיר מסכה של כל הפיקסלים שלהן.</p></div>
+<pre class="code" dir="ltr"><span class="src">src/layerforge_l1/reveal_planner.py:211-234</span>
+<span class="ln"> 211</span>  def _orphan_cores(material: np.ndarray, perimeter: np.ndarray, kernel: np.ndarray) -&gt; np.ndarray:
+<span class="ln"> 212</span>      core = cv2.erode(material.astype(np.uint8), kernel).astype(bool)
+<span class="ln"> 213</span>      return core &amp; ~_anchored(core, perimeter)
+<span class="ln"> 214</span>  
+<span class="ln"> 215</span>  
+<span class="ln"> 216</span>  def _anchored(core: np.ndarray, perimeter: np.ndarray) -&gt; np.ndarray:
+<span class="ln"> 217</span>      count, components = cv2.connectedComponents(core.astype(np.uint8), connectivity=4)
+<span class="ln"> 218</span>      keep = np.zeros(count, dtype=bool)
+<span class="ln"> 219</span>      keep[np.unique(components[perimeter &amp; core])] = True
+<span class="ln"> 220</span>      keep[0] = False
+<span class="ln"> 221</span>      return keep[components]
+<span class="ln"> 222</span>  
+<span class="ln"> 223</span>  
+<span class="ln"> 224</span>  _CROSS = cv2.getStructuringElement(cv2.MORPH_CROSS, (3, 3))
+<span class="ln"> 225</span>  
+<span class="ln"> 226</span>  
+<span class="ln"> 227</span>  def _geodesic_reach(seed: np.ndarray, domain: np.ndarray, steps: int) -&gt; np.ndarray:
+<span class="ln"> 228</span>      reach = seed &amp; domain
+<span class="ln"> 229</span>      for _ in range(steps):
+<span class="ln"> 230</span>          grown = cv2.dilate(reach.astype(np.uint8), _CROSS).astype(bool) &amp; domain
+<span class="ln"> 231</span>          if np.array_equal(grown, reach):
+<span class="ln"> 232</span>              break
+<span class="ln"> 233</span>          reach = grown
+<span class="ln"> 234</span>      return reach</pre>
+
+<h2 id="c7s2">7.2 האופרטור הבסיסי</h2>
+<pre class="code" dir="ltr"><span class="src">src/layerforge_l1/reveal_planner.py:183-185</span>
+<span class="ln"> 183</span>      covered_core = cv2.erode(covered.astype(np.uint8), kernel).astype(bool)
+<span class="ln"> 184</span>      anchored = _anchored(covered_core, perimeter)
+<span class="ln"> 185</span>      support = cv2.dilate(anchored.astype(np.uint8), kernel).astype(bool) &amp; covered</pre>
+<div class="box impl"><span class="tag impl">IMPLEMENTED MATHEMATICS</span>
+<div class="mb">\mathrm{Struct}_0(U)=\Big(\mathrm{Anch}_P\big(U\ominus K\big)\oplus K\Big)\cap U</div>
+<p><b>שלב 1:</b> <span class="m">U\ominus K</span> היא ה"ליבה" (core): כל הפיקסלים שאפשר למקם עליהם את מרכז ה"מטבע" ברוחב 1.27 מ"מ. <b>שלב 2:</b> <span class="m">\mathrm{Anch}_P</span> משאיר רק חלקי ליבה שנוגעים במסגרת. <b>שלב 3:</b> <span class="m">\oplus K</span> מחזיר את הרוחב: כל פיקסל ש"מטבע" כזה, שמחובר למסגרת, מכסה. <b>שלב 4:</b> <span class="m">\cap U</span> הוא ביטוח: לא יוצרים חומר מחוץ ל־U.</p></div>
+<div class="box derived"><span class="tag derived">DERIVED</span> <b>פירוש:</b> <span class="m">\mathrm{Struct}_0(U)</span> הוא החלק של הפתיחה <span class="m">U\circ K</span> שמטבע ברוחב 1.27 מ"מ מגיע אליו <b>בהחלקה רציפה מהמסגרת</b>, בלי לצאת מ־U. שני פיקסלי ליבה סמוכים (4 שכנים) p ו־q מקיימים <span class="m">p+K\subseteq U</span> ו־<span class="m">q+K\subseteq U</span>, ולכן מסלול ליבה 4־קשיר מתאר "מסדרון" ברוחב הגרעין לכל אורכו. זה בדיוק מה שה־validator בודק (פרק 10).</div>
+<div class="box derived"><span class="tag derived">DERIVED</span> <b>אינווריאנט: <span class="m">\mathrm{Struct}(U)\subseteq U</span>.</b> בשורות 185 ו־207 יש <code>&amp; covered</code> מפורש. בשורה 196 (גשרים) אין, אבל <code>bridge</code> ⊆ <code>covered_core</code> = <span class="m">U\ominus K</span>. מההגדרה, לכל <span class="m">b\in U\ominus K</span> מתקיים <span class="m">b+K\subseteq U</span>, ולכן <span class="m">\text{bridge}\oplus K\subseteq U</span> (K סימטרי). <b>זה האינווריאנט שמבטיח שהמתכנן לא מוסיף חומר במקומות שצריכים להישאר חורים</b> (פרק 9).</div>
+
+<h2 id="c7s3">7.3 מונוטוניות: הבסיס לכל המתכנן</h2>
+<div class="box derived"><span class="tag derived">DERIVED</span> <b>טענה:</b> אם <span class="m">U\subseteq U'</span>, אז <span class="m">\mathrm{Struct}_0(U)\subseteq\mathrm{Struct}_0(U')</span>.<br>
+<b>נימוק:</b> (1) שחיקה מונוטונית: <span class="m">U\ominus K\subseteq U'\ominus K</span>. (2) כל רכיב Q של הליבה הקטנה שנוגע ב־P מוכל ברכיב Q' של הליבה הגדולה (הוא קשיר וכלול בה), ו־Q' נוגע ב־P באותו פיקסל. לכן <span class="m">\mathrm{Anch}</span> מונוטוני. (3) גם התפשטות וחיתוך מונוטוניים.<br>
+<b>הסתייגות:</b> לולאות התיקון (גשרים וחיתוכים, בהמשך) הן היוריסטיות, והנימוק הזה לא מכסה אותן. ה־docstring של הקובץ טוען למונוטוניות, אבל לגבי הגרסה המלאה עם התיקונים זו הנחה עבודה, לא משפט מוכח.</div>
+<p>המשמעות המעשית: <b>כשקבוצת המכוסים גדלה, התמיכה רק גדלה.</b> מכאן נובע שחשיפה של יותר תאים מוקדם לא מזיקה לאף לוח מאחור (פרק 8).</p>
+
+<h2 id="c7s4">7.4 לולאת הגשרים (bridge loop)</h2>
+<pre class="code" dir="ltr"><span class="src">src/layerforge_l1/reveal_planner.py:186-196</span>
+<span class="ln"> 186</span>      for _ in range(8):
+<span class="ln"> 187</span>          core = cv2.erode(support.astype(np.uint8), kernel).astype(bool)
+<span class="ln"> 188</span>          orphan = core &amp; ~_anchored(core, perimeter)
+<span class="ln"> 189</span>          if not orphan.any():
+<span class="ln"> 190</span>              break
+<span class="ln"> 191</span>          bridge = (
+<span class="ln"> 192</span>              cv2.dilate(orphan.astype(np.uint8), _CROSS).astype(bool) &amp; covered_core &amp; ~core
+<span class="ln"> 193</span>          )
+<span class="ln"> 194</span>          if not bridge.any():
+<span class="ln"> 195</span>              break
+<span class="ln"> 196</span>          support |= cv2.dilate(bridge.astype(np.uint8), kernel).astype(bool)</pre>
+<p><b>הבעיה שהיא פותרת:</b> ברסטר, <span class="m">(\cdot\oplus K)\ominus K</span> אינו בהכרח שווה לקלט. אחרי ההתפשטות, שחיקה חוזרת (בדיוק מה שה־validator עושה) עלולה ליצור פיקסלי ליבה "תועים" שנוגעים בליבה המעוגנת <b>רק באלכסון</b>. ה־validator עובד בקשירות 4, ולכן יספור אותם כ"ליבות יתומות" (orphan cores) ויכשיל את הלוח. זו הייתה התקלה של "מדרגות אלכסוניות" שתוקנה במהלך הפיתוח.</p>
+<div class="box impl"><span class="tag impl">IMPLEMENTED MATHEMATICS</span> בכל איטרציה (עד 8):
+<div class="mb">O=(S\ominus K)\setminus\mathrm{Anch}_P(S\ominus K),\qquad B=(O\oplus C_{3\times3}^{+})\cap(U\ominus K)\setminus(S\ominus K),\qquad S\leftarrow S\cup(B\oplus K)</div>
+<p><span class="m">C^{+}</span> הוא צלב 3×3, כלומר 4 שכנים. B הם פיקסלים שצמודים (4 שכנים) ליתום, נמצאים בליבה המותרת של U, אבל לא נמצאים כרגע בליבה של S. הוספת <span class="m">B\oplus K</span> ל־S הופכת אותם לליבה ומחברת את היתום בחיבור 4־קשיר.</p></div>
+
+<h2 id="c7s5">7.5 לולאת החיתוך (growing-cut prune)</h2>
+<pre class="code" dir="ltr"><span class="src">src/layerforge_l1/reveal_planner.py:197-208</span>
+<span class="ln"> 197</span>      # Where no bridge fits, cut the anchored core next to each orphan so the
+<span class="ln"> 198</span>      # material it implied is dropped (hidden) or reported unsupported (visible).
+<span class="ln"> 199</span>      for attempt in range(16):
+<span class="ln"> 200</span>          core = cv2.erode(support.astype(np.uint8), kernel).astype(bool)
+<span class="ln"> 201</span>          orphan = core &amp; ~_anchored(core, perimeter)
+<span class="ln"> 202</span>          if not orphan.any():
+<span class="ln"> 203</span>              break
+<span class="ln"> 204</span>          size = 5 + 4 * attempt  # grow the cut if the same orphan persists
+<span class="ln"> 205</span>          cut = cv2.dilate(orphan.astype(np.uint8), np.ones((size, size), np.uint8)).astype(bool)
+<span class="ln"> 206</span>          anchored = _anchored(anchored &amp; ~cut, perimeter)
+<span class="ln"> 207</span>          support = cv2.dilate(anchored.astype(np.uint8), kernel).astype(bool) &amp; covered
+<span class="ln"> 208</span>      return support</pre>
+<div class="box impl"><span class="tag impl">IMPLEMENTED MATHEMATICS</span> אם נשארו יתומים, ניסיון t (עד 16):
+<div class="mb">c_t=5+4t,\quad X=O\oplus \square_{c_t},\quad A\leftarrow \mathrm{Anch}_P(A\setminus X),\quad S\leftarrow (A\oplus K)\cap U</div>
+<p><span class="m">\square_c</span> הוא ריבוע מלא c×c (5, 9, 13 וכן הלאה). חותכים את הליבה המעוגנת סביב היתום, ואם היתום נשאר, החיתוך גדל. החומר שהיתום "ייצג" נעלם מהתמיכה: אם הוא היה מוסתר, זה בטוח, ואם הוא היה גלוי, <code>unsupported_pixels</code> יחזיר אותו כפיקסל לא נתמך (פרק 8).</p></div>
+<div class="box gap"><span class="tag gap">LIMITATION</span> אחרי 8 גשרים ו־16 חיתוכים הפונקציה מחזירה את S גם אם נשארו בו יתומים. במקרה כזה ההגנה היא בשכבה העליונה: <code>unsupported_pixels</code> בודק את הלוח הגמור (פרק 8.2), וה־validator בודק כל לוח בסוף.</div>
+
+<h2 id="c7s6">7.6 הגעה גאודזית: הגבול ל"בליטות" (nubs)</h2>
+<div class="box impl"><span class="tag impl">IMPLEMENTED MATHEMATICS</span> <span class="ref" data-sym="def _geodesic_reach">src/layerforge_l1/reveal_planner.py:227</span>
+<div class="mb">R_0=S\cap D,\qquad R_{t+1}=(R_t\oplus C^{+})\cap D,\qquad D=S\cup V,\quad t\le 5</div>
+<p>התוצאה: כל פיקסל גלוי שאפשר להגיע אליו מהתמיכה S במסלול 4־קשיר באורך 5 צעדים לכל היותר, שעובר רק דרך פיקסלים של <span class="m">S\cup V</span>. אלו קצוות של קווים ופינות חדות שבולטים עד 0.49 מ"מ מעבר לחומר הנושא.</p></div>
+
+<h2 id="c7s7">7.7 דוגמה A2: הפונקציה האמיתית על רשת 9×12</h2>
+<p>בדוגמה הזו קראתי ל־<code>structural_support</code> ול־<code>_anchored</code> <b>מתוך הקוד</b>, עם גרעין אליפטי 3×3 (שהוא צלב) במקום 13×13, כדי שהמצבים יהיו קריאים. המסגרת P היא העמודה השמאלית. U כולל גוף ברוחב 5 שמחובר למסגרת, "זיז" ברוחב פיקסל אחד, ובלוק 3×3 שמחובר לגוף רק דרך הזיז.</p>
+<div class="bitsrow">
+<div><table class="bits" dir="ltr"><tr><td class="b1"></td><td class="b1"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td></tr><tr><td class="b1"></td><td class="b1"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td></tr><tr><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b0"></td><td class="b0"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td></tr><tr><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b0"></td><td class="b0"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td></tr><tr><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b0"></td><td class="b0"></td></tr><tr><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td></tr><tr><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td></tr><tr><td class="b1"></td><td class="b1"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td></tr><tr><td class="b1"></td><td class="b1"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td></tr></table>U (covered)</div>
+<div><table class="bits" dir="ltr"><tr><td class="b1"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td></tr><tr><td class="b1"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td></tr><tr><td class="b1"></td><td class="b1"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b1"></td><td class="b1"></td></tr><tr><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td></tr><tr><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td></tr><tr><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td></tr><tr><td class="b1"></td><td class="b1"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td></tr><tr><td class="b1"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td></tr><tr><td class="b1"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td></tr></table><span class="m">U\ominus K</span></div>
+<div><table class="bits" dir="ltr"><tr><td class="b1"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td></tr><tr><td class="b1"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td></tr><tr><td class="b1"></td><td class="b1"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td></tr><tr><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td></tr><tr><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td></tr><tr><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td></tr><tr><td class="b1"></td><td class="b1"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td></tr><tr><td class="b1"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td></tr><tr><td class="b1"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td></tr></table><span class="m">\mathrm{Anch}_P(U\ominus K)</span></div>
+<div><table class="bits" dir="ltr"><tr><td class="b1"></td><td class="b1"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td></tr><tr><td class="b1"></td><td class="b1"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td></tr><tr><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td></tr><tr><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td></tr><tr><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td></tr><tr><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td></tr><tr><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td></tr><tr><td class="b1"></td><td class="b1"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td></tr><tr><td class="b1"></td><td class="b1"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td></tr></table><code>structural_support</code></div>
+</div>
+<ul>
+<li><b>ליבה:</b> הזיז נעלם בשחיקה כי הוא צר מהגרעין. הבלוק שבימין משאיר ליבה (עמודות 10–11 בשורה 2). את עמודה 11 משאירה רק התנהגות הגבול של OpenCV, שמתייחס לפיקסלים מחוץ לתמונה כחומר. בשורות 0–1 ו־7–8 ליד עמודה 0 קורה אותו דבר.</li>
+<li><b>עיגון:</b> ליבת הבלוק לא מחוברת למסגרת, ולכן היא נזרקת. היא "יתום".</li>
+<li><b>תמיכה:</b> הגוף חוזר לרוחבו המלא (<span class="m">\oplus K</span>), ובנוסף פיקסל אחד מהזיז (שורה 4, עמודה 7), שנמצא בטווח הגרעין מליבת הגוף. הבלוק והחלק החיצוני של הזיז <b>אינם</b> בתמיכה.</li>
+<li><b>מה זה אומר למתכנן:</b> נניח שהבלוק אמור להיות גלוי בלוח הזה. אם הזיז אינו גלוי, ההגעה הגאודזית עוברת רק דרך <span class="m">S\cup V</span> ולא מגיעה לבלוק, ולכן הבלוק נדחה מיד. אם גם הזיז גלוי, הבלוק נמצא 2–3 צעדים מהתמיכה ולכן "מושג". אבל אז בדיקת הלוח הגמור (8.2) מוצאת ליבה יתומה בתוך הבלוק, והוא נדחה בכל זאת.</li>
+</ul>
+
+<h2 id="c7s8">7.8 סיבוכיות</h2>
+<div class="box derived"><span class="tag derived">DERIVED</span> לרשת <span class="m">N\times N</span> (<span class="m">N=2304</span>, כ־5.3 מיליון פיקסלים) וגרעין עם <span class="m">|K|=121</span>: כל שחיקה או התפשטות עולה <span class="m">O(N^2|K|)</span> במקרה הגרוע. OpenCV ממומש ב־SIMD, ולכן הזמן בפועל קטן בהרבה מהחסם. רכיבים קשירים עולים <span class="m">O(N^2)</span>. קריאה אחת כוללת לפחות 2 שחיקות, התפשטות ותיוג, ועוד עד 8 ו־16 סבבי תיקון. בפועל רוב הקריאות יוצאות כבר בסבב הראשון.</div>
+</section><section class="chapter" data-name="08_planner"><h1 id="c8">8. המתכנן הפעיל: RevealPlanner</h1>
+<p><span class="ref" data-sym="class RevealPlanner">src/layerforge_l1/reveal_planner.py:237</span>. זה <b>מתכנן השכבות היחיד</b> שרץ ב־Option B, במצב <code>split_regions=True</code> ("per_cell"). לאותו קוד יש וריאנט השוואה, <code>split_regions=False</code> ("region_indivisible"), שבו כל אזור הוא תא אחד. הוא מתועד בסעיף 8.9 כי הוא חלק מהסקריפט ומהבדיקות, אבל ב־Option B הוא לא הורץ (<code>--variants per_cell</code>).</p>
+
+<h2 id="c8s1">8.1 המודל: חשיפה מלפנים לאחור</h2>
+<div class="box impl"><span class="tag impl">IMPLEMENTED MATHEMATICS</span> מסמנים את הלוחות לפי עומק <span class="m">k=0,1,\dots,S-1</span> (0 = קדמי). לכל לוח יש צבע <span class="m">c_k</span> וקבוצת תאים שהוא חושף, <span class="m">X_k</span>, וכל תא ב־<span class="m">X_k</span> הוא בצבע <span class="m">c_k</span>. קבוצת התאים המכוסים לפני לוח k:
+<div class="mb">\mathcal C_k=F\ \cup\ \bigcup_{j<k}X_j,\qquad F=\texttt{start\_covered}\ (\text{frame cells})</div>
+<p>מסכת החומר של לוח k (<span class="ref" data-sym="def sheet_mask">src/layerforge_l1/reveal_planner.py:348</span>):</p>
+<div class="mb">M_k=\mathrm{Struct}\big(\,\mathrm{px}(\mathcal C_k\cup X_k)\,\big)\ \cup\ \mathrm{px}(X_k),\qquad \mathrm{px}(\cdot)\ \text{includes the perimeter}\ P</div></div>
+<pre class="code" dir="ltr"><span class="src">src/layerforge_l1/reveal_planner.py:348-351</span>
+<span class="ln"> 348</span>      def sheet_mask(self, covered_cells: np.ndarray, visible_cells: np.ndarray) -&gt; np.ndarray:
+<span class="ln"> 349</span>          covered = self.covered_mask(covered_cells | visible_cells)
+<span class="ln"> 350</span>          visible = self.cells_mask(visible_cells)
+<span class="ln"> 351</span>          return structural_support(covered, self.perimeter, self.kernel) | visible</pre>
+<div class="box derived"><span class="tag derived">DERIVED</span> <b>האינטואיציה הפיזית.</b> פיקסל שכבר נחשף בלוח קדמי מוסתר מאחוריו, ולכן לוח k יכול להחזיק שם חומר בכל צבע (חומר <b>נסתר</b>) כדי לחזק את עצמו. פיקסל שעוד לא נחשף חייב להיות <b>חור</b> בלוח k, כי אחרת הוא יסתיר את הצבע שאמור להופיע מאחור. האינווריאנט <span class="m">\mathrm{Struct}(U)\subseteq U</span> (פרק 7) מבטיח בדיוק את זה: <span class="m">M_k\subseteq \mathrm{px}(\mathcal C_k\cup X_k)</span>.</div>
+<div class="box derived"><span class="tag derived">DERIVED</span> <b>משפט השחזור המדויק.</b> נניח שתא x נחשף בעומק d. לכל <span class="m">k&lt;d</span>, ‏<span class="m">x\notin\mathcal C_k\cup X_k</span>, ולכן <span class="m">x\notin M_k</span>. בעומק d, ‏<span class="m">x\in\mathrm{px}(X_d)\subseteq M_d</span>. לכן הלוח הקדמי ביותר שיש בו חומר ב־x הוא d, וצבעו <span class="m">c_d=\text{color}(x)</span>. <b>השחזור מדויק בהגדרה, בתנאי שכל התאים נחשפו.</b> ההרצה מאשרת זאת: ב־Option B יש 0 פיקסלים שונים.</div>
+
+<h2 id="c8s2">8.2 unsupported_pixels: האם לוח מסוים בנוי היטב?</h2>
+<p><span class="ref" data-sym="def unsupported_pixels">src/layerforge_l1/reveal_planner.py:273</span></p>
+<pre class="code" dir="ltr"><span class="src">src/layerforge_l1/reveal_planner.py:273-288</span>
+<span class="ln"> 273</span>      def unsupported_pixels(
+<span class="ln"> 274</span>          self, covered_cells: np.ndarray, reveal: np.ndarray
+<span class="ln"> 275</span>      ) -&gt; np.ndarray:
+<span class="ln"> 276</span>          &quot;&quot;&quot;Visible pixels of ``reveal`` that the sheet cannot support.&quot;&quot;&quot;
+<span class="ln"> 277</span>  
+<span class="ln"> 278</span>          visible = self.cells_mask(reveal)
+<span class="ln"> 279</span>          covered = self.covered_mask(covered_cells) | visible
+<span class="ln"> 280</span>          support = structural_support(covered, self.perimeter, self.kernel)
+<span class="ln"> 281</span>          reach = _geodesic_reach(support, support | visible, self.nub_steps)
+<span class="ln"> 282</span>          bad = visible &amp; ~reach
+<span class="ln"> 283</span>          if not bad.any():
+<span class="ln"> 284</span>              # Nubs can rebuild a sub-width band the support had cut; check
+<span class="ln"> 285</span>              # the finished sheet exactly as the validator will.
+<span class="ln"> 286</span>              orphan = _orphan_cores(support | visible, self.perimeter, self.kernel)
+<span class="ln"> 287</span>              bad = visible &amp; cv2.dilate(orphan.astype(np.uint8), self.kernel).astype(bool)
+<span class="ln"> 288</span>          return bad</pre>
+<div class="box impl"><span class="tag impl">IMPLEMENTED MATHEMATICS</span> כאשר <span class="m">V=\mathrm{px}(X)</span> ו־<span class="m">U=\mathrm{px}(\mathcal C)\cup V</span>:
+<div class="mb">S=\mathrm{Struct}(U),\qquad \mathrm{Bad}=V\setminus R_5(S,\ S\cup V)</div>
+<div class="mb">\text{if } \mathrm{Bad}=\emptyset:\quad \mathrm{Bad}=V\cap\Big(\big((S\cup V)\ominus K\big)\setminus\mathrm{Anch}_P\big((S\cup V)\ominus K\big)\Big)\oplus K</div>
+<p><b>בדיקה ראשונה:</b> כל פיקסל גלוי חייב להיות בתמיכה, או במרחק של עד 5 צעדים ממנה דרך פיקסלים גלויים. <b>בדיקה שנייה</b> (רק אם הראשונה עברה): הלוח הגמור <span class="m">S\cup V</span> נבדק בדיוק כמו ב־validator. אם יש ליבה יתומה, כל הפיקסלים הגלויים בטווח הגרעין ממנה נכשלים. הבדיקה הזאת נחוצה כי בליטות גלויות שמחוברות זו לזו יכולות לבנות מחדש "פס" צר שהתמיכה חתכה, וליצור ליבה יתומה.</p></div>
+
+<h2 id="c8s3">8.3 maximal_reveal: החשיפה הגדולה ביותר (נקודת שבת)</h2>
+<p><span class="ref" data-sym="def maximal_reveal">src/layerforge_l1/reveal_planner.py:290</span></p>
+<pre class="code" dir="ltr"><span class="src">src/layerforge_l1/reveal_planner.py:290-304</span>
+<span class="ln"> 290</span>      def maximal_reveal(
+<span class="ln"> 291</span>          self, covered_cells: np.ndarray, color: int
+<span class="ln"> 292</span>      ) -&gt; tuple[np.ndarray, int]:
+<span class="ln"> 293</span>          &quot;&quot;&quot;Greatest fixpoint of supportable uncovered cells of one color.&quot;&quot;&quot;
+<span class="ln"> 294</span>  
+<span class="ln"> 295</span>          candidate = (~covered_cells) &amp; (self.cell_color == color)
+<span class="ln"> 296</span>          iterations = 0
+<span class="ln"> 297</span>          while candidate.any():
+<span class="ln"> 298</span>              iterations += 1
+<span class="ln"> 299</span>              bad = self.unsupported_pixels(covered_cells, candidate)
+<span class="ln"> 300</span>              if not bad.any():
+<span class="ln"> 301</span>                  break
+<span class="ln"> 302</span>              bad_cells = np.unique(self.cell_map[bad])
+<span class="ln"> 303</span>              candidate[bad_cells[bad_cells &gt;= 0]] = False
+<span class="ln"> 304</span>          return candidate, iterations</pre>
+<div class="box impl"><span class="tag impl">IMPLEMENTED MATHEMATICS</span>
+<div class="mb">X^{(0)}=\{x:\ x\notin\mathcal C,\ \text{color}(x)=c\},\qquad X^{(i+1)}=X^{(i)}\setminus \mathrm{cells}\big(\mathrm{Bad}(\mathcal C,X^{(i)})\big)</div>
+<p>מתחילים מ<b>כל</b> התאים בצבע c שעוד לא נחשפו, ומוחקים כל תא שיש בו לפחות פיקסל אחד לא נתמך, עד שאין יותר מחיקות. התוצאה יכולה להיות ריקה (אי אפשר לחשוף את הצבע הזה עכשיו).</p></div>
+<div class="box derived"><span class="tag derived">DERIVED</span> <b>למה זו "הגדולה ביותר"?</b> אם תא נכשל ב־<span class="m">X^{(i)}</span>, אז בכל תת־קבוצה <span class="m">Y\subseteq X^{(i)}</span> התמיכה קטנה יותר (מונוטוניות), וגם קבוצת ההגעה קטנה יותר. לכן הוא ייכשל גם שם, וזה בטוח למחוק אותו. מכאן שהתוצאה מכילה כל קבוצת תאים חוקית בצבע c, כלומר זו <b>נקודת השבת הגדולה ביותר</b> (greatest fixpoint), והיא יחידה. <span class="tag unv">CAVEAT</span> הנימוק מניח מונוטוניות מלאה. הבדיקה השנייה (ליבות יתומות של הלוח הגמור) והתיקונים ההיוריסטיים אינם בהכרח מונוטוניים, ולכן זו הצדקת התכנון ולא הוכחה. כל לוח נבדק בסוף בכל מקרה על ידי ה־validator.</div>
+<div class="box derived"><span class="tag derived">DERIVED</span> <b>למה זה טוב לחשוף מקסימום?</b> אם חושפים יותר עכשיו, <span class="m">\mathcal C</span> של כל לוח מאחור גדל, ובזכות המונוטוניות התמיכה שלו רק גדלה. לכן חשיפה מקסימלית לא חוסמת אף אפשרות עתידית. זה מקטין את מרחב החיפוש: מכל מצב ולכל צבע יש בדיוק מעבר אחד.</div>
+
+<h2 id="c8s4">8.4 closure: בדיקת היתכנות שלא תלויה בסדר</h2>
+<p><span class="ref" data-sym="def closure">src/layerforge_l1/reveal_planner.py:353</span></p>
+<pre class="code" dir="ltr"><span class="src">src/layerforge_l1/reveal_planner.py:356-372</span>
+<span class="ln"> 356</span>          covered = self.start_covered.copy()
+<span class="ln"> 357</span>          sequence: list[int] = []
+<span class="ln"> 358</span>          progress = True
+<span class="ln"> 359</span>          while progress and not covered.all():
+<span class="ln"> 360</span>              progress = False
+<span class="ln"> 361</span>              for color in self.colors:
+<span class="ln"> 362</span>                  reveal, _ = self.maximal_reveal(covered, color)
+<span class="ln"> 363</span>                  if reveal.any():
+<span class="ln"> 364</span>                      covered |= reveal
+<span class="ln"> 365</span>                      sequence.append(color)
+<span class="ln"> 366</span>                      progress = True
+<span class="ln"> 367</span>          return {
+<span class="ln"> 368</span>              &quot;feasible&quot;: bool(covered.all()),
+<span class="ln"> 369</span>              &quot;round_robin_sheet_count&quot;: len(sequence),
+<span class="ln"> 370</span>              &quot;obstruction_cells&quot;: np.flatnonzero(~covered).tolist(),
+<span class="ln"> 371</span>              &quot;covered_cells&quot;: covered,
+<span class="ln"> 372</span>          }</pre>
+<p>Round-robin: עוברים על כל הצבעים שוב ושוב, ובכל פעם חושפים את המקסימום האפשרי לצבע, עד שאין התקדמות. אם בסוף <span class="m">\mathcal C</span> מכיל את כל התאים, הבעיה פתירה. אחרת, התאים שנשארו הם <b>קבוצת חסימה</b> (obstruction) מפורשת.</p>
+<div class="box derived"><span class="tag derived">DERIVED</span> <b>למה זה לא תלוי בסדר:</b> במודל מונוטוני, קבוצת התאים שאפשר לכסות היא הסגור (closure) של פעולת "חשוף מקסימום". כל סדר הוגן מגיע לאותה נקודת שבת: מה שנחשף בסדר אחד יישאר חשיף גם בסדר אחר, כי <span class="m">\mathcal C</span> רק גדל. לכן closure היא <b>תנאי הכרחי ומספיק</b> לקיום פתרון, בתוך המודל ובכפוף להסתייגות על מונוטוניות. ב־Option B: feasible = True, ב־12 לוחות round-robin, תוך 15.8 שניות (<span class="tag obs">OBSERVED</span>).</div>
+
+<h2 id="c8s5">8.5 beam_search: מספר לוחות קטן</h2>
+<p><span class="ref" data-sym="def beam_search">src/layerforge_l1/reveal_planner.py:374</span></p>
+<pre class="code" dir="ltr"><span class="src">src/layerforge_l1/reveal_planner.py:377-421</span>
+<span class="ln"> 377</span>          start = self.start_covered.copy()
+<span class="ln"> 378</span>          beam: list[tuple[np.ndarray, list[int], list[np.ndarray]]] = [(start, [], [])]
+<span class="ln"> 379</span>          evaluations = 0
+<span class="ln"> 380</span>          for _ in range(self.config.max_sheets):
+<span class="ln"> 381</span>              expanded: dict[bytes, tuple[np.ndarray, list[int], list[np.ndarray]]] = {}
+<span class="ln"> 382</span>              for covered, colors, reveals in beam:
+<span class="ln"> 383</span>                  for color in self.colors:
+<span class="ln"> 384</span>                      if colors and colors[-1] == color:
+<span class="ln"> 385</span>                          continue  # a repeat would have been revealed already
+<span class="ln"> 386</span>                      reveal, _ = self.maximal_reveal(covered, color)
+<span class="ln"> 387</span>                      evaluations += 1
+<span class="ln"> 388</span>                      if not reveal.any():
+<span class="ln"> 389</span>                          continue
+<span class="ln"> 390</span>                      nxt = covered | reveal
+<span class="ln"> 391</span>                      key = np.packbits(nxt).tobytes()
+<span class="ln"> 392</span>                      if key not in expanded:
+<span class="ln"> 393</span>                          expanded[key] = (nxt, colors + [color], reveals + [reveal])
+<span class="ln"> 394</span>              if not expanded:
+<span class="ln"> 395</span>                  break
+<span class="ln"> 396</span>              complete = [state for state in expanded.values() if state[0].all()]
+<span class="ln"> 397</span>              if complete:
+<span class="ln"> 398</span>                  covered, colors, reveals = complete[0]
+<span class="ln"> 399</span>                  return {
+<span class="ln"> 400</span>                      &quot;status&quot;: &quot;COMPLETE&quot;,
+<span class="ln"> 401</span>                      &quot;front_to_back_colors&quot;: colors,
+<span class="ln"> 402</span>                      &quot;reveals&quot;: reveals,
+<span class="ln"> 403</span>                      &quot;evaluations&quot;: evaluations,
+<span class="ln"> 404</span>                  }
+<span class="ln"> 405</span>              beam = sorted(
+<span class="ln"> 406</span>                  expanded.values(),
+<span class="ln"> 407</span>                  key=self._beam_key,
+<span class="ln"> 408</span>              )[: self.config.beam_width]
+<span class="ln"> 409</span>          best = beam[0]
+<span class="ln"> 410</span>          return {
+<span class="ln"> 411</span>              &quot;status&quot;: &quot;INCOMPLETE&quot;,
+<span class="ln"> 412</span>              &quot;front_to_back_colors&quot;: best[1],
+<span class="ln"> 413</span>              &quot;reveals&quot;: best[2],
+<span class="ln"> 414</span>              &quot;evaluations&quot;: evaluations,
+<span class="ln"> 415</span>              &quot;uncovered_cells&quot;: np.flatnonzero(~best[0]).tolist(),
+<span class="ln"> 416</span>          }
+<span class="ln"> 417</span>  
+<span class="ln"> 418</span>      def _beam_key(self, state: tuple) -&gt; tuple[int, int]:
+<span class="ln"> 419</span>          area = -int(self.cell_area[state[0]].sum())
+<span class="ln"> 420</span>          unfinished = len({int(c) for c in self.cell_color[~state[0]]})
+<span class="ln"> 421</span>          return (unfinished, area) if self.config.beam_score == &quot;colors&quot; else (area, unfinished)</pre>
+<h3>איך זה עובד</h3>
+<ul>
+<li><b>מצב:</b> קבוצת המכוסים <span class="m">\mathcal C</span>, יחד עם רשימת הצבעים ורשימת החשיפות עד כה.</li>
+<li><b>מעבר:</b> לכל צבע, מלבד הצבע של הלוח הקודם (שורה 384: לחזור על אותו צבע מיד אחריו מיותר, כי החשיפה הקודמת כבר הייתה מקסימלית), מבצעים <code>maximal_reveal</code>. אם יצא ריק, מדלגים.</li>
+<li><b>ביטול כפילויות (שורה 391):</b> <span class="ref" data-sym="key = np.packbits">src/layerforge_l1/reveal_planner.py:391</span>. שני מסלולים שמגיעים לאותה קבוצה <span class="m">\mathcal C</span> שקולים לגבי העתיד, ולכן נשמר רק הראשון.</li>
+<li><b>עצירה:</b> (א) נמצא מצב שכל התאים בו מכוסים, ומוחזר הראשון ברשימה, COMPLETE. (ב) אין הרחבות, כלומר כל הצבעים נתקעו. (ג) הגיעו ל־<code>max_sheets=24</code>. ב־(ב) וב־(ג) מוחזר INCOMPLETE עם המצב הטוב ביותר.</li>
+<li><b>דירוג:</b> רק <code>beam_width</code> המצבים הטובים ביותר עוברים לשלב הבא.</li>
+</ul>
+<div class="box impl"><span class="tag impl">IMPLEMENTED MATHEMATICS</span> מפתח הדירוג (<span class="ref" data-sym="def _beam_key">src/layerforge_l1/reveal_planner.py:418</span>). ב־<code>"colors"</code> (Option B) ממיינים לקסיקוגרפית, מהקטן לגדול:
+<div class="mb">\kappa(\mathcal C)=\Big(\ \big|\{\text{color}(x):x\notin\mathcal C\}\big|\ ,\ \ -\!\!\sum_{x\in\mathcal C}\text{area}(x)\ \Big)</div>
+<p>קודם מעדיפים מצבים שבהם פחות צבעים "לא גמורים", כלומר צבעים שעדיין יש מהם תאים חשופים. בשוויון מעדיפים את המצב שכיסה יותר שטח. ב־<code>"area"</code> הסדר הפוך.</p></div>
+<div class="box derived"><span class="tag derived">DERIVED</span> <b>אילו הבטחות יש ואילו אין.</b> החיפוש מתקדם רמה אחר רמה (BFS עם גיזום), ולכן הפתרון הראשון שנמצא הוא הקצר ביותר <b>מבין המצבים ששרדו את הגיזום</b>. <span class="tag unv">UNVERIFIED</span> אין הבטחת אופטימליות גלובלית: מצב שנגזם יכול היה להוביל לפתרון קצר יותר. חסם תחתון טריוויאלי ש<b>כן</b> מוכח: כל צבע צריך לוח אחד לפחות, ולכן <span class="m">S\ge 9</span> ב־Option B. הטענה ב־STATUS.md ש־10 הוא החסם התחתון נשענת על טיעון ידני (השחור חייב להופיע גם לפני וגם אחרי אזור אחר). הקוד לא מוכיח אותה.</div>
+<div class="box impl"><span class="tag impl">IMPLEMENTED MATHEMATICS</span> <b>מספר ההערכות.</b> ברמה הראשונה יש <span class="m">|colors|=9</span> קריאות. בכל רמה אחרת יש לכל היותר <span class="m">B\cdot(|colors|-1)=8\cdot8=64</span>. לכן לפתרון של 10 לוחות: <span class="m">\le 9+9\cdot64=585</span>. בפועל נרשמו 553 (<span class="tag obs">OBSERVED</span>).</div>
+
+<h2 id="c8s6">8.6 eliminate_sheets: מחיקת לוחות בדיעבד</h2>
+<p><span class="ref" data-sym="def eliminate_sheets">src/layerforge_l1/reveal_planner.py:306</span>. ננסה להעביר את כל תאי לוח מסוים ללוח מאוחר יותר באותו צבע. לוחות קטנים נבדקים ראשונים. כל הלוחות שביניהם מאבדים את התאים האלה מקבוצת המכוסים שלהם, ולכן כל אחד מהם נבדק מחדש ב־<code>unsupported_pixels</code>. המהלך נשמר רק אם כולם תקינים. אחרי כל הצלחה מתחילים מחדש. <b>ב־Option B לא נמחק אף לוח</b> (<code>eliminated_sheets: []</code>).</p>
+<pre class="code" dir="ltr"><span class="src">src/layerforge_l1/reveal_planner.py:315-346</span>
+<span class="ln"> 315</span>          colors, reveals = list(colors), [r.copy() for r in reveals]
+<span class="ln"> 316</span>          log: list[dict[str, Any]] = []
+<span class="ln"> 317</span>          changed = True
+<span class="ln"> 318</span>          while changed:
+<span class="ln"> 319</span>              changed = False
+<span class="ln"> 320</span>              order = sorted(range(len(reveals)), key=lambda j: int(self.cell_area[reveals[j]].sum()))
+<span class="ln"> 321</span>              for source in order:
+<span class="ln"> 322</span>                  for target in range(source + 1, len(reveals)):
+<span class="ln"> 323</span>                      if colors[target] != colors[source]:
+<span class="ln"> 324</span>                          continue
+<span class="ln"> 325</span>                      trial = [r.copy() for r in reveals]
+<span class="ln"> 326</span>                      trial[target] |= trial[source]
+<span class="ln"> 327</span>                      trial[source][:] = False
+<span class="ln"> 328</span>                      covered = self.start_covered.copy()
+<span class="ln"> 329</span>                      valid = True
+<span class="ln"> 330</span>                      for depth in range(len(trial)):
+<span class="ln"> 331</span>                          if depth &gt;= source and trial[depth].any():
+<span class="ln"> 332</span>                              if self.unsupported_pixels(covered, trial[depth]).any():
+<span class="ln"> 333</span>                                  valid = False
+<span class="ln"> 334</span>                                  break
+<span class="ln"> 335</span>                          covered |= trial[depth]
+<span class="ln"> 336</span>                      if valid:
+<span class="ln"> 337</span>                          log.append({&quot;removed_front_to_back_depth&quot;: source, &quot;merged_into&quot;: target,
+<span class="ln"> 338</span>                                      &quot;color&quot;: colors[source], &quot;cells_moved&quot;: int(reveals[source].sum())})
+<span class="ln"> 339</span>                          del trial[source]
+<span class="ln"> 340</span>                          del colors[source]
+<span class="ln"> 341</span>                          reveals = trial
+<span class="ln"> 342</span>                          changed = True
+<span class="ln"> 343</span>                          break
+<span class="ln"> 344</span>                  if changed:
+<span class="ln"> 345</span>                      break
+<span class="ln"> 346</span>          return colors, reveals, log</pre>
+
+<h2 id="c8s7">8.7 materialize ו־seam_report</h2>
+<pre class="code" dir="ltr"><span class="src">src/layerforge_l1/reveal_planner.py:426-438</span>
+<span class="ln"> 426</span>          covered = self.start_covered.copy()
+<span class="ln"> 427</span>          sheets = []
+<span class="ln"> 428</span>          for reveal in reveals:
+<span class="ln"> 429</span>              physical = self.sheet_mask(covered, reveal)
+<span class="ln"> 430</span>              sheets.append(
+<span class="ln"> 431</span>                  {
+<span class="ln"> 432</span>                      &quot;physical_mask&quot;: physical,
+<span class="ln"> 433</span>                      &quot;visible_mask&quot;: self.cells_mask(reveal),
+<span class="ln"> 434</span>                      &quot;visible_cells&quot;: reveal.copy(),
+<span class="ln"> 435</span>                  }
+<span class="ln"> 436</span>              )
+<span class="ln"> 437</span>              covered |= reveal
+<span class="ln"> 438</span>          return sheets</pre>
+<p><code>materialize</code> עובר על החשיפות מלפנים לאחור ובונה לכל לוח את <span class="m">M_k</span> ואת <span class="m">V_k</span>. <span class="ref" data-sym="def seam_report">src/layerforge_l1/reveal_planner.py:440</span> סופר זוגות של פיקסלי יעד סמוכים (אופקית ואנכית) שנמצאים בתאים שונים <b>של אותו אזור</b> ובעומקים שונים:</p>
+<div class="mb">L_{\text{seam}}=s\cdot\big|\{(a,b)\ \text{4-adjacent}:\ \mathrm{cell}(a)\neq\mathrm{cell}(b),\ \mathrm{reg}(a)=\mathrm{reg}(b),\ \mathrm{depth}(a)\neq\mathrm{depth}(b)\}\big|</div>
+<p>ב־Option B: 171 זוגות, כלומר <span class="m">171\cdot 0.09765625=16.7</span> מ"מ. רק אזור אחד (מזהה 0, השחור) פוצל בין שני עומקים.</p>
+
+<h2 id="c8s8">8.8 תרשים 3: זרימת יצירת השכבות</h2>
+<div class="flow">
+ <div class="n">labels → <code>build_cells</code> → n תאים · <code>start_covered</code> = תאי המסגרת</div><div class="a">▼</div>
+ <div class="n dec"><b>closure()</b>: האם round-robin של חשיפות מקסימליות מכסה הכול?</div>
+ <div class="split"><div class="n fail">לא: <code>obstruction_cells</code> + <code>obstruction_overlay.png</code>. <b>עצירה, אין לוחות.</b></div><div class="n out">כן: ממשיכים</div></div><div class="a">▼</div>
+ <div class="n dec"><b>beam_search()</b>: בכל רמה, לכל מצב ולכל צבע ≠ הקודם, <code>maximal_reveal</code> ← dedupe ← מיון לפי κ ← B הטובים</div><div class="a">▼</div>
+ <div class="n"><b>eliminate_sheets()</b>: ניסיון למזג לוחות באותו צבע</div><div class="a">▼</div>
+ <div class="n out"><b>materialize()</b>: ‏<span class="m">M_k=\mathrm{Struct}(\cdot)\cup V_k</span> → validators → PNG ו־JSON</div>
+</div>
+
+<h2 id="c8s9">8.9 דוגמת ריצה: הפיקסטורה הסינתטית מהבדיקות</h2>
+<p>הפיקסטורה <span class="ref" data-sym="def _fixture">tests/test_reveal_planner.py:20</span> היא איור מקורי (לא מוגן זכויות): פרצוף צהוב עם מתאר שחור, ומעליו פפיון עם מתאר שחור, שתי אונות אדומות ומחיצה שחורה ברוחב 3 פיקסלים בלבד (1.17 מ"מ ברשת של 512 פיקסלים). הרצתי את המתכנן האמיתי עם <code>RevealConfig(scale=2)</code>, כמו בבדיקה (<span class="tag obs">OBSERVED</span>, 20.7 שניות):</p>
+<div class="row"><figure><img src="fig/fixture_target.png" style="width:52mm"><figcaption>יעד 512 × 512 (צבעים: 0 = שמיים, 1 = שחור, 2 = צהוב, 3 = אדום, 4 = לבן)</figcaption></figure>
+<figure><img src="fig/fixture_depth.png" style="width:52mm"><figcaption>עומק החשיפה לכל פיקסל (כהה = קדמי)</figcaption></figure></div>
+<table class="t small">
+<tr><th>נתון</th><th>ערך</th></tr>
+<tr><td>רשת</td><td>outer = 1152 פיקסלים, <span class="m">s=225/1152=0.1953</span> מ"מ, גרעין 7×7, ‏nub = 3 צעדים</td></tr>
+<tr><td>תאים</td><td>2949 (במצב region_indivisible: 11 אזורים)</td></tr>
+<tr><td>חשיפה מקסימלית בצעד הראשון</td><td>שמיים: 2156/2156 תאים (איטרציה אחת). שחור, צהוב, אדום ולבן: 0. בלוח הקדמי השמיים מסביבם עדיין לא חשופים, ולכן חייבים להיות חור. בלי שום חומר נסתר הם היו "איים" שלא מחוברים למסגרת.</td></tr>
+<tr><td>closure</td><td>feasible, ‏6 לוחות round-robin</td></tr>
+<tr><td>beam</td><td>COMPLETE אחרי 49 הערכות. מלפנים לאחור: 0, 1, 2, 3, 1, 4, עם 2156, 153, 512, 74, 51 ו־3 תאים</td></tr>
+<tr><td>לוחות</td><td>6 מתוך 6 עוברים 4-neighbor ו־width. חומר שנשאר: 0.819, 0.839, 0.979, 0.993, 1.0, 1.0</td></tr>
+<tr><td>שחזור</td><td>0 פיקסלים שונים</td></tr>
+<tr><td>תפרים</td><td>אזור אחד מפוצל, 15 זוגות = 5.86 מ"מ</td></tr>
+<tr><td>וריאנט region_indivisible</td><td><b>לא פתיר</b>: closure מחזירה 3 אזורי חסימה</td></tr>
+</table>
+<figure><img src="fig/fixture_sheets.png" style="width:100%"><figcaption>ששת הלוחות הפיזיים, משמאל לימין: עומק 0 (קדמי) עד עומק 5 (אחורי). השחור מופיע פעמיים: בלוח 1 (המתאר החיצוני) ובלוח 4 (המחיצה, שמאחורי האדום)</figcaption></figure>
+<div class="box derived"><span class="tag derived">DERIVED</span> <b>למה השחור צריך שני לוחות:</b> אם המחיצה השחורה (1.17 מ"מ) באותו לוח עם המתאר, לפני האדום, היא פס צר מ־1.27 מ"מ ונפסלת. אם היא מאחורי האדום כחלק מאזור שלם, האונות האדומות נשארות "איים" בלוח האדום. פיצול לתאים מאפשר למתאר להיחשף מוקדם ולמחיצה מאוחר יותר, ואז לוח האדום מחזיק את החומר הנסתר שמאחורי המתאר. זו הסיבה לתוצאה <code>count(BLACK) == 2</code> שבבדיקה.</div>
+
+<h2 id="c8s10">8.10 תשובות לשאלות היסוד מתוך הקוד</h2>
+<table class="t small">
+<tr><th style="width:28%">שאלה</th><th>תשובה</th></tr>
+<tr><td>כמה לוחות?</td><td>מספר הרמות עד שה־beam מוצא מצב מכוסה במלואו, ואחר כך מחיקות ב־eliminate. אין קלט "מספר לוחות".</td></tr>
+<tr><td>איזה צבע לכל לוח?</td><td>הצבע שבחר המעבר ב־beam. כל לוח הוא צבע אחד, ומותר שצבע יחזור (לא ברצף).</td></tr>
+<tr><td>סדר מלפנים לאחור?</td><td>סדר הרמות ב־beam: לוח 0 נבחר ראשון. בפלט המספור הפוך (<code>back_index = S-1-depth</code>).</td></tr>
+<tr><td>מה נשאר חומר?</td><td><span class="m">M_k=\mathrm{Struct}(\mathrm{px}(\mathcal C_k\cup X_k))\cup V_k</span>.</td></tr>
+<tr><td>היכן החורים?</td><td>כל מה שמחוץ ל־<span class="m">M_k</span>: כל התאים שעוד לא נחשפו, וגם חומר נסתר דק שהתמיכה השמיטה.</td></tr>
+<tr><td>איך צבע אחורי נראה?</td><td>לכל k קודם, התא שלו מחוץ ל־<span class="m">\mathcal C_k\cup X_k</span>, ולכן חור בכל הלוחות שלפניו (8.1).</td></tr>
+<tr><td>חומר נסתר?</td><td><span class="m">M_k\cap\mathrm{px}(\mathcal C_k)</span>: גלוי בלוח קדמי ולכן מוסתר, ומשמש כ"שלד" שמחבר את <span class="m">V_k</span> למסגרת.</td></tr>
+<tr><td>גאומטריה דקה או מנותקת?</td><td>גלויה: נדחית (התא חוזר לרשימה ויחכה לשלב שבו יש לו תמיכה). נסתרת: מושמטת בשקט, וזה בטוח.</td></tr>
+<tr><td>קבלה ודחייה?</td><td>תא מתקבל רק אם כל הפיקסלים שלו עוברים את <code>unsupported_pixels</code>. לוח שלם עובר בסוף את ה־validator.</td></tr>
+<tr><td>האם משנה גאומטריה?</td><td>לא. היעד לא משתנה. מתווסף רק חומר נסתר (תחת לוחות קדמיים).</td></tr>
+<tr><td>מתי עוצר?</td><td>COMPLETE, תקיעה, או 24 רמות.</td></tr>
+<tr><td>אם אין פתרון?</td><td>closure = False: אין לוחות, יש <code>obstruction_overlay.png</code> ופירוט לפי צבע. beam INCOMPLETE: הסקריפט עדיין מייצר לוחות חלקיים, והשחזור ייכשל (mismatch &gt; 0).</td></tr>
+</table>
+
+<h2 id="c8s11">8.11 סיבוכיות ומקורות העלות</h2>
+<div class="box derived"><span class="tag derived">DERIVED</span>
+<p>תהי <span class="m">T_u</span> העלות של קריאה ל־<code>unsupported_pixels</code> (כמה פעולות מורפולוגיות על 2304²), <span class="m">I</span> מספר האיטרציות בנקודת השבת, B רוחב ה־beam, ‏Q מספר הצבעים ו־S מספר הלוחות.</p>
+<div class="mb">T_{\text{beam}}\approx O\big(S\cdot B\cdot Q\cdot \bar I\cdot T_u\big),\qquad T_{\text{closure}}\approx O\big(R\cdot Q\cdot\bar I\cdot T_u\big)</div>
+<p>R הוא מספר הסבבים. ב־Option B היו 553 הערכות, וכל המתכנן (כולל closure, validators וכתיבת PNG) רץ 304 שניות. כלומר, פחות מ־0.55 שניות להערכה בממוצע. הזיכרון: כל מצב שומר רשימת וקטורי bool באורך n (11,498), כך שהוא זניח לעומת המסכות. כל מסכה במלוא הרשת תופסת כ־5.3 מגה־בייט, וכמה כאלה קיימות בו־זמנית בכל קריאה. <code>eliminate_sheets</code> עולה במקרה הגרוע <span class="m">O(S^3)</span> בדיקות.</p></div>
+
+<h2 id="c8s12">8.12 תנאי כשל</h2>
+<ul>
+<li><b>מוכח בבדיקה:</b> במצב region_indivisible הפיקסטורה לא פתירה. במצב per_cell היא כן.</li>
+<li><b>מוכח בהיסטוריה:</b> שוליים של 2 פיקסלים בגרעין (<code>planning_margin_pixels</code>) הגדילו את מספר הלוחות (22 לוחות בצב), ובוטלו.</li>
+<li><b>תיאורטי:</b> פרט גלוי צר מ־1.27 מ"מ שאינו "בליטה" קצרה (למשל קו דק וארוך) לא יכול להיתמך בשום עומק, כי התמיכה שלו תמיד דקה מדי. closure תחזיר אותו כחסימה. זו הסיבה לתיקון הידני של הלחי (Option A).</li>
+<li><b>תיאורטי:</b> מכיוון שה־beam לא אופטימלי, ייתכן פתרון קצר יותר שלא נמצא.</li>
+<li><b>תפעולי:</b> זיכרון וזמן גדלים עם רוחב ה־beam. הרצה עם beam 16 על הצב נעצרה בגלל לחץ זיכרון במחשב.</li>
+</ul>
+</section><section class="chapter" data-name="09_masks"><h1 id="c9">9. מסכות פיזיות: חומר, חורים וחומר נסתר</h1>
+
+<h2 id="c9s1">9.1 שלושה סוגי פיקסלים בכל לוח</h2>
+<p>מבחינת לוח k, כל פיקסל ברשת שייך לאחד משלושה סוגים:</p>
+<table class="t">
+<tr><th>סוג</th><th>הגדרה</th><th>מקור בקוד</th></tr>
+<tr><td><b>גלוי</b> (visible)</td><td><span class="m">V_k=\mathrm{px}(X_k)</span>: הפיקסלים שהלוח מראה.</td><td><code>visible_mask</code> → <code>source_visible_region_mask.png</code></td></tr>
+<tr><td><b>חומר נסתר</b> (hidden retained)</td><td><span class="m">M_k\setminus V_k</span>, ובהכרח ⊆ <span class="m">\mathrm{px}(\mathcal C_k)</span>: חומר מאחורי לוחות קדמיים. כולל את המסגרת.</td><td><code>physical_mask &amp; ~visible_mask</code></td></tr>
+<tr><td><b>חור</b> (cutout)</td><td><span class="m">\overline{M_k}</span>: כל התאים שייחשפו מאחור, וגם חומר מכוסה שלא נכלל בתמיכה.</td><td>הערך 0 ב־<code>retained_material_mask.png</code></td></tr>
+</table>
+
+<h2 id="c9s2">9.2 האנטומיה של לוח אמיתי מ־Option B</h2>
+<div class="row">
+<figure><img src="fig/anatomy_layer05.png" style="width:78mm"><figcaption><code>layer_05_3d7033</code> (עומק 4 מלפנים): ירוק = גלוי, אפור = חומר נסתר, לבן = חור</figcaption></figure>
+<figure><img src="fig/anatomy_layer05_zoom.png" style="width:78mm"><figcaption>הגדלה של אזור 600 × 600 פיקסלים (58.6 מ"מ) ליד הדשא</figcaption></figure>
+</div>
+<p>החורים בלוח הזה הם בדיוק האזורים שייחשפו בלוחות אחוריים יותר (השחור השני, הלבן, ירוק בהיר, ירוק בינוני והאדום). כל השאר הוא חומר: הדשא הירוק־כהה הגלוי, ומסביבו "שלד" אפור נסתר, שמאחורי השחור, הצהוב, הכחול והאפור שכבר נחשפו בלוחות שלפניו.</p>
+
+<h2 id="c9s3">9.3 האינווריאנטים שמבטיחים לוח תקין</h2>
+<div class="box derived"><span class="tag derived">DERIVED</span>
+<ol>
+<li><b>אין חומר שמסתיר צבע אחורי:</b> <span class="m">M_k\subseteq\mathrm{px}(\mathcal C_k\cup X_k)</span>, מכוח <span class="m">\mathrm{Struct}(U)\subseteq U</span> (פרק 7).</li>
+<li><b>כל פיקסל גלוי הוא חומר:</b> <span class="m">V_k\subseteq M_k</span>, כי ב־<code>sheet_mask</code> יש איחוד מפורש <code>| visible</code>.</li>
+<li><b>כל פיקסל גלוי נתמך:</b> נבדק ב־<code>maximal_reveal</code> לפני שהתא התקבל.</li>
+<li><b>מסגרת מלאה:</b> <span class="m">P\subseteq M_k</span>. זה נבדק בפועל (<code>shared_perimeter_complete</code>) ולא נובע אוטומטית. המסגרת ברוחב 128 פיקסלים נשחקת לליבה שנוגעת בעצמה ב־P, וההתפשטות מחזירה אותה במלואה.</li>
+<li><b>מונוטוניות החומר:</b> <span class="m">\mathcal C_k</span> גדל עם k, ולכן לוחות אחוריים מלאים יותר. ב־Option B אחוז החומר עולה בהדרגה מ־42.3% בלוח הקדמי עד 100% בלוח האחורי (טבלה בפרק 12).</li>
+</ol></div>
+
+<h2 id="c9s4">9.4 האם המסכות מאבדות חומר נסתר שהיה יכול לחזק?</h2>
+<p>כן, במכוון. חומר מכוסה שלא נגיש ל"מטבע" ברוחב 1.27 מ"מ מהמסגרת לא נכלל בתמיכה, גם אם מותר היה להחזיק אותו. למשל, בליטה דקה של חומר נסתר שמחוברת רק בפס צר נחתכת. כך כל החומר שנשאר הוא חומר "מבני", ולא נוצרים איים נסתרים דקים שה־validator היה מכשיל. המחיר: לוחות קדמיים "חלולים" יותר מהמינימום הדרוש מבחינה ויזואלית.</p>
+
+<h2 id="c9s5">9.5 הלוח האחורי</h2>
+<p>בלוח האחרון <span class="m">\mathcal C\cup X</span> כולל את כל התאים, ולכן <span class="m">U</span> הוא כל הרשת. השחיקה משאירה את כל התמונה פרט לשוליים, והכול מעוגן. לכן <span class="m">M_{S-1}</span> הוא ריבוע מלא בגודל 225 × 225 מ"מ (<code>retained_fraction = 1.0</code>). בייצוא CAD הוא מתורגם לפוליגון אחד עם 5 קודקודים ו־12 משולשים (פרק 11).</p>
+</section><section class="chapter" data-name="10_validation"><h1 id="c10">10. אימות פיזי</h1>
+<p>ה־validator <b>לא נכתב מחדש</b>. בכל לוח שהמתכנן מייצר, הסקריפט קורא לפונקציות הקיימות מ־<code>connectivity_repair.py</code> בלי שינוי (<span class="ref" data-sym="edge, _ = audit_edge_connectivity(physical)">scripts/run_turtle_reveal_planner_poc.py:94</span>). המתכנן משתמש באותו גרעין ובאותה הגדרת עיגון, כך שה־validator הוא בדיקה בלתי תלויה של אותה הגדרה ולא של הגדרה אחרת.</p>
+
+<h2 id="c10s1">10.1 תרשים 7: זרימת האימות והטיפול בכשל</h2>
+<div class="flow">
+ <div class="n"><code>physical_mask</code> (2304²) + <code>visible_mask</code> של כל לוח</div><div class="a">▼</div>
+ <div class="split"><div class="n dec">4-neighbor: רכיב אחד?</div><div class="n dec">width: אין ליבות יתומות?</div><div class="n dec">perimeter: <code>M[P]</code> כולו 1?</div></div><div class="a">▼</div>
+ <div class="n dec">composite: האם הרכבת המסכות שווה ליעד בכל פיקסל (מחוץ ל־P)?</div><div class="a">▼</div>
+ <div class="split"><div class="n out"><code>all_sheets_pass_x4 = true</code> ו־mismatch = 0</div><div class="n fail">כשל מדווח ב־JSON. הסקריפט <b>לא</b> מתקן ולא עוצר: הלוחות נכתבים כפי שהם</div></div>
+ <div class="n">אבחון בלבד: <code>narrow_openings_under_0_8mm</code> · <code>thin_decorative_warnings</code> · ‏x8 (לא הורץ ב־Option B)</div>
+</div>
+
+<h2 id="c10s2">10.2 בדיקה 1: קשירות 4 (audit_edge_connectivity)</h2>
+<p><span class="ref" data-sym="def audit_edge_connectivity">src/layerforge_l1/connectivity_repair.py:82</span></p>
+<pre class="code" dir="ltr"><span class="src">src/layerforge_l1/connectivity_repair.py:85-108</span>
+<span class="ln">  85</span>      binary = mask.astype(np.uint8)
+<span class="ln">  86</span>      count4, labels4, stats4, _ = cv2.connectedComponentsWithStats(
+<span class="ln">  87</span>          binary, connectivity=4
+<span class="ln">  88</span>      )
+<span class="ln">  89</span>      border4 = set(
+<span class="ln">  90</span>          int(value)
+<span class="ln">  91</span>          for value in np.unique(
+<span class="ln">  92</span>              np.concatenate(
+<span class="ln">  93</span>                  (labels4[0], labels4[-1], labels4[:, 0], labels4[:, -1])
+<span class="ln">  94</span>              )
+<span class="ln">  95</span>          )
+<span class="ln">  96</span>          if value
+<span class="ln">  97</span>      )
+<span class="ln">  98</span>      orphans4 = [component for component in range(1, count4) if component not in border4]
+<span class="ln">  99</span>      count8, _, _, _ = cv2.connectedComponentsWithStats(binary, connectivity=8)
+<span class="ln"> 100</span>      report = {
+<span class="ln"> 101</span>          &quot;eight_neighbor_components&quot;: count8 - 1,
+<span class="ln"> 102</span>          &quot;four_neighbor_components&quot;: count4 - 1,
+<span class="ln"> 103</span>          &quot;four_neighbor_perimeter_components&quot;: len(border4),
+<span class="ln"> 104</span>          &quot;four_neighbor_orphan_components&quot;: len(orphans4),
+<span class="ln"> 105</span>          &quot;four_neighbor_orphan_pixels&quot;: int(
+<span class="ln"> 106</span>              sum(stats4[component, cv2.CC_STAT_AREA] for component in orphans4)
+<span class="ln"> 107</span>          ),
+<span class="ln"> 108</span>          &quot;four_neighbor_status&quot;: &quot;PASS&quot; if count4 - 1 == 1 else &quot;FAIL&quot;,</pre>
+<div class="box impl"><span class="tag impl">IMPLEMENTED MATHEMATICS</span>
+<div class="mb">\text{PASS}\iff \#\{\text{4-connected components of } M\}=1</div>
+<p><b>מה זה מודד:</b> אם כל החומר בלוח הוא חתיכה אחת. שני פיקסלים שנוגעים רק בפינה (אלכסון) לא נחשבים מחוברים. זו הגדרה שמרנית, כי בהדפסה מגע בפינה הוא נקודה בלי שטח. הדוח מוסיף ספירה ב־8 שכנים ו"יתומים", כלומר רכיבים שלא נוגעים בשולי התמונה, למטרות אבחון בלבד.</p>
+<p><b>מה זה לא מוכיח:</b> חוזק. חתיכה אחת יכולה להיות מחוברת בצוואר של פיקסל אחד. את זה תופסת בדיקה 2.</p></div>
+
+<h2 id="c10s3">10.3 בדיקה 2: רוחב מבני (audit_connection_width)</h2>
+<p><span class="ref" data-sym="def audit_connection_width">src/layerforge_l1/connectivity_repair.py:227</span> ו־<span class="ref" data-sym="def _core_connectivity">src/layerforge_l1/connectivity_repair.py:152</span></p>
+<pre class="code" dir="ltr"><span class="src">src/layerforge_l1/connectivity_repair.py:152-165</span>
+<span class="ln"> 152</span>  def _core_connectivity(
+<span class="ln"> 153</span>      material: np.ndarray, perimeter: np.ndarray, kernel_size: int
+<span class="ln"> 154</span>  ) -&gt; tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, list[int]]:
+<span class="ln"> 155</span>      kernel = cv2.getStructuringElement(
+<span class="ln"> 156</span>          cv2.MORPH_ELLIPSE, (kernel_size, kernel_size)
+<span class="ln"> 157</span>      )
+<span class="ln"> 158</span>      core = cv2.erode(material, kernel, iterations=1).astype(bool)
+<span class="ln"> 159</span>      count, labels, stats, _ = cv2.connectedComponentsWithStats(
+<span class="ln"> 160</span>          core.astype(np.uint8), connectivity=4
+<span class="ln"> 161</span>      )
+<span class="ln"> 162</span>      anchored = set(int(value) for value in np.unique(labels[core &amp; perimeter]) if value)
+<span class="ln"> 163</span>      orphan_ids = [component for component in range(1, count) if component not in anchored]
+<span class="ln"> 164</span>      connected = np.isin(labels, list(anchored))
+<span class="ln"> 165</span>      return core, connected, labels, stats, orphan_ids</pre>
+<pre class="code" dir="ltr"><span class="src">src/layerforge_l1/connectivity_repair.py:247-257</span>
+<span class="ln"> 247</span>      kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_size, kernel_size))
+<span class="ln"> 248</span>      material = physical_mask.astype(np.uint8)
+<span class="ln"> 249</span>      _, perimeter = _outer_and_perimeter(poc)
+<span class="ln"> 250</span>      core, connected_core, core_labels, stats, orphan_core = _core_connectivity(
+<span class="ln"> 251</span>          material, perimeter, kernel_size
+<span class="ln"> 252</span>      )
+<span class="ln"> 253</span>      anchored = set(int(value) for value in np.unique(core_labels[connected_core]) if value)
+<span class="ln"> 254</span>      restored_support = (
+<span class="ln"> 255</span>          cv2.dilate(connected_core.astype(np.uint8), kernel, iterations=1).astype(bool)
+<span class="ln"> 256</span>          &amp; physical_mask
+<span class="ln"> 257</span>      )</pre>
+<div class="box impl"><span class="tag impl">IMPLEMENTED MATHEMATICS</span>
+<div class="mb">\mathrm{core}=M\ominus K_{13},\qquad \mathrm{Orph}=\mathrm{core}\setminus\mathrm{Anch}_{P_0}(\mathrm{core}),\qquad \text{PASS}\iff \mathrm{Orph}=\emptyset</div>
+<p><span class="m">P_0</span> כאן היא הטבעת בלבד (<code>_outer_and_perimeter(poc)</code>). פסי ה־magenta לא כלולים בה, אבל הם מחוברים לטבעת ונשחקים לליבה מחוברת, ולכן התוצאה זהה. <span class="ref" data-sym="passed = not orphan_core">src/layerforge_l1/connectivity_repair.py:301</span>. הסטטוס בכשל הוא <code>CONFLICT_REQUIRES_USER_DECISION</code>.</p></div>
+<div class="box derived"><span class="tag derived">DERIVED</span> <b>מה PASS מוכיח:</b> כל חלק בלוח שמספיק עבה כדי להכיל אליפסה של 1.27 מ"מ מחובר למסגרת דרך מסדרון ברוחב האליפסה (מסלול ליבה 4־קשיר, פרק 7.2). יחד עם בדיקה 1, החלקים הדקים (שאין בהם ליבה) מחוברים פיזית, אבל לא בהכרח במסדרון רחב.<br>
+<b>מה PASS לא מוכיח:</b> (א) שחלקים דקים, בלי ליבה, קצרים. ה־validator רק מסווג אותם כ־<code>thin_decorative</code> (אזהרה). ה<b>מתכנן</b> הוא שמגביל אותם ל־0.5 מ"מ גאודזית. (ב) חוזק מכני, עיוות או התאמה לחומר ההדפסה. (ג) פתחים צרים בחומר (ראה בדיקה 5).</div>
+<h3>סיווג רכיבים גלויים (אבחון)</h3>
+<pre class="code" dir="ltr"><span class="src">src/layerforge_l1/connectivity_repair.py:270-281</span>
+<span class="ln"> 270</span>      orphan_core_mask = np.isin(core_labels, orphan_core)
+<span class="ln"> 271</span>      thin_decorative: list[int] = []
+<span class="ln"> 272</span>      structural_bottleneck_visible: list[int] = []
+<span class="ln"> 273</span>      structurally_supported_visible: list[int] = []
+<span class="ln"> 274</span>      for component in range(1, visible_count):
+<span class="ln"> 275</span>          component_mask = visible_labels == component
+<span class="ln"> 276</span>          if not np.any(core &amp; component_mask):
+<span class="ln"> 277</span>              thin_decorative.append(component)
+<span class="ln"> 278</span>          elif np.any(orphan_core_mask &amp; component_mask):
+<span class="ln"> 279</span>              structural_bottleneck_visible.append(component)
+<span class="ln"> 280</span>          else:
+<span class="ln"> 281</span>              structurally_supported_visible.append(component)</pre>
+<p>כל רכיב 4־קשיר של <span class="m">V</span> מסווג לאחת משלוש קטגוריות: <b>thin_decorative</b> (אין בו אף פיקסל ליבה), <b>structural_bottleneck_visible</b> (חלק מליבה יתומה) או <b>structurally_supported</b>. ב־Option B: 0 אזהרות thin_decorative בכל 10 הלוחות (<span class="tag obs">OBSERVED</span>).</p>
+<h3>מדידת "צוואר הבקבוק" ליתומים (אבחון)</h3>
+<p><span class="ref" data-sym="def _measure_orphan_bottlenecks">src/layerforge_l1/connectivity_repair.py:168</span>: לכל ליבה יתומה הפונקציה בודקת את כל הגרעינים האי־זוגיים מ־1 עד 13, ומדווחת על הגדול ביותר שבו האזור עדיין מחובר. התוצאה היא "חוסר רוחב" בדיד: <span class="m">(13-k^*)\cdot s</span> מ"מ. ב־Option B לא היו יתומים, ולכן החלק הזה לא הופעל.</p>
+
+<h2 id="c10s4">10.4 בדיקה 3: מסגרת משותפת</h2>
+<pre class="code" dir="ltr"><span class="src">scripts/run_turtle_reveal_planner_poc.py:128-128</span>
+<span class="ln"> 128</span>                  &quot;shared_perimeter_complete&quot;: bool(physical[planner.perimeter].all()),</pre>
+<p>כל הפיקסלים של <code>planner.perimeter</code>, כלומר הטבעת ופסי המסגרת, חייבים להיות חומר. זה מבטיח שכל הלוחות זהים בהיקף החיצוני.</p>
+
+<h2 id="c10s5">10.5 בדיקה 4: שחזור מדויק</h2>
+<pre class="code" dir="ltr"><span class="src">scripts/run_turtle_reveal_planner_poc.py:134-136</span>
+<span class="ln"> 134</span>      target = embed(labels.astype(np.int16), planner.grid, -1)
+<span class="ln"> 135</span>      inside = ~planner.perimeter  # includes any frame padding
+<span class="ln"> 136</span>      row[&quot;reconstruction_mismatched_pixels_x4&quot;] = int((composite[inside] != target[inside]).sum())</pre>
+<div class="box impl"><span class="tag impl">IMPLEMENTED MATHEMATICS</span> ההרכבה נבנית בשורה 93: <code>composite[(composite &lt; 0) &amp; physical] = color</code>, לפי סדר מלפנים לאחור:
+<div class="mb">\mathrm{comp}(p)=c_{k^*(p)},\quad k^*(p)=\min\{k:\ p\in M_k\},\qquad \text{mismatch}=\big|\{p\notin P:\ \mathrm{comp}(p)\neq \mathrm{target}(p)\}\big|</div>
+<p>ב־Option B: <code>reconstruction_mismatched_pixels_x4 = 0</code>. זה אישור אמפירי למשפט מסעיף 8.1.</p></div>
+
+<h2 id="c10s6">10.6 בדיקה 5: פתחים צרים (אבחון בלבד)</h2>
+<pre class="code" dir="ltr"><span class="src">scripts/run_turtle_reveal_planner_poc.py:43-49</span>
+<span class="ln">  43</span>  def _narrow_openings(physical: np.ndarray, mm_per_pixel: float) -&gt; int:
+<span class="ln">  44</span>      holes = (~physical).astype(np.uint8)
+<span class="ln">  45</span>      size = int(np.ceil(OPENING_MM / mm_per_pixel))
+<span class="ln">  46</span>      size += 1 - size % 2
+<span class="ln">  47</span>      opened = cv2.morphologyEx(holes, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (size, size)))
+<span class="ln">  48</span>      count, labels = cv2.connectedComponents(holes, connectivity=4)
+<span class="ln">  49</span>      return int(sum(1 for c in range(1, count) if not opened[labels == c].any()))</pre>
+<div class="box impl"><span class="tag impl">IMPLEMENTED MATHEMATICS</span>
+<div class="mb">H=\overline{M},\quad k=\lceil 0.8/s\rceil=9\ (\text{odd}),\quad \text{count}=\big|\{Q\ \text{4-comp of } H:\ Q\cap(H\circ E_9)=\emptyset\}\big|</div>
+<p>סופר חורים שאי אפשר להכניס לתוכם דיסקה של 0.88 מ"מ, כלומר חור צר שעלול להיסגר בהדפסה. ב־Option B היה חור אחד כזה בכל אחד מ־4 הלוחות הקדמיים. <span class="tag gap">NOT INVESTIGATED</span> זה רק דיווח, לא חלק מ־PASS/FAIL, ולא נבדק אילו חורים אלה.</p></div>
+
+<h2 id="c10s7">10.7 אימות ברזולוציה כפולה (x8): לא הורץ</h2>
+<p>הסקריפט יכול להריץ את אותם validators אחרי הגדלה של פי 2 בשיטת nearest (<span class="ref" data-sym="def audit_mask_at_physical_scale">src/layerforge_l1/hidden_width_repair.py:65</span>). ב־Option B הוא הורץ עם <code>--skip-x8</code> כדי לחסוך זמן וזיכרון, ולכן בדוח מופיע <code>NOT_RUN</code>. <span class="tag gap">GAP</span></p>
+
+<h2 id="c10s8">10.8 דיוק, דיסקרטיזציה וטולרנסים</h2>
+<ul>
+<li>כל המדידות בדידות, ברזולוציה של <span class="m">s=0.0977</span> מ"מ. רוחב "1.2 מ"מ" נאכף בפועל כ־13 פיקסלים, כלומר 1.27 מ"מ.</li>
+<li>הגרעין האליפטי מקרב דיסקה. בכיוונים אלכסוניים הוא מעט צר יותר (פרק 6.2).</li>
+<li>הקשר בין רשת היעד לרשת הפיזית הוא 1:1, ולכן אין שגיאת דגימה בין התכנון לאימות.</li>
+<li>המעבר ל־CAD מוסיף עיגול של 0.03 מ"מ (פשטות פוליגונים). לפי בדיקת הרסטור החוזר, ההשפעה עליו היא 0 פיקסלים (פרק 11).</li>
+</ul>
+</section><section class="chapter" data-name="11_cad"><h1 id="c11">11. בניית CAD וייצוא</h1>
+<p>הסקריפט <span class="ref" data-sym="def main">scripts/export_reveal_stack_cad.py:53</span> קורא את קובצי <code>retained_material_mask.png</code> בלבד, ולא שום מצב אחר של המתכנן. לכן הגאומטריה הפיזית נגזרת בדיוק מהמסכה שעברה אימות.</p>
+
+<h2 id="c11s1">11.1 תרשים 5: מסכה → מוצק</h2>
+<div class="flow">
+ <div class="n"><b>מסכה</b> <code>bool[2304,2304]</code> · פיקסל = <span class="m">s=225/2304</span> מ"מ</div><div class="a">▼ <code>cv2.findContours(RETR_CCOMP, CHAIN_APPROX_SIMPLE)</code></div>
+ <div class="n">קווי מתאר חיצוניים וחורים, בקואורדינטות פיקסל (מרכזי פיקסלים)</div><div class="a">▼ מיפוי למ"מ + היפוך y → <code>shapely.Polygon(shell, holes)</code></div>
+ <div class="n"><code>unary_union(buffer(0))</code> → <code>buffer(+s/2, mitre)</code> → <code>simplify(0.03, preserve_topology)</code> → <code>buffer(0)</code></div><div class="a">▼ <code>geometry.extrude_geometry(geom, 1.6)</code></div>
+ <div class="n">CadQuery: <code>Wire.makePolygon</code> → <code>Face.makeFromWires(outer, holes)</code> → <code>Solid.extrudeLinear</code> → fuse</div><div class="a">▼</div>
+ <div class="split"><div class="n out"><code>step/layer_XX.step</code></div><div class="n out"><code>stl/layer_XX.stl</code> (tol 0.02 mm, 0.2 rad)</div></div><div class="a">▼ קריאה חוזרת</div>
+ <div class="n dec"><code>importStep</code>: מספר solids · <code>trimesh</code>: watertight, רכיבים, נפח, גבולות → <code>cad_manifest.json</code></div>
+</div>
+
+<h2 id="c11s2">11.2 mask_to_geometry: ממסכה לפוליגונים</h2>
+<p><span class="ref" data-sym="def mask_to_geometry">scripts/export_reveal_stack_cad.py:29</span></p>
+<pre class="code" dir="ltr"><span class="src">scripts/export_reveal_stack_cad.py:29-50</span>
+<span class="ln">  29</span>  def mask_to_geometry(mask: np.ndarray, mm_per_pixel: float, simplify_mm: float):
+<span class="ln">  30</span>      &quot;&quot;&quot;Polygons whose edges follow pixel edges (not pixel centres).&quot;&quot;&quot;
+<span class="ln">  31</span>  
+<span class="ln">  32</span>      contours, hierarchy = cv2.findContours(
+<span class="ln">  33</span>          mask.astype(np.uint8), cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE
+<span class="ln">  34</span>      )
+<span class="ln">  35</span>      height = mask.shape[0]
+<span class="ln">  36</span>      to_mm = lambda c: [((x + 0.5) * mm_per_pixel, (height - y - 0.5) * mm_per_pixel) for x, y in c[:, 0]]
+<span class="ln">  37</span>      shells = []
+<span class="ln">  38</span>      for index, contour in enumerate(contours):
+<span class="ln">  39</span>          if hierarchy[0][index][3] != -1 or len(contour) &lt; 3:
+<span class="ln">  40</span>              continue
+<span class="ln">  41</span>          holes = []
+<span class="ln">  42</span>          child = hierarchy[0][index][2]
+<span class="ln">  43</span>          while child != -1:
+<span class="ln">  44</span>              if len(contours[child]) &gt;= 3:
+<span class="ln">  45</span>                  holes.append(to_mm(contours[child]))
+<span class="ln">  46</span>              child = hierarchy[0][child][0]
+<span class="ln">  47</span>          shells.append(Polygon(to_mm(contour), holes))
+<span class="ln">  48</span>      half = 0.5 * mm_per_pixel
+<span class="ln">  49</span>      geometry = unary_union([s.buffer(0) for s in shells]).buffer(half, join_style=2, mitre_limit=2.0)
+<span class="ln">  50</span>      return geometry.simplify(simplify_mm, preserve_topology=True).buffer(0)</pre>
+<h3>שלב א: מעקב קווי מתאר</h3>
+<p><code>RETR_CCOMP</code> מחזיר היררכיה בשתי רמות: קווי מתאר חיצוניים (ההורה הוא 1−) וחורים, שהם הילדים שלהם, ונעבור עליהם בעזרת <code>hierarchy[...][2]</code> (ילד ראשון) ו־<code>[0]</code> (אח הבא). אי שבתוך חור מופיע שוב כקו מתאר חיצוני ברמה העליונה. <code>CHAIN_APPROX_SIMPLE</code> משאיר רק את קצוות הקטעים הישרים (אופקיים, אנכיים ואלכסוניים). OpenCV עוקב אחרי <b>מרכזי</b> פיקסלי הגבול של החומר, גם בחורים.</p>
+<h3>שלב ב: מעבר למ"מ והיפוך ציר</h3>
+<div class="box impl"><span class="tag impl">IMPLEMENTED MATHEMATICS</span> שורה 36:
+<div class="mb">X=(x+0.5)\,s,\qquad Y=(H-y-0.5)\,s,\qquad H=2304,\ s=0.09765625\ \text{mm}</div>
+<p>פיקסל <span class="m">(x,y)</span> תופס ב־CAD את התיבה <span class="m">[xs,(x+1)s]\times[(H-y-1)s,(H-y)s]</span>, ו־<span class="m">(X,Y)</span> הוא מרכזה. y של התמונה גדל כלפי מטה, ו־Y של ה־CAD כלפי מעלה, ולכן יש היפוך. <b>דוגמה:</b> הפיקסל השמאלי־עליון <span class="m">(0,0)</span> ממופה ל־<span class="m">(0.0488,\ 224.95)</span> מ"מ.</p></div>
+<h3>שלב ג: הרחבה בחצי פיקסל</h3>
+<div class="box derived"><span class="tag derived">DERIVED</span> הפוליגון עובר דרך מרכזי פיקסלי הגבול, ולכן הוא קטן בחצי פיקסל מהמסכה האמיתית בכל צד. <code>buffer(s/2, join_style=2, mitre_limit=2.0)</code> מזיז כל צלע החוצה ב־<span class="m">s/2</span> עם פינות חדות (mitre). בצלעות אופקיות ואנכיות, הגבול עובר בדיוק לקצה הפיקסל. בחור, הקו עובר דרך מרכזי החומר שסביבו, וההרחבה מזיזה אותו <b>לתוך</b> החור, שוב בדיוק לקצה. בצלעות אלכסוניות של <code>CHAIN_APPROX_SIMPLE</code> התוצאה היא קו ישר ולא מדרגות, ולכן יש סטייה תת־פיקסלית.</div>
+<h3>שלב ד: פישוט Douglas–Peucker</h3>
+<div class="box theory"><span class="tag theory">THEORETICAL BACKGROUND</span> <code>simplify(ε=0.03, preserve_topology=True)</code> מסיר קודקודים כל עוד המרחק של כל קודקוד שהוסר מהמיתר החדש קטן מ־ε, כלומר 0.03 מ"מ ≈ 0.31 פיקסל. <code>preserve_topology</code> מבטיח שטבעות לא יחצו זו את זו ושחורים לא ייעלמו. <code>buffer(0)</code> בסוף מתקן פוליגונים לא תקינים.</div>
+<div class="box impl"><span class="tag impl">IMPLEMENTED MATHEMATICS</span> בדיקת השטח (שורה 93):
+<div class="mb">\Delta_A=100\cdot\frac{A_{\text{poly}}-n_{\text{px}}\,s^2}{n_{\text{px}}\,s^2}\ \%</div>
+<p>ב־Option B: בין 0.0% (הלוח האחורי) ל־0.085% (הלוח הקדמי, עם 10,595 קודקודים).</p></div>
+<div class="box gap"><span class="tag gap">LIMITATION</span> בשורה 39 קווי מתאר עם פחות מ־3 נקודות מושמטים. רכיב של פיקסל בודד או שני פיקסלים היה נעלם. מסכה שעברה את בדיקה 1 היא רכיב אחד גדול, ולכן זה לא משפיע כאן, אבל זה עלול להשפיע על חורים זעירים.</div>
+
+<h2 id="c11s3">11.3 extrude_geometry: CadQuery / OpenCascade</h2>
+<p><span class="ref" data-sym="def extrude_geometry">src/layerforge_l1/geometry.py:97</span> (קוד קיים, ללא שינוי)</p>
+<pre class="code" dir="ltr"><span class="src">src/layerforge_l1/geometry.py:84-109</span>
+<span class="ln">  84</span>  def _wire(coords: Iterable[tuple[float, float]]) -&gt; cq.Wire:
+<span class="ln">  85</span>      points = [cq.Vector(float(x), float(y), 0.0) for x, y in coords]
+<span class="ln">  86</span>      if points[0].toTuple() != points[-1].toTuple():
+<span class="ln">  87</span>          points.append(points[0])
+<span class="ln">  88</span>      return cq.Wire.makePolygon(points)
+<span class="ln">  89</span>  
+<span class="ln">  90</span>  
+<span class="ln">  91</span>  def _face(poly: Polygon) -&gt; cq.Face:
+<span class="ln">  92</span>      exterior = _wire(poly.exterior.coords)
+<span class="ln">  93</span>      interiors = [_wire(ring.coords) for ring in poly.interiors]
+<span class="ln">  94</span>      return cq.Face.makeFromWires(exterior, interiors)
+<span class="ln">  95</span>  
+<span class="ln">  96</span>  
+<span class="ln">  97</span>  def extrude_geometry(geometry: BaseGeometry, height_mm: float, z0_mm: float = 0.0) -&gt; cq.Shape:
+<span class="ln">  98</span>      solids: list[cq.Shape] = []
+<span class="ln">  99</span>      for poly in polygons(geometry):
+<span class="ln"> 100</span>          solid = cq.Solid.extrudeLinear(_face(poly), cq.Vector(0.0, 0.0, height_mm))
+<span class="ln"> 101</span>          if z0_mm:
+<span class="ln"> 102</span>              solid = solid.translate(cq.Vector(0.0, 0.0, z0_mm))
+<span class="ln"> 103</span>          solids.append(solid)
+<span class="ln"> 104</span>      if not solids:
+<span class="ln"> 105</span>          raise ValueError(&quot;cannot extrude geometry without polygonal area&quot;)
+<span class="ln"> 106</span>      result = solids[0]
+<span class="ln"> 107</span>      for solid in solids[1:]:
+<span class="ln"> 108</span>          result = result.fuse(solid)
+<span class="ln"> 109</span>      return result</pre>
+<div class="box impl"><span class="tag impl">IMPLEMENTED MATHEMATICS</span>
+<div class="mb">\text{Solid}=\mathrm{Face}(\partial_{\text{out}},\{\partial_{\text{hole}}\})\times[z_0,\ z_0+t],\qquad t=1.6\ \text{mm},\ z_0=0,\qquad V=A\cdot t</div>
+<p>החורים הם wires פנימיים של ה־face, ולכן אחרי ה־extrusion הם <b>חורים אמיתיים</b> שעוברים דרך כל העובי, כמו שנדרש ב־AGENTS.md. אם יש כמה פוליגונים, הם מאוחדים ב־<code>fuse</code>. ב־Option B יש פוליגון אחד בכל לוח, ולכן אין צורך ב־fuse. העובי 1.6 מ"מ הוא <span class="tag obs">DESIGN_CHOICE</span>, ברירת המחדל של <code>--thickness-mm</code>.</p></div>
+
+<h2 id="c11s4">11.4 ייצוא ובדיקת קריאה חוזרת</h2>
+<pre class="code" dir="ltr"><span class="src">scripts/export_reveal_stack_cad.py:72-80</span>
+<span class="ln">  72</span>          solid = extrude_geometry(geometry, args.thickness_mm)
+<span class="ln">  73</span>          stem = layer_dir.name
+<span class="ln">  74</span>          step_path, stl_path = out / &quot;step&quot; / f&quot;{stem}.step&quot;, out / &quot;stl&quot; / f&quot;{stem}.stl&quot;
+<span class="ln">  75</span>          cq.exporters.export(solid, str(step_path), exportType=&quot;STEP&quot;)
+<span class="ln">  76</span>          cq.exporters.export(solid, str(stl_path), exportType=&quot;STL&quot;, tolerance=0.02, angularTolerance=0.2)
+<span class="ln">  77</span>          t_export = time.perf_counter()
+<span class="ln">  78</span>          step_solids = len(cq.importers.importStep(str(step_path)).val().Solids())
+<span class="ln">  79</span>          mesh = trimesh.load_mesh(stl_path, file_type=&quot;stl&quot;, process=True)
+<span class="ln">  80</span>          components = len(mesh.split(only_watertight=False))</pre>
+<table class="t small">
+<tr><th>בדיקה</th><th>חישוב</th><th>מה זה מוכיח</th></tr>
+<tr><td class="l">step_solids</td><td>מספר ה־Solids ב־<code>importStep</code></td><td>שהקובץ נפתח ושיש בו מוצק אחד ולא רסיסים</td></tr>
+<tr><td class="l">stl_watertight</td><td><code>mesh.is_watertight</code></td><td>שכל צלע משותפת לשני משולשים בדיוק, כלומר רשת סגורה</td></tr>
+<tr><td class="l">stl_components</td><td><code>len(mesh.split())</code></td><td>שאין איים ברשת</td></tr>
+<tr><td class="l">volume_vs_area_x_thickness_pct</td><td><span class="m">100(V_{\text{mesh}}-A\,t)/(A\,t)</span></td><td>שהמשולשים תואמים לפוליגון</td></tr>
+<tr><td class="l">stl_bounds_mm</td><td><code>mesh.bounds</code></td><td>שהלוח בגודל 225 × 225 × 1.6 ובמקום הנכון</td></tr>
+</table>
+<div class="box derived"><span class="tag derived">DERIVED</span> כל הצלעות ישרות (אין קשתות), ולכן טולרנס ה־tessellation של STL (0.02 מ"מ) לא משנה את הגאומטריה. כל פאה מתחלקת למשולשים בלי קירוב. זה מתאים לסטייה של 0.0% בנפח.</div>
+
+<h2 id="c11s5">11.5 קואורדינטות הרכבה וקואורדינטות הדפסה</h2>
+<pre class="code" dir="ltr"><span class="src">scripts/export_reveal_stack_cad.py:101-116</span>
+<span class="ln"> 101</span>      order = sorted(rows, key=lambda r: r[&quot;layer&quot;])  # layer_00 = back
+<span class="ln"> 102</span>      manifest = {
+<span class="ln"> 103</span>          &quot;outer_sheet_mm&quot;: args.outer_mm,
+<span class="ln"> 104</span>          &quot;thickness_mm&quot;: args.thickness_mm,
+<span class="ln"> 105</span>          &quot;assembly_back_to_front&quot;: [
+<span class="ln"> 106</span>              {
+<span class="ln"> 107</span>                  &quot;layer&quot;: r[&quot;layer&quot;],
+<span class="ln"> 108</span>                  &quot;color&quot;: r[&quot;color&quot;],
+<span class="ln"> 109</span>                  &quot;stl&quot;: f&quot;stl/{r[&#x27;layer&#x27;]}.stl&quot;,
+<span class="ln"> 110</span>                  &quot;step&quot;: f&quot;step/{r[&#x27;layer&#x27;]}.step&quot;,
+<span class="ln"> 111</span>                  &quot;assembled_z0_mm&quot;: i * args.thickness_mm,
+<span class="ln"> 112</span>              }
+<span class="ln"> 113</span>              for i, r in enumerate(order)
+<span class="ln"> 114</span>          ],
+<span class="ln"> 115</span>          &quot;print_placement&quot;: &quot;every STL at z = 0, broad face on the bed&quot;,
+<span class="ln"> 116</span>          &quot;layers&quot;: rows,</pre>
+<ul>
+<li><b>הדפסה:</b> כל קובץ STL/STEP נמצא ב־<span class="m">z\in[0,1.6]</span>, עם הפאה הרחבה על המשטח, ו־XY זהים בכל הלוחות (רישום משותף).</li>
+<li><b>הרכבה:</b> רק מספר ב־manifest: <span class="m">z_0^{(i)}=1.6\,i</span>, כאשר i=0 הוא הלוח האחורי (<code>layer_00</code>) ו־i=9 הקדמי, ב־14.4 מ"מ.</li>
+<li><span class="tag gap">GAP</span> לא נוצר קובץ הרכבה תלת־ממדי ולא תצוגה מפוצצת (exploded) <b>מתוך המוצקים</b>. ההרכבה שהוצגה (<code>stack_from_cad.png</code>) נבנתה מרסטור מחדש של הפוליגונים, כלומר מהגאומטריה שנכנסה ל־CAD, ולא מקריאת קובצי STEP/STL עצמם.</li>
+</ul>
+
+<h2 id="c11s6">11.6 אימות חוזר אחרי CAD <span class="tag man">AD HOC</span></h2>
+<p>הקוד המלא שהורץ (אינו במאגר):</p>
+<pre class="plain">N=2304; mm=225/N; S=4
+def raster_ss(geom):                          # 4x supersampled, 1/16 sub-pixel precision
+    img=np.zeros((N*S,N*S),np.uint8)
+    f=lambda cs: np.round(np.array([(x/mm*S,(N-y/mm)*S) for x,y in cs])*16-8).astype(np.int32)
+    for poly in polygons(geom):
+        cv2.fillPoly(img,[f(poly.exterior.coords)],1,shift=4)
+        for r in poly.interiors: cv2.fillPoly(img,[f(r.coords)],0,shift=4)
+    return img.reshape(N,S,N,S).sum((1,3))>=(S*S)/2
+for d in layers (front first):
+    m = retained mask; v = visible mask
+    r = raster_ss(mask_to_geometry(m, mm, 0.03))
+    edge = audit_edge_connectivity(r); width = audit_connection_width(r, (v&r)[p:-p,p:-p], grid, DEFAULT_OPTIMIZATION_CONFIG)
+    px_diff = (r != m).sum(); cad_stack[r & ~shown] = layer colour; shown |= r
+stack_mismatch = (cad_stack != mask_derived_composite) inside the artwork</pre>
+<div class="box impl"><span class="tag impl">IMPLEMENTED MATHEMATICS</span>
+<div class="mb">u=\frac{X}{s}S,\quad v=\Big(H-\frac{Y}{s}\Big)S,\qquad r(p)=\Big[\sum_{i,j<4}\mathrm{in}(p,i,j)\ \ge 8\Big]</div>
+<p>הפוליגון נצבע ברשת פי 4, עם דיוק של 1/16 פיקסל (<code>shift=4</code>; ההיסט 8− הוא חצי פיקסל). פיקסל נחשב "מלא" אם לפחות חצי מ־16 תתי־הפיקסלים שלו בפנים. <b>תוצאות</b> (<span class="tag obs">OBSERVED</span>, <code>cad_revalidation.json</code>): לכל 10 הלוחות 0 פיקסלים שונים מהמסכה, 4-neighbor PASS, width PASS, מסגרת מלאה. <code>stack_mismatch_px = 0</code>.</p></div>
+<div class="box note">ניסיון ראשון עם <code>fillPoly</code> רגיל (בלי supersampling) הראה הפרשים, אבל הם נבעו מכלל המילוי של ה־rasterizer ולא מהגאומטריה. ההרצה המחודשת ב־supersampling הראתה 0 הפרשים, ורק היא נשמרה בקובץ.</div>
+</section><section class="chapter" data-name="12_walkthrough"><h1 id="c12">12. הרצה מלאה: Option B מהתמונה ועד STL</h1>
+<p>כל המספרים בפרק נקראו מקבצים קיימים ב־<code>artifacts/l1_van_gogh_v1/</code> (<span class="tag obs">OBSERVED_IN_FILE</span>). לצורך המסמך לא הורצה שום אופטימיזציה מחדש. האיור הוא קניין רוחני של צד שלישי, ולכן אסור לפרסם את המסמך הזה ברבים.</p>
+
+<h2 id="c12s1">12.1 קלט והכנה</h2>
+<div class="row">
+<figure><img src="fig/orig.jpg" style="height:72mm"><figcaption>קלט: <code>van_gogh_p.jfif</code> בגודל 1856 × 2268</figcaption></figure>
+<figure><img src="fig/flat_optB.png" style="height:72mm"><figcaption>יעד Option B: 2048 × 2048, עם 9 צבעים ומסגרת magenta</figcaption></figure>
+</div>
+<table class="t small">
+<tr><th>שלב</th><th>קריאה</th><th>תוצאה</th></tr>
+<tr><td>פלטה</td><td class="l">extract_palette(original)</td><td>10 צבעים: ‎#97CCE5 ‎#EAC007 ‎#000100 ‎#8AA1A2 ‎#3D7033 ‎#FCFEFE ‎#7CAE49 ‎#609337 ‎#BF3934 ‎#354043</td></tr>
+<tr><td>הקטנה ומיפוי</td><td class="l">resize(INTER_AREA) + snap_to_palette</td><td>1676 × 2048 (163.7 × 200 מ"מ), במרכז קנבס של 2048, עם x₀ = 186</td></tr>
+<tr><td>Option A</td><td>ידני (פתיחה של 17 פיקסלים בחלון הלחי)</td><td>173 פיקסלים צהובים → שחור (1.65 מ"מ²)</td></tr>
+<tr><td>Option B</td><td>ידני</td><td>13,154 פיקסלים ‎#354043 → ‎#000100 (125.4 מ"מ²)</td></tr>
+<tr><td>אינדוקס</td><td class="l">exact_index</td><td>10 תוויות, frame_label = 9 (‎#FF00FF), 35 אזורים</td></tr>
+</table>
+<div class="row">
+<figure><img src="fig/optA_cheek_before_change_after.png" style="width:118mm"><figcaption>Option A: לפני / הפיקסלים שהשתנו (magenta) / אחרי</figcaption></figure>
+</div>
+<div class="row"><figure><img src="fig/optB_hat_before_after.png" style="width:118mm"><figcaption>Option B: פס הכובע לפני ואחרי ההמרה לשחור</figcaption></figure></div>
+
+<h2 id="c12s2">12.2 רצף הקריאות במתכנן</h2>
+<pre class="plain">main()                                            scripts/run_turtle_reveal_planner_poc.py:158
+ ├─ exact_index(rgb)                              -> labels[2048,2048], palette[10]
+ └─ run_variant("per_cell", labels, palette, RevealConfig(tile 2.0, beam 8, "colors", frame 9))
+     ├─ RevealPlanner.__init__
+     │    physical_grid -> 2048/2304/128 @225 mm ; width_kernel -> 13x13 ellipse
+     │    build_cells   -> 11,498 cells ; embed -> cell_map[2304,2304] ; nub_steps = 5
+     ├─ closure()          feasible=True, round-robin 12 sheets, 15.8 s
+     ├─ beam_search()      COMPLETE, 10 sheets, 553 maximal_reveal evaluations
+     ├─ eliminate_sheets() no merge possible -> 10 sheets
+     ├─ materialize()      10 x {physical_mask, visible_mask}
+     ├─ audit_edge_connectivity / audit_connection_width   (x4 only; x8 skipped)
+     ├─ composite vs target -> 0 mismatched pixels
+     └─ seam_report()      171 px = 16.7 mm, 1 of 35 regions split          total 304.3 s</pre>
+
+<h2 id="c12s3">12.3 הלוחות שנוצרו</h2>
+<table class="t small">
+<tr><th>עומק (קדמי=0)</th><th>קובץ</th><th>צבע</th><th>4-neighbor</th><th>width</th><th>חומר</th><th>פתחים &lt;0.8</th><th>חורים ב־CAD</th><th>קודקודים</th></tr>
+<tr><td>0</td><td class="l">layer_09_000100</td><td class="l">#000100</td><td>PASS</td><td>PASS</td><td>42.3%</td><td>1</td><td>18</td><td>10,595</td></tr>
+<tr><td>1</td><td class="l">layer_08_eac007</td><td class="l">#EAC007</td><td>PASS</td><td>PASS</td><td>64.5%</td><td>1</td><td>24</td><td>9,665</td></tr>
+<tr><td>2</td><td class="l">layer_07_97cce5</td><td class="l">#97CCE5</td><td>PASS</td><td>PASS</td><td>79.5%</td><td>1</td><td>22</td><td>7,427</td></tr>
+<tr><td>3</td><td class="l">layer_06_8aa1a2</td><td class="l">#8AA1A2</td><td>PASS</td><td>PASS</td><td>85.1%</td><td>1</td><td>24</td><td>6,071</td></tr>
+<tr><td>4</td><td class="l">layer_05_3d7033</td><td class="l">#3D7033</td><td>PASS</td><td>PASS</td><td>90.5%</td><td>0</td><td>19</td><td>4,699</td></tr>
+<tr><td>5</td><td class="l">layer_04_000100</td><td class="l">#000100</td><td>PASS</td><td>PASS</td><td>92.0%</td><td>0</td><td>10</td><td>2,741</td></tr>
+<tr><td>6</td><td class="l">layer_03_fcfefe</td><td class="l">#FCFEFE</td><td>PASS</td><td>PASS</td><td>94.9%</td><td>0</td><td>6</td><td>1,735</td></tr>
+<tr><td>7</td><td class="l">layer_02_7cae49</td><td class="l">#7CAE49</td><td>PASS</td><td>PASS</td><td>97.5%</td><td>0</td><td>4</td><td>994</td></tr>
+<tr><td>8</td><td class="l">layer_01_609337</td><td class="l">#609337</td><td>PASS</td><td>PASS</td><td>99.1%</td><td>0</td><td>2</td><td>461</td></tr>
+<tr><td>9</td><td class="l">layer_00_bf3934</td><td class="l">#BF3934</td><td>PASS</td><td>PASS</td><td>100%</td><td>0</td><td>0</td><td>5</td></tr>
+</table>
+<div class="layers">
+<figure><img src="fig/layer_09_000100.png"><figcaption>0 · layer_09 #000100</figcaption></figure>
+<figure><img src="fig/layer_08_eac007.png"><figcaption>1 · layer_08 #EAC007</figcaption></figure>
+<figure><img src="fig/layer_07_97cce5.png"><figcaption>2 · layer_07 #97CCE5</figcaption></figure>
+<figure><img src="fig/layer_06_8aa1a2.png"><figcaption>3 · layer_06 #8AA1A2</figcaption></figure>
+<figure><img src="fig/layer_05_3d7033.png"><figcaption>4 · layer_05 #3D7033</figcaption></figure>
+<figure><img src="fig/layer_04_000100.png"><figcaption>5 · layer_04 #000100</figcaption></figure>
+<figure><img src="fig/layer_03_fcfefe.png"><figcaption>6 · layer_03 #FCFEFE</figcaption></figure>
+<figure><img src="fig/layer_02_7cae49.png"><figcaption>7 · layer_02 #7CAE49</figcaption></figure>
+<figure><img src="fig/layer_01_609337.png"><figcaption>8 · layer_01 #609337</figcaption></figure>
+<figure><img src="fig/layer_00_bf3934.png"><figcaption>9 · layer_00 #BF3934</figcaption></figure>
+</div>
+<p class="small">איור: <code>physical_sheet_preview.png</code> של כל לוח (לבן = חור). מספר = עומק מלפנים.</p>
+<div class="box derived"><span class="tag derived">DERIVED</span> <b>קריאת הסדר:</b> השחור הקדמי הוא המתאר הראשי. אחריו הצהוב, שבזכות המתאר שלפניו יכול להחזיק "שלד" נסתר. השחור השני (עומק 5) מכיל פרטים פנימיים: עיניים, אף, פה, קווי הלחיים, קווים בגוף ופרטי הכובע. אלה פרטים מוקפים בצבעים אחרים, שאפשר לתמוך בהם רק אחרי שהלוחות שלפניהם חשפו מספיק כדי שיהיה מאחוריהם חומר נסתר. קטע מקו המתאר השחור הראשי (אזור 0) פוצל בין שני העומקים, וזה כל התפר: 171 זוגות פיקסלים.</div>
+<figure><img src="fig/two_blacks.png" style="width:80mm"><figcaption>הפיקסלים הגלויים של שני לוחות השחור: שחור = עומק 0, אדום = עומק 5 (הופק מ־<code>source_visible_region_mask.png</code>)</figcaption></figure>
+
+<h2 id="c12s4">12.4 הרכבה, עומק והשוואה אחרי CAD</h2>
+<div class="row">
+<figure><img src="fig/composite.png" style="width:56mm"><figcaption><code>mask_derived_composite.png</code>: הרכבה מהמסכות</figcaption></figure>
+<figure><img src="fig/stack_from_cad.png" style="width:56mm"><figcaption><code>stack_from_cad.png</code>: הרכבה מהגאומטריה שנכנסה ל־CAD</figcaption></figure>
+<figure><img src="fig/depth.png" style="width:56mm"><figcaption><code>visible_depth_map.png</code> (כהה = קדמי)</figcaption></figure>
+</div>
+<p>הרכבה מהמסכות לעומת היעד: 0 פיקסלים שונים. הרכבה מה־CAD לעומת הרכבה מהמסכות: 0 פיקסלים שונים. התמונה השמאלית: באזור התמונה הצבעים כמעט אחידים, כי רוב התאים של כל צבע נחשפו באותו עומק.</p>
+
+<h2 id="c12s5">12.5 תוצאות ה־CAD</h2>
+<table class="t small">
+<tr><th>שכבה</th><th>פוליגונים</th><th>חורים</th><th>STEP solids</th><th>משולשי STL</th><th>watertight</th><th>רכיבים</th><th>ΔA %</th><th>ΔV %</th><th>זמן (trace/CAD/read)</th></tr>
+<tr><td class="l">layer_00</td><td>1</td><td>0</td><td>1</td><td>12</td><td>✓</td><td>1</td><td>0.0</td><td>0.0</td><td>0.05/0.06/0.05</td></tr>
+<tr><td class="l">layer_01</td><td>1</td><td>2</td><td>1</td><td>1,836</td><td>✓</td><td>1</td><td>0.0016</td><td>0.0</td><td>0.03/0.28/0.60</td></tr>
+<tr><td class="l">layer_02</td><td>1</td><td>4</td><td>1</td><td>3,968</td><td>✓</td><td>1</td><td>0.0035</td><td>0.0</td><td>0.03/0.61/1.31</td></tr>
+<tr><td class="l">layer_03</td><td>1</td><td>6</td><td>1</td><td>6,932</td><td>✓</td><td>1</td><td>0.0063</td><td>0.0</td><td>0.05/1.16/2.12</td></tr>
+<tr><td class="l">layer_04</td><td>1</td><td>10</td><td>1</td><td>10,956</td><td>✓</td><td>1</td><td>0.0101</td><td>0.0</td><td>0.04/1.90/3.15</td></tr>
+<tr><td class="l">layer_05</td><td>1</td><td>19</td><td>1</td><td>18,788</td><td>✓</td><td>1</td><td>0.0169</td><td>0.0</td><td>0.06/3.34/5.20</td></tr>
+<tr><td class="l">layer_06</td><td>1</td><td>24</td><td>1</td><td>24,276</td><td>✓</td><td>1</td><td>0.0231</td><td>0.0</td><td>0.07/4.51/7.14</td></tr>
+<tr><td class="l">layer_07</td><td>1</td><td>22</td><td>1</td><td>29,700</td><td>✓</td><td>1</td><td>0.0292</td><td>0.0</td><td>0.08/5.97/13.21</td></tr>
+<tr><td class="l">layer_08</td><td>1</td><td>24</td><td>1</td><td>38,652</td><td>✓</td><td>1</td><td>0.0485</td><td>0.0</td><td>0.11/8.49/19.99</td></tr>
+<tr><td class="l">layer_09</td><td>1</td><td>18</td><td>1</td><td>42,372</td><td>✓</td><td>1</td><td>0.085</td><td>0.0</td><td>0.12/10.70/32.52</td></tr>
+</table>
+<p>כל הקבצים בגבולות <span class="m">[0,225]\times[0,225]\times[0,1.6]</span> מ"מ. סך הכול 122.9 שניות. רוב הזמן הלך לקריאה החוזרת, ובעיקר ל־<code>importStep</code> ול־trimesh.</p>
+<div class="box derived"><span class="tag derived">DERIVED</span> <b>מספר המשולשים:</b> ללוח עם V קודקודים (בכל הטבעות) ו־h חורים, הפאה העליונה והתחתונה תורמות כ־<span class="m">2(V+2h-2)</span> משולשים, והדפנות <span class="m">2V</span>. יחד: <span class="m">\approx 4V+4h-4</span>. בדיקה: ב־layer_00 (V=5 כולל קודקוד סוגר, כלומר 4 ייחודיים, h=0): <span class="m">4\cdot4-4=12</span> ✓. ב־layer_01 (461 כולל 3 קודקודים סוגרים, כלומר 458 ייחודיים, h=2): <span class="m">4\cdot458+8-4=1836</span> ✓.</div>
+</section><section class="chapter" data-name="13_limits"><h1 id="c13">13. בדיקות, מגבלות ומצב המימוש</h1>
+
+<h2 id="c13s1">13.1 בדיקות אוטומטיות</h2>
+<table class="t">
+<tr><th>קובץ</th><th>בדיקה</th><th>מה היא מוכיחה</th><th>תוצאה (2026-10-22)</th></tr>
+<tr><td class="l">tests/test_reveal_planner.py</td><td class="l">test_region_indivisible_fixture_is_stuck</td><td>שבמצב "אזור שלם בעומק אחד" closure מחזירה לא־פתיר וקבוצת חסימה לא ריקה</td><td>PASS</td></tr>
+<tr><td class="l">tests/test_reveal_planner.py</td><td class="l">test_per_cell_depth_builds_valid_exact_six_sheet_stack</td><td>closure פתיר, beam COMPLETE, 6 לוחות עם שחור פעמיים, כל לוח עובר validator ומסגרת, שחזור מדויק, ולפחות אזור אחד מפוצל</td><td>PASS</td></tr>
+</table>
+<p>הפקודה: <code>pytest tests/test_reveal_planner.py -q</code> → <b>2 passed in 5.76s</b>. בהרצה המלאה האחרונה של כל ה־suite (מוקדם יותר באותו מושב) התקבלו <b>73 PASS ו־50 FAIL</b>. כל 50 הכשלים הם בבדיקות של מודולים ישנים, שמחפשים תיקיות ממצאים שכבר לא קיימות (<code>FileNotFoundError</code>), והם לא קשורים למסלול הזה.</p>
+<div class="box gap"><span class="tag gap">GAP</span> אין בדיקה אוטומטית ל־<code>fullres_flatten.py</code>, ל־<code>export_reveal_stack_cad.py</code> או לאימות החוזר של ה־CAD. הם אומתו רק בהרצה על Option B.</div>
+
+<h2 id="c13s2">13.2 מגבלות ידועות</h2>
+<table class="t small">
+<tr><th>מגבלה</th><th>סוג</th><th>פירוט</th></tr>
+<tr><td>אין פקודה אחת</td><td>מוכח</td><td>שלבים 1–3 ו־6 הם קוד חד־פעמי (פרק 3).</td></tr>
+<tr><td>פלטה לא דטרמיניסטית</td><td>מהקוד</td><td><code>cv2.kmeans</code> בלי seed.</td></tr>
+<tr><td>זיכרון ב־snap_to_palette</td><td>מהקוד</td><td>מערך מרחקים של <span class="m">H\cdot W\cdot P\cdot 3</span> מספרי float32 (כ־412 מגה־בייט ב־Option B).</td></tr>
+<tr><td>אין אופטימליות</td><td>מהקוד</td><td>beam עם גיזום. החסם התחתון המוכח הוא רק 9 (מספר הצבעים).</td></tr>
+<tr><td>מונוטוניות</td><td>תיאורטי</td><td>מוכחת לאופרטור הבסיסי בלבד. לולאות התיקון הן היוריסטיות.</td></tr>
+<tr><td>x8 לא הורץ</td><td>מוכח</td><td><code>all_sheets_pass_x8: "NOT_RUN"</code>.</td></tr>
+<tr><td>פתחים צרים</td><td>אבחון</td><td>חור צר מ־0.88 מ"מ בכל אחד מ־4 הלוחות הקדמיים. לא נחקר.</td></tr>
+<tr><td>תפרים</td><td>מוכח</td><td>16.7 מ"מ של מדרגת עובי בתוך אזור שחור אחד. עדיין לא נבדק אם הם נראים בהדפסה.</td></tr>
+<tr><td>שינוי אמנותי ידני</td><td>מוכח</td><td>Option A ו־B משנים את האיור (1.65 ו־125.4 מ"מ²). זו החלטה של המשתמש, לא של המתכנן.</td></tr>
+<tr><td>שם הסקריפט</td><td>מוכח</td><td><code>run_turtle_reveal_planner_poc.py</code> כללי, למרות השם. ברירת המחדל של <code>--target</code> מצביעה על קובץ של הצב שכבר לא קיים במאגר, ולכן חובה לציין <code>--target</code>.</td></tr>
+<tr><td>הרכבה מתוך המוצקים</td><td>GAP</td><td>אין קובץ הרכבה או תצוגה מפוצצת שנבנים מקובצי STEP/STL.</td></tr>
+<tr><td>הדפסה פיזית</td><td>PENDING</td><td>לא בוצעה. אף בדיקה תוכנתית לא מחליפה אותה.</td></tr>
+</table>
+
+<h2 id="c13s3">13.3 השוואה ל־MILESTONES.md</h2>
+<table class="t small">
+<tr><th>נושא</th><th>מצב בקוד</th></tr>
+<tr><td>L-1 (אבן הדרך הנוכחית)</td><td><code>AWAITING_PHYSICAL_TEST</code>. ההוכחה המקורית של L-1 נבנתה על איור מקורי ובתכנון ידני. Option B הוא ראיה <b>נוספת</b> ניסיונית ולא מחליף אותה. L-G10 (הדפסה ואישור משתמש) עדיין PENDING.</td></tr>
+<tr><td>L0 (ליבה גאומטרית רב־פעמית ו־CLI)</td><td><b>לא התחיל.</b> חסום עד אישור L-1. הקוד של Option B מפוזר בין מודול חדש, שני סקריפטים וקטעים חד־פעמיים.</td></tr>
+<tr><td>L1 (הצעות אוטומטיות לתמונה חדשה)</td><td>קיימות <b>ראיות ניסיוניות</b>: הצב ו־van_gogh_p (תמונה שנייה שלא נראתה קודם) רצו באותו קוד ובאותן הגדרות. אבל ב־Option B היו תיקוני איור ידניים (מוצהרים), ושלבי ההכנה ידניים. לכן אין כאן טענה להמרה אוטומטית מלאה.</td></tr>
+<tr><td>L2–L4</td><td>לא מומשו. אין עורך, אין UI ואין API, בהתאם ל־AGENTS.md.</td></tr>
+</table>
+<div class="box note">המסמך לא משנה אף סטטוס אבן דרך ולא מאשר שום בדיקה פיזית. לפי AGENTS.md, ההתקדמות לשלב הבא מחכה לאישור מפורש שלך.</div>
+
+<h2 id="c13s4">13.4 קוד ישן וניסיוני שלא תועד</h2>
+<p>לבקשתך, האלגוריתמים האלה <b>לא מוסברים</b> במסמך: CP-SAT בעומק קבוע (<code>experimental_global_planner.py</code>, פרט ל־<code>exact_index</code>), width-aware beam, Region-bitset optimization, הצעות subtractive, flattening ישן לפי quantization גלובלי, נרמול קווי מתאר, ניקוי אזורים זעירים, ותיקוני רוחב נסתרים (<code>hidden_width_repair.repair_one_mask</code>). הם קיימים במאגר אבל לא השתתפו ב־Option B.</p>
+</section><section class="chapter" data-name="14_navigation"><h1 id="c14">14. מדריך ניווט למפתח ואינדקס מקורות</h1>
+
+<h2 id="c14s1">14.1 איפה לשנות מה</h2>
+<table class="t small">
+<tr><th>אם רוצים לשנות…</th><th>המקום</th><th>שים לב</th></tr>
+<tr><td>רוחב מינימלי (1.2 מ"מ)</td><td class="l">layer_optimization.OptimizationConfig</td><td>משפיע גם על ה־validator וגם על המתכנן (שניהם קוראים ל־<code>_width_parameters</code>). לפי AGENTS.md אסור להוריד סף.</td></tr>
+<tr><td>גודל לוח או מסגרת</td><td class="l">RevealConfig.outer_sheet_mm; PocConfig (512/576/32)</td><td>היחס 512:576 קובע מסגרת של 12.5 מ"מ.</td></tr>
+<tr><td>גודל תאים</td><td class="l">--tile-mm / RevealConfig.cell_tile_mm</td><td>קטן יותר: יותר גמישות, יותר תאים וזמן ריצה ארוך יותר.</td></tr>
+<tr><td>אורך בליטות</td><td class="l">RevealConfig.nub_tolerance_mm</td><td>המתכנן בלבד. ה־validator לא מגביל אותן.</td></tr>
+<tr><td>איכות החיפוש</td><td class="l">--beam, --score</td><td>זיכרון וזמן גדלים בערך ליניארית עם B.</td></tr>
+<tr><td>עובי לוח ופישוט</td><td class="l">--thickness-mm, --simplify-mm</td><td>סקריפט הייצוא בלבד.</td></tr>
+<tr><td>פלטה</td><td class="l">extract_palette(max_colors, merge_delta, min_share)</td><td>לא נחשף כ־CLI.</td></tr>
+</table>
+
+<h2 id="c14s2">14.2 איך לשחזר את Option B מהקבצים</h2>
+<ol>
+<li>היעד המוכן כבר שמור: <code>artifacts/l1_van_gogh_v1/flat_2048_framed_optB.png</code>.</li>
+<li>הרצת המתכנן: הפקודה בסעיף 3.6 (כ־5 דקות. דורשת כמה ג'יגה־בייט פנויים).</li>
+<li>ייצוא: הפקודה בסעיף 3.7 (כ־2 דקות).</li>
+<li>לבנות את ה־PDF הזה מחדש: <code>PYTHONPATH=src .venv/Scripts/python.exe docs/technical_optB/compute_examples.py</code>, אחריו <code>make_figures.py</code>, ואחריו <code>build_pdf.py</code>.</li>
+</ol>
+
+<h2 id="c14s3">14.3 אינדקס מקורות</h2>
+<table class="t small">
+<tr><th>סמל</th><th>מיקום</th><th>פרק</th></tr>
+<tr><td class="l">FlattenConfig</td><td><span class="ref" data-sym="class FlattenConfig">src/layerforge_l1/fullres_flatten.py:26</span></td><td>4</td></tr>
+<tr><td class="l">snap_to_palette</td><td><span class="ref" data-sym="def snap_to_palette">src/layerforge_l1/fullres_flatten.py:34</span></td><td>4</td></tr>
+<tr><td class="l">majority_filter</td><td><span class="ref" data-sym="def majority_filter">src/layerforge_l1/fullres_flatten.py:46</span></td><td>4</td></tr>
+<tr><td class="l">merge_small_fragments</td><td><span class="ref" data-sym="def merge_small_fragments">src/layerforge_l1/fullres_flatten.py:53</span></td><td>4</td></tr>
+<tr><td class="l">extract_palette</td><td><span class="ref" data-sym="def extract_palette">src/layerforge_l1/fullres_flatten.py:76</span></td><td>4</td></tr>
+<tr><td class="l">exact_index</td><td><span class="ref" data-sym="def exact_index">src/layerforge_l1/experimental_global_planner.py:73</span></td><td>4</td></tr>
+<tr><td class="l">RevealConfig</td><td><span class="ref" data-sym="class RevealConfig">src/layerforge_l1/reveal_planner.py:38</span></td><td>5</td></tr>
+<tr><td class="l">physical_grid</td><td><span class="ref" data-sym="def physical_grid">src/layerforge_l1/reveal_planner.py:65</span></td><td>6</td></tr>
+<tr><td class="l">width_kernel</td><td><span class="ref" data-sym="def width_kernel">src/layerforge_l1/reveal_planner.py:74</span></td><td>6</td></tr>
+<tr><td class="l">build_cells</td><td><span class="ref" data-sym="def build_cells">src/layerforge_l1/reveal_planner.py:85</span></td><td>6</td></tr>
+<tr><td class="l">_merge_small_cells</td><td><span class="ref" data-sym="def _merge_small_cells">src/layerforge_l1/reveal_planner.py:130</span></td><td>6</td></tr>
+<tr><td class="l">embed</td><td><span class="ref" data-sym="def embed">src/layerforge_l1/reveal_planner.py:161</span></td><td>6</td></tr>
+<tr><td class="l">structural_support</td><td><span class="ref" data-sym="def structural_support">src/layerforge_l1/reveal_planner.py:171</span></td><td>7</td></tr>
+<tr><td class="l">_orphan_cores</td><td><span class="ref" data-sym="def _orphan_cores">src/layerforge_l1/reveal_planner.py:211</span></td><td>7, 8</td></tr>
+<tr><td class="l">_anchored</td><td><span class="ref" data-sym="def _anchored">src/layerforge_l1/reveal_planner.py:216</span></td><td>7</td></tr>
+<tr><td class="l">_CROSS</td><td><span class="ref" data-sym="_CROSS = ">src/layerforge_l1/reveal_planner.py:224</span></td><td>7</td></tr>
+<tr><td class="l">_geodesic_reach</td><td><span class="ref" data-sym="def _geodesic_reach">src/layerforge_l1/reveal_planner.py:227</span></td><td>7</td></tr>
+<tr><td class="l">RevealPlanner</td><td><span class="ref" data-sym="class RevealPlanner">src/layerforge_l1/reveal_planner.py:237</span></td><td>5, 8</td></tr>
+<tr><td class="l">cells_mask / covered_mask</td><td><span class="ref" data-sym="def cells_mask">src/layerforge_l1/reveal_planner.py:264</span></td><td>5</td></tr>
+<tr><td class="l">unsupported_pixels</td><td><span class="ref" data-sym="def unsupported_pixels">src/layerforge_l1/reveal_planner.py:273</span></td><td>8</td></tr>
+<tr><td class="l">maximal_reveal</td><td><span class="ref" data-sym="def maximal_reveal">src/layerforge_l1/reveal_planner.py:290</span></td><td>8</td></tr>
+<tr><td class="l">eliminate_sheets</td><td><span class="ref" data-sym="def eliminate_sheets">src/layerforge_l1/reveal_planner.py:306</span></td><td>8</td></tr>
+<tr><td class="l">sheet_mask</td><td><span class="ref" data-sym="def sheet_mask">src/layerforge_l1/reveal_planner.py:348</span></td><td>8, 9</td></tr>
+<tr><td class="l">closure</td><td><span class="ref" data-sym="def closure">src/layerforge_l1/reveal_planner.py:353</span></td><td>8</td></tr>
+<tr><td class="l">beam_search / _beam_key</td><td><span class="ref" data-sym="def beam_search">src/layerforge_l1/reveal_planner.py:374</span></td><td>8</td></tr>
+<tr><td class="l">materialize</td><td><span class="ref" data-sym="def materialize">src/layerforge_l1/reveal_planner.py:423</span></td><td>8</td></tr>
+<tr><td class="l">seam_report</td><td><span class="ref" data-sym="def seam_report">src/layerforge_l1/reveal_planner.py:440</span></td><td>8</td></tr>
+<tr><td class="l">PocConfig / _outer_and_perimeter</td><td><span class="ref" data-sym="def _outer_and_perimeter">src/layerforge_l1/subtractive_poc.py:412</span></td><td>5</td></tr>
+<tr><td class="l">WidthRepairConfig</td><td><span class="ref" data-sym="class WidthRepairConfig">src/layerforge_l1/hidden_width_repair.py:28</span></td><td>5</td></tr>
+<tr><td class="l">OptimizationConfig</td><td><span class="ref" data-sym="class OptimizationConfig">src/layerforge_l1/layer_optimization.py:38</span></td><td>5</td></tr>
+<tr><td class="l">audit_edge_connectivity</td><td><span class="ref" data-sym="def audit_edge_connectivity">src/layerforge_l1/connectivity_repair.py:82</span></td><td>10</td></tr>
+<tr><td class="l">_width_parameters</td><td><span class="ref" data-sym="def _width_parameters">src/layerforge_l1/connectivity_repair.py:114</span></td><td>6</td></tr>
+<tr><td class="l">audit_connection_width</td><td><span class="ref" data-sym="def audit_connection_width">src/layerforge_l1/connectivity_repair.py:227</span></td><td>10</td></tr>
+<tr><td class="l">_narrow_openings</td><td><span class="ref" data-sym="def _narrow_openings">scripts/run_turtle_reveal_planner_poc.py:43</span></td><td>10</td></tr>
+<tr><td class="l">run_variant / main</td><td><span class="ref" data-sym="def run_variant">scripts/run_turtle_reveal_planner_poc.py:52</span></td><td>3</td></tr>
+<tr><td class="l">mask_to_geometry</td><td><span class="ref" data-sym="def mask_to_geometry">scripts/export_reveal_stack_cad.py:29</span></td><td>11</td></tr>
+<tr><td class="l">polygons / _face / extrude_geometry</td><td><span class="ref" data-sym="def polygons">src/layerforge_l1/geometry.py:72</span></td><td>11</td></tr>
+<tr><td class="l">_fixture (test)</td><td><span class="ref" data-sym="def _fixture">tests/test_reveal_planner.py:20</span></td><td>8</td></tr>
+</table>
+</section><section class="chapter" data-name="15_glossary"><h1 id="c15">15. מילון מונחים</h1>
+<table class="t small">
+<tr><th style="width:24%">מונח</th><th>הגדרה כפי שהיא משמשת בקוד</th></tr>
+<tr><td>לוח / sheet</td><td>שכבה פיזית אחת: מסכה בינארית בגודל 2304², בצבע אחד ובעובי 1.6 מ"מ.</td></tr>
+<tr><td>עומק / depth</td><td>האינדקס מלפנים לאחור (0 = קדמי). בשמות הקבצים המספור הפוך.</td></tr>
+<tr><td>אזור / region</td><td>רכיב 4־קשיר של צבע אחד ביעד.</td></tr>
+<tr><td>תא / cell</td><td>החיתוך של אזור עם אריח (2 מ"מ ב־Option B), אחרי מיזוג פיסות זעירות. זו יחידת ההחלטה של המתכנן.</td></tr>
+<tr><td>חשיפה / reveal <span class="m">X_k</span></td><td>קבוצת התאים שלוח k מראה.</td></tr>
+<tr><td>מכוסים / covered <span class="m">\mathcal C_k</span></td><td>תאים שנחשפו בלוחות שלפני k, וגם תאי המסגרת.</td></tr>
+<tr><td>Perimeter <span class="m">P</span></td><td>טבעת המסגרת ברוחב 128 פיקסלים (12.5 מ"מ), ובמתכנן גם פסי ה־magenta.</td></tr>
+<tr><td>ליבה / core</td><td><span class="m">M\ominus K_{13}</span>: מקומות שאפשר למקם בהם את מרכז ה"מטבע" ברוחב 1.27 מ"מ.</td></tr>
+<tr><td>ליבה יתומה / orphan core</td><td>רכיב 4־קשיר של הליבה שלא נוגע ב־P. בגללה ה־validator נכשל.</td></tr>
+<tr><td>תמיכה מבנית / Struct</td><td><span class="m">(\mathrm{Anch}_P(U\ominus K)\oplus K)\cap U</span>, ועוד גשרים וחיתוכים.</td></tr>
+<tr><td>בליטה / nub</td><td>פיקסל גלוי מחוץ לתמיכה, שנמצא עד 5 צעדים (0.49 מ"מ) ממנה.</td></tr>
+<tr><td>חומר נסתר</td><td>חומר בלוח k במקום שכבר נחשף בלוח קדמי.</td></tr>
+<tr><td>Maximal reveal</td><td>נקודת השבת הגדולה ביותר של תאים נתמכים בצבע נתון.</td></tr>
+<tr><td>Closure</td><td>חזרה של round-robin עם maximal reveal עד שאין התקדמות. זו בדיקת ההיתכנות.</td></tr>
+<tr><td>Obstruction</td><td>תאים שאף סדר לא מצליח לחשוף.</td></tr>
+<tr><td>Beam</td><td>חיפוש רמה־אחר־רמה ששומר רק את B המצבים הטובים ביותר.</td></tr>
+<tr><td>תפר / seam</td><td>גבול בין שני תאים של אותו אזור בעומקים שונים, כלומר מדרגת עובי בתוך שטח בצבע אחד.</td></tr>
+<tr><td>Erosion <span class="m">\ominus</span> / Dilation <span class="m">\oplus</span></td><td>פעולות המינימום והמקסימום של OpenCV עם גרעין K.</td></tr>
+<tr><td>Opening <span class="m">\circ</span></td><td>שחיקה ואחריה התפשטות. משמשת בתיקון Option A ובאבחון הפתחים הצרים.</td></tr>
+<tr><td>4-connected</td><td>שכנות דרך צלע בלבד (למעלה, למטה, ימינה, שמאלה).</td></tr>
+<tr><td>CIELAB (OpenCV 8-bit)</td><td>מרחב צבע: <span class="m">L\cdot2.55</span>, <span class="m">a+128</span>, <span class="m">b+128</span>.</td></tr>
+<tr><td>Douglas–Peucker</td><td>פישוט קווים בסובלנות ε (0.03 מ"מ).</td></tr>
+<tr><td>Watertight</td><td>רשת משולשים סגורה, שכל צלע בה משותפת לשני משולשים.</td></tr>
+<tr><td>STEP / STL</td><td>STEP: מוצק B-Rep מדויק (OCCT). STL: רשת משולשים.</td></tr>
+</table>
+
+<h2 id="c15s1">15.1 אימות המסמך</h2>
+<ul>
+<li>כל ההפניות <code>path:line</code> נבדקו אוטומטית מול הקבצים בזמן הבנייה (<code>build_pdf.py</code>). אם סמל לא נמצא בשורה, הבנייה נכשלת.</li>
+<li>כל קטעי הקוד במסמך הועתקו אוטומטית מהקבצים עצמם, יחד עם מספרי השורות.</li>
+<li>הדוגמאות A1, A2 וריצת הפיקסטורה חושבו בקריאה לפונקציות הייצור עצמן (<code>compute_examples.py</code>).</li>
+<li>לא שונה אף קובץ קוד, artifact או סטטוס. נוצרו רק קבצים ב־<code>docs/technical_optB/</code> וב־<code>output/pdf/optB/</code>.</li>
+</ul>
+</section><script src="vendor/katex.min.js"></script><script>
+for (const e of document.querySelectorAll('.m')) katex.render(e.textContent, e, {output:'mathml', throwOnError:true});
+for (const e of document.querySelectorAll('.mb')) katex.render(e.textContent, e, {output:'mathml', displayMode:true, throwOnError:true});
+</script><script>
+setTimeout(() => {
+  const limit = document.body.getBoundingClientRect();
+  const bad = [];
+  for (const e of document.body.querySelectorAll('*')) {
+    const r = e.getBoundingClientRect();
+    if (r.width && (r.left < limit.left - 1 || r.right > limit.right + 1)) {
+      if (e.closest('math') && e.tagName.toLowerCase() !== 'math') continue;
+      if (e.parentElement && bad.length && e.parentElement.contains(bad[bad.length - 1].el) === false && bad[bad.length-1].el.contains(e)) continue;
+      bad.push({el: e, tag: e.tagName, cls: e.className && e.className.baseVal === undefined ? e.className : '',
+                w: Math.round(r.width), text: (e.textContent || '').slice(0, 90)});
+    }
+  }
+  fetch('/result', {method: 'POST', body: JSON.stringify({body: Math.round(limit.width),
+    bad: bad.map(({el, ...rest}) => rest)})});
+}, 3000);
+</script></body></html>

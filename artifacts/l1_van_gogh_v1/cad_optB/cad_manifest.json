@@ -1,0 +1,360 @@
+{
+  "outer_sheet_mm": 225.0,
+  "thickness_mm": 1.6,
+  "assembly_back_to_front": [
+    {
+      "layer": "layer_00_bf3934",
+      "color": "#BF3934",
+      "assembled_z0_mm": 0.0,
+      "stl": "stl/layer_00_bf3934.stl",
+      "step": "step/layer_00_bf3934.step"
+    },
+    {
+      "layer": "layer_01_609337",
+      "color": "#609337",
+      "assembled_z0_mm": 1.6,
+      "stl": "stl/layer_01_609337.stl",
+      "step": "step/layer_01_609337.step"
+    },
+    {
+      "layer": "layer_02_7cae49",
+      "color": "#7CAE49",
+      "assembled_z0_mm": 3.2,
+      "stl": "stl/layer_02_7cae49.stl",
+      "step": "step/layer_02_7cae49.step"
+    },
+    {
+      "layer": "layer_03_fcfefe",
+      "color": "#FCFEFE",
+      "assembled_z0_mm": 4.800000000000001,
+      "stl": "stl/layer_03_fcfefe.stl",
+      "step": "step/layer_03_fcfefe.step"
+    },
+    {
+      "layer": "layer_04_000100",
+      "color": "#000100",
+      "assembled_z0_mm": 6.4,
+      "stl": "stl/layer_04_000100.stl",
+      "step": "step/layer_04_000100.step"
+    },
+    {
+      "layer": "layer_05_3d7033",
+      "color": "#3D7033",
+      "assembled_z0_mm": 8.0,
+      "stl": "stl/layer_05_3d7033.stl",
+      "step": "step/layer_05_3d7033.step"
+    },
+    {
+      "layer": "layer_06_8aa1a2",
+      "color": "#8AA1A2",
+      "assembled_z0_mm": 9.600000000000001,
+      "stl": "stl/layer_06_8aa1a2.stl",
+      "step": "step/layer_06_8aa1a2.step"
+    },
+    {
+      "layer": "layer_07_97cce5",
+      "color": "#97CCE5",
+      "assembled_z0_mm": 11.200000000000001,
+      "stl": "stl/layer_07_97cce5.stl",
+      "step": "step/layer_07_97cce5.step"
+    },
+    {
+      "layer": "layer_08_eac007",
+      "color": "#EAC007",
+      "assembled_z0_mm": 12.8,
+      "stl": "stl/layer_08_eac007.stl",
+      "step": "step/layer_08_eac007.step"
+    },
+    {
+      "layer": "layer_09_000100",
+      "color": "#000100",
+      "assembled_z0_mm": 14.4,
+      "stl": "stl/layer_09_000100.stl",
+      "step": "step/layer_09_000100.step"
+    }
+  ],
+  "print_placement": "every STL at z = 0, broad face on the bed",
+  "layers": [
+    {
+      "layer": "layer_00_bf3934",
+      "color": "#BF3934",
+      "polygons": 1,
+      "holes": 0,
+      "vertices": 5,
+      "step_solids": 1,
+      "stl_triangles": 12,
+      "stl_watertight": true,
+      "stl_components": 1,
+      "stl_bounds_mm": [
+        [
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          225.0,
+          225.0,
+          1.6
+        ]
+      ],
+      "traced_area_vs_mask_pct": 0.0,
+      "volume_vs_area_x_thickness_pct": 0.0,
+      "seconds_trace": 0.05,
+      "seconds_cad_export": 0.06,
+      "seconds_readback": 0.05
+    },
+    {
+      "layer": "layer_01_609337",
+      "color": "#609337",
+      "polygons": 1,
+      "holes": 2,
+      "vertices": 461,
+      "step_solids": 1,
+      "stl_triangles": 1836,
+      "stl_watertight": true,
+      "stl_components": 1,
+      "stl_bounds_mm": [
+        [
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          225.0,
+          225.0,
+          1.6
+        ]
+      ],
+      "traced_area_vs_mask_pct": 0.0016,
+      "volume_vs_area_x_thickness_pct": 0.0,
+      "seconds_trace": 0.03,
+      "seconds_cad_export": 0.28,
+      "seconds_readback": 0.6
+    },
+    {
+      "layer": "layer_02_7cae49",
+      "color": "#7CAE49",
+      "polygons": 1,
+      "holes": 4,
+      "vertices": 994,
+      "step_solids": 1,
+      "stl_triangles": 3968,
+      "stl_watertight": true,
+      "stl_components": 1,
+      "stl_bounds_mm": [
+        [
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          225.0,
+          225.0,
+          1.6
+        ]
+      ],
+      "traced_area_vs_mask_pct": 0.0035,
+      "volume_vs_area_x_thickness_pct": 0.0,
+      "seconds_trace": 0.03,
+      "seconds_cad_export": 0.61,
+      "seconds_readback": 1.31
+    },
+    {
+      "layer": "layer_03_fcfefe",
+      "color": "#FCFEFE",
+      "polygons": 1,
+      "holes": 6,
+      "vertices": 1735,
+      "step_solids": 1,
+      "stl_triangles": 6932,
+      "stl_watertight": true,
+      "stl_components": 1,
+      "stl_bounds_mm": [
+        [
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          225.0,
+          225.0,
+          1.6
+        ]
+      ],
+      "traced_area_vs_mask_pct": 0.0063,
+      "volume_vs_area_x_thickness_pct": 0.0,
+      "seconds_trace": 0.05,
+      "seconds_cad_export": 1.16,
+      "seconds_readback": 2.12
+    },
+    {
+      "layer": "layer_04_000100",
+      "color": "#000100",
+      "polygons": 1,
+      "holes": 10,
+      "vertices": 2741,
+      "step_solids": 1,
+      "stl_triangles": 10956,
+      "stl_watertight": true,
+      "stl_components": 1,
+      "stl_bounds_mm": [
+        [
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          225.0,
+          225.0,
+          1.6
+        ]
+      ],
+      "traced_area_vs_mask_pct": 0.0101,
+      "volume_vs_area_x_thickness_pct": 0.0,
+      "seconds_trace": 0.04,
+      "seconds_cad_export": 1.9,
+      "seconds_readback": 3.15
+    },
+    {
+      "layer": "layer_05_3d7033",
+      "color": "#3D7033",
+      "polygons": 1,
+      "holes": 19,
+      "vertices": 4699,
+      "step_solids": 1,
+      "stl_triangles": 18788,
+      "stl_watertight": true,
+      "stl_components": 1,
+      "stl_bounds_mm": [
+        [
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          225.0,
+          225.0,
+          1.6
+        ]
+      ],
+      "traced_area_vs_mask_pct": 0.0169,
+      "volume_vs_area_x_thickness_pct": -0.0,
+      "seconds_trace": 0.06,
+      "seconds_cad_export": 3.34,
+      "seconds_readback": 5.2
+    },
+    {
+      "layer": "layer_06_8aa1a2",
+      "color": "#8AA1A2",
+      "polygons": 1,
+      "holes": 24,
+      "vertices": 6071,
+      "step_solids": 1,
+      "stl_triangles": 24276,
+      "stl_watertight": true,
+      "stl_components": 1,
+      "stl_bounds_mm": [
+        [
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          225.0,
+          225.0,
+          1.6
+        ]
+      ],
+      "traced_area_vs_mask_pct": 0.0231,
+      "volume_vs_area_x_thickness_pct": -0.0,
+      "seconds_trace": 0.07,
+      "seconds_cad_export": 4.51,
+      "seconds_readback": 7.14
+    },
+    {
+      "layer": "layer_07_97cce5",
+      "color": "#97CCE5",
+      "polygons": 1,
+      "holes": 22,
+      "vertices": 7427,
+      "step_solids": 1,
+      "stl_triangles": 29700,
+      "stl_watertight": true,
+      "stl_components": 1,
+      "stl_bounds_mm": [
+        [
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          225.0,
+          225.0,
+          1.6
+        ]
+      ],
+      "traced_area_vs_mask_pct": 0.0292,
+      "volume_vs_area_x_thickness_pct": -0.0,
+      "seconds_trace": 0.08,
+      "seconds_cad_export": 5.97,
+      "seconds_readback": 13.21
+    },
+    {
+      "layer": "layer_08_eac007",
+      "color": "#EAC007",
+      "polygons": 1,
+      "holes": 24,
+      "vertices": 9665,
+      "step_solids": 1,
+      "stl_triangles": 38652,
+      "stl_watertight": true,
+      "stl_components": 1,
+      "stl_bounds_mm": [
+        [
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          225.0,
+          225.0,
+          1.6
+        ]
+      ],
+      "traced_area_vs_mask_pct": 0.0485,
+      "volume_vs_area_x_thickness_pct": -0.0,
+      "seconds_trace": 0.11,
+      "seconds_cad_export": 8.49,
+      "seconds_readback": 19.99
+    },
+    {
+      "layer": "layer_09_000100",
+      "color": "#000100",
+      "polygons": 1,
+      "holes": 18,
+      "vertices": 10595,
+      "step_solids": 1,
+      "stl_triangles": 42372,
+      "stl_watertight": true,
+      "stl_components": 1,
+      "stl_bounds_mm": [
+        [
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          225.0,
+          225.0,
+          1.6
+        ]
+      ],
+      "traced_area_vs_mask_pct": 0.085,
+      "volume_vs_area_x_thickness_pct": -0.0,
+      "seconds_trace": 0.12,
+      "seconds_cad_export": 10.7,
+      "seconds_readback": 32.52
+    }
+  ],
+  "total_seconds": 122.9
+}

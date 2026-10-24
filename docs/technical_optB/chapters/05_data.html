@@ -1,0 +1,78 @@
+<h1>מודלי הנתונים</h1>
+<p>אין במסלול הזה אובייקט <code>LayerStack</code> או סכמה מפורמלת. כל הנתונים הם מערכי numpy, dataclass־ים קפואים (frozen) ומילונים (dict) שמסודרים ל־JSON. הפרק מתאר כל מבנה: מה הוא מייצג, היכן הוא נוצר ומי צורך אותו.</p>
+
+<h2>תרשים 4: מבני הנתונים והקשרים ביניהם</h2>
+<div class="flow">
+ <div class="n"><b>labels</b> <code>uint8[2048,2048]</code> + <b>palette</b> <code>uint8[10,3]</code>, מתוך <code>exact_index</code></div><div class="a">▼ build_cells</div>
+ <div class="split"><div class="n"><b>native_cells</b> <code>int32[2048,2048]</code>: מזהה תא לכל פיקסל</div><div class="n"><b>cell_color / cell_region</b> <code>int32[n]</code>, n = 11,498</div></div><div class="a">▼ embed (+perimeter)</div>
+ <div class="n"><b>cell_map</b> <code>int32[2304,2304]</code>, עם 1− במסגרת · <b>perimeter</b> <code>bool[2304,2304]</code></div><div class="a">▼ planning on cell vectors</div>
+ <div class="n dec"><b>covered, reveal</b> <code>bool[n]</code>: מצב החיפוש · <b>beam state</b> <code>(covered, colors, reveals)</code></div><div class="a">▼ materialize</div>
+ <div class="n out"><b>sheet</b> dict: <code>physical_mask</code>, <code>visible_mask</code> <code>bool[2304,2304]</code>, <code>visible_cells</code> <code>bool[n]</code></div><div class="a">▼ PNG + JSON</div>
+ <div class="n out"><code>layers/layer_XX_rrggbb/*.png</code> · <code>poc_report.json</code> → <code>cad_manifest.json</code> · <code>stl/</code> · <code>step/</code></div>
+</div>
+
+<h2>RevealConfig</h2>
+<p><span class="ref" data-sym="class RevealConfig">src/layerforge_l1/reveal_planner.py:38</span>: מחלקת dataclass קפואה. בהרצת Option B הסקריפט שינה ארבעה שדות: <code>cell_tile_mm=2.0</code>, <code>beam_width=8</code>, <code>beam_score="colors"</code> ו־<code>frame_label=9</code>.</p>
+<pre class="code" data-file="src/layerforge_l1/reveal_planner.py" data-lines="37-62"></pre>
+<table class="t small">
+<tr><th>שדה</th><th>ערך ב־Option B</th><th>למה הוא קיים</th></tr>
+<tr><td class="l">outer_sheet_mm</td><td>225.0</td><td>גודל הלוח הפיזי, כולל המסגרת. ממנו נגזר מ"מ לפיקסל.</td></tr>
+<tr><td class="l">scale</td><td>4</td><td>הכפלה של הרשת הבסיסית (512 ← 2048) לפי <code>validation_poc_config</code>.</td></tr>
+<tr><td class="l">nub_tolerance_mm</td><td>0.5</td><td>כמה פיקסלים גלויים יכולים לבלוט מחוץ לליבה המבנית (פינות, קצות קווים).</td></tr>
+<tr><td class="l">cell_tile_mm</td><td>2.0</td><td>גודל אריח החיתוך של אזורים לתאים.</td></tr>
+<tr><td class="l">min_cell_mm2</td><td>0.9</td><td>תאים קטנים מזה מתמזגים לשכן מאותו אזור.</td></tr>
+<tr><td class="l">split_regions</td><td>True</td><td>True: עומק לכל תא. False: אזור שלם בעומק אחד (וריאנט ההשוואה).</td></tr>
+<tr><td class="l">frame_label</td><td>9</td><td>התווית שמסמנת את פסי המסגרת הצדדיים (magenta).</td></tr>
+<tr><td class="l">planning_margin_pixels</td><td>0</td><td>הגדלה אופציונלית של גרעין התכנון. לא שימש.</td></tr>
+<tr><td class="l">beam_width / beam_score</td><td>8 / "colors"</td><td>רוחב החיפוש ומפתח הדירוג.</td></tr>
+<tr><td class="l">max_sheets</td><td>24</td><td>גבול עליון לעומק החיפוש.</td></tr>
+</table>
+
+<h2>PocConfig והרשת הפיזית</h2>
+<p><span class="ref" data-sym="class PocConfig">src/layerforge_l1/subtractive_poc.py:24</span> מגיע מ־PoC ישן. ממנו נלקחות רק ארבע מידות: <code>analysis_pixels=512</code>, <code>outer_pixels=576</code>, <code>perimeter_pixels=32</code> ו־<code>sheet_size_mm</code>. הפונקציה <span class="ref" data-sym="def validation_poc_config">src/layerforge_l1/hidden_width_repair.py:36</span> מכפילה אותן פי <code>scale</code> ומחליפה את הגודל ל־225 מ"מ:</p>
+<pre class="code" data-file="src/layerforge_l1/hidden_width_repair.py" data-lines="36-51"></pre>
+<p>תוצאה ב־Option B (<span class="tag obs">OBSERVED</span>): analysis = 2048, outer = 2304, perimeter = 128, sheet = 225 מ"מ.</p>
+
+<h2>OptimizationConfig: מרכיבי הרוחב</h2>
+<pre class="code" data-file="src/layerforge_l1/layer_optimization.py" data-lines="37-52"></pre>
+<p>רק שלושת שדות הרוחב משמשים כאן: <span class="m">0.8+0.2+0.2=1.2</span> מ"מ (נומינלי + מרווח לווקטוריזציה + מרווח להמרת CAD).</p>
+
+<h2>מצב המתכנן (RevealPlanner)</h2>
+<pre class="code" data-file="src/layerforge_l1/reveal_planner.py" data-lines="240-268"></pre>
+<table class="t small">
+<tr><th>מאפיין</th><th>טיפוס וגודל ב־Option B</th><th>משמעות</th></tr>
+<tr><td class="l">perimeter</td><td class="l">bool[2304,2304]</td><td>טבעת ברוחב 128 פיקסלים, ובנוסף פיקסלי התאים של פסי ה־magenta (שורה 261). זה ה"עוגן" שאליו כל חומר חייב להתחבר.</td></tr>
+<tr><td class="l">native_cells</td><td class="l">int32[2048,2048]</td><td>מזהה תא לכל פיקסל יעד.</td></tr>
+<tr><td class="l">cell_map</td><td class="l">int32[2304,2304]</td><td><code>native_cells</code> מוטמע ברשת הפיזית. במסגרת: 1−.</td></tr>
+<tr><td class="l">cell_color, cell_region</td><td class="l">int32[11498]</td><td>תווית הצבע ומזהה האזור המקורי של כל תא.</td></tr>
+<tr><td class="l">cell_area</td><td class="l">int64[11498]</td><td>מספר פיקסלי היעד בכל תא. משמש לדירוג ה־beam ולסדר ב־eliminate.</td></tr>
+<tr><td class="l">start_covered</td><td class="l">bool[11498]</td><td>תאי המסגרת. הם "מכוסים" מראש, אף פעם לא גלויים, ותמיד חומר.</td></tr>
+<tr><td class="l">colors</td><td class="l">list[int]</td><td>הצבעים שיש לחשוף. ב־Option B יש 9 (כולם חוץ מ־9).</td></tr>
+<tr><td class="l">kernel</td><td class="l">uint8[13,13]</td><td>גרעין הרוחב האליפטי (פרק 6).</td></tr>
+<tr><td class="l">nub_steps</td><td>5</td><td><span class="m">\mathrm{round}(0.5/0.0977)</span>.</td></tr>
+</table>
+<h3>המרה מווקטור תאים למסכה: cells_mask</h3>
+<pre class="code" data-file="src/layerforge_l1/reveal_planner.py" data-lines="264-271"></pre>
+<div class="box derived"><span class="tag derived">DERIVED</span> הטריק: טבלת lookup בגודל n+1, שהערך האחרון בה תמיד False. במסגרת <code>cell_map=-1</code>, ובפייתון <code>lookup[-1]</code> הוא האיבר האחרון. כך מתקבלת המסכה בפעולת gather אחת, <span class="m">O(N^2)</span>, בלי לולאה על תאים. <code>covered_mask</code> מוסיף את ה־perimeter: <span class="m">\mathrm{px}(C)=P\cup\{p:\ \mathrm{cell}(p)\in C\}</span>.</div>
+
+<h2>מבני הפלט של התכנון</h2>
+<table class="t small">
+<tr><th>מבנה</th><th>שדות</th><th>נוצר ב</th><th>נצרך ב</th></tr>
+<tr><td>closure</td><td class="l">feasible, round_robin_sheet_count, obstruction_cells, covered_cells</td><td class="l">closure()</td><td>הסקריפט: אם False, נוצרת מפת חסימה ולא נוצרים לוחות</td></tr>
+<tr><td>plan</td><td class="l">status, front_to_back_colors, reveals, evaluations, [uncovered_cells]</td><td class="l">beam_search()</td><td class="l">eliminate_sheets, materialize, seam_report</td></tr>
+<tr><td>sheet</td><td class="l">physical_mask, visible_mask, visible_cells</td><td class="l">materialize()</td><td>validators, PNG</td></tr>
+<tr><td>seams</td><td class="l">seam_edge_length_native_pixels/mm, source_regions, ...split...</td><td class="l">seam_report()</td><td class="l">poc_report.json</td></tr>
+</table>
+
+<h2>קבצים על הדיסק</h2>
+<table class="t small">
+<tr><th>קובץ</th><th>תוכן</th><th>מי כותב / קורא</th></tr>
+<tr><td class="l">layers/layer_XX_rrggbb/retained_material_mask.png</td><td>מסכת החומר הפיזית, 2304 × 2304, ‏0/255. XX הוא אינדקס אחורה־לפנים (00 = אחורי).</td><td>נכתב בשורה 109 בסקריפט המתכנן, נקרא בייצוא ה־CAD</td></tr>
+<tr><td class="l">…/source_visible_region_mask.png</td><td>הפיקסלים שהלוח הזה מראה.</td><td>נכתב בשורה 115, נקרא באימות החוזר</td></tr>
+<tr><td class="l">…/physical_sheet_preview.png</td><td>תצוגת צבע (1152 × 1152, NEAREST).</td><td>לבדיקה ויזואלית בלבד</td></tr>
+<tr><td class="l">mask_derived_composite.png</td><td>הרכבה front-to-back של מסכות החומר.</td><td>השוואה ליעד (0 פיקסלים שונים)</td></tr>
+<tr><td class="l">visible_depth_map.png</td><td>עומק החשיפה לכל פיקסל (viridis).</td><td>ויזואלי</td></tr>
+<tr><td class="l">poc_report.json</td><td>config, palette, תוצאות closure ו־beam, טבלת לוחות, seams, זמנים.</td><td>הסקריפט</td></tr>
+<tr><td class="l">cad_manifest.json</td><td>סדר הרכבה, נתיבי stl ו־step, ‏<code>assembled_z0_mm</code>, בדיקות לכל שכבה, זמנים.</td><td class="l">export_reveal_stack_cad.py</td></tr>
+<tr><td class="l">cad_revalidation.json</td><td>לכל שכבה: הפרש פיקסלים ותוצאות validators. ‏<code>stack_mismatch_px</code>.</td><td>ad hoc</td></tr>
+</table>

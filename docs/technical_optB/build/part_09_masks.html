@@ -1,0 +1,38 @@
+<!doctype html><html lang="he" dir="rtl"><head><meta charset="utf-8">
+<title>LayerForge Technical Architecture</title><link rel="stylesheet" href="style.css"></head><body><section class="chapter" data-name="09_masks"><h1 id="c9">9. מסכות פיזיות: חומר, חורים וחומר נסתר</h1>
+
+<h2 id="c9s1">9.1 שלושה סוגי פיקסלים בכל לוח</h2>
+<p>מבחינת לוח k, כל פיקסל ברשת שייך לאחד משלושה סוגים:</p>
+<table class="t">
+<tr><th>סוג</th><th>הגדרה</th><th>מקור בקוד</th></tr>
+<tr><td><b>גלוי</b> (visible)</td><td><span class="m">V_k=\mathrm{px}(X_k)</span>: הפיקסלים שהלוח מראה.</td><td><code>visible_mask</code> → <code>source_visible_region_mask.png</code></td></tr>
+<tr><td><b>חומר נסתר</b> (hidden retained)</td><td><span class="m">M_k\setminus V_k</span>, ובהכרח ⊆ <span class="m">\mathrm{px}(\mathcal C_k)</span>: חומר מאחורי לוחות קדמיים. כולל את המסגרת.</td><td><code>physical_mask &amp; ~visible_mask</code></td></tr>
+<tr><td><b>חור</b> (cutout)</td><td><span class="m">\overline{M_k}</span>: כל התאים שייחשפו מאחור, וגם חומר מכוסה שלא נכלל בתמיכה.</td><td>הערך 0 ב־<code>retained_material_mask.png</code></td></tr>
+</table>
+
+<h2 id="c9s2">9.2 האנטומיה של לוח אמיתי מ־Option B</h2>
+<div class="row">
+<figure><img src="fig/anatomy_layer05.png" style="width:78mm"><figcaption><code>layer_05_3d7033</code> (עומק 4 מלפנים): ירוק = גלוי, אפור = חומר נסתר, לבן = חור</figcaption></figure>
+<figure><img src="fig/anatomy_layer05_zoom.png" style="width:78mm"><figcaption>הגדלה של אזור 600 × 600 פיקסלים (58.6 מ"מ) ליד הדשא</figcaption></figure>
+</div>
+<p>החורים בלוח הזה הם בדיוק האזורים שייחשפו בלוחות אחוריים יותר (השחור השני, הלבן, ירוק בהיר, ירוק בינוני והאדום). כל השאר הוא חומר: הדשא הירוק־כהה הגלוי, ומסביבו "שלד" אפור נסתר, שמאחורי השחור, הצהוב, הכחול והאפור שכבר נחשפו בלוחות שלפניו.</p>
+
+<h2 id="c9s3">9.3 האינווריאנטים שמבטיחים לוח תקין</h2>
+<div class="box derived"><span class="tag derived">DERIVED</span>
+<ol>
+<li><b>אין חומר שמסתיר צבע אחורי:</b> <span class="m">M_k\subseteq\mathrm{px}(\mathcal C_k\cup X_k)</span>, מכוח <span class="m">\mathrm{Struct}(U)\subseteq U</span> (פרק 7).</li>
+<li><b>כל פיקסל גלוי הוא חומר:</b> <span class="m">V_k\subseteq M_k</span>, כי ב־<code>sheet_mask</code> יש איחוד מפורש <code>| visible</code>.</li>
+<li><b>כל פיקסל גלוי נתמך:</b> נבדק ב־<code>maximal_reveal</code> לפני שהתא התקבל.</li>
+<li><b>מסגרת מלאה:</b> <span class="m">P\subseteq M_k</span>. זה נבדק בפועל (<code>shared_perimeter_complete</code>) ולא נובע אוטומטית. המסגרת ברוחב 128 פיקסלים נשחקת לליבה שנוגעת בעצמה ב־P, וההתפשטות מחזירה אותה במלואה.</li>
+<li><b>מונוטוניות החומר:</b> <span class="m">\mathcal C_k</span> גדל עם k, ולכן לוחות אחוריים מלאים יותר. ב־Option B אחוז החומר עולה בהדרגה מ־42.3% בלוח הקדמי עד 100% בלוח האחורי (טבלה בפרק 12).</li>
+</ol></div>
+
+<h2 id="c9s4">9.4 האם המסכות מאבדות חומר נסתר שהיה יכול לחזק?</h2>
+<p>כן, במכוון. חומר מכוסה שלא נגיש ל"מטבע" ברוחב 1.27 מ"מ מהמסגרת לא נכלל בתמיכה, גם אם מותר היה להחזיק אותו. למשל, בליטה דקה של חומר נסתר שמחוברת רק בפס צר נחתכת. כך כל החומר שנשאר הוא חומר "מבני", ולא נוצרים איים נסתרים דקים שה־validator היה מכשיל. המחיר: לוחות קדמיים "חלולים" יותר מהמינימום הדרוש מבחינה ויזואלית.</p>
+
+<h2 id="c9s5">9.5 הלוח האחורי</h2>
+<p>בלוח האחרון <span class="m">\mathcal C\cup X</span> כולל את כל התאים, ולכן <span class="m">U</span> הוא כל הרשת. השחיקה משאירה את כל התמונה פרט לשוליים, והכול מעוגן. לכן <span class="m">M_{S-1}</span> הוא ריבוע מלא בגודל 225 × 225 מ"מ (<code>retained_fraction = 1.0</code>). בייצוא CAD הוא מתורגם לפוליגון אחד עם 5 קודקודים ו־12 משולשים (פרק 11).</p>
+</section><script src="vendor/katex.min.js"></script><script>
+for (const e of document.querySelectorAll('.m')) katex.render(e.textContent, e, {output:'mathml', throwOnError:true});
+for (const e of document.querySelectorAll('.mb')) katex.render(e.textContent, e, {output:'mathml', displayMode:true, throwOnError:true});
+</script></body></html>

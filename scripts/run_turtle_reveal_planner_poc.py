@@ -132,7 +132,7 @@ def run_variant(name: str, labels: np.ndarray, palette: np.ndarray, config: Reve
         )
         print(name, sheet_rows[-1], flush=True)
     target = embed(labels.astype(np.int16), planner.grid, -1)
-    inside = ~planner.perimeter
+    inside = ~planner.perimeter  # includes any frame padding
     row["reconstruction_mismatched_pixels_x4"] = int((composite[inside] != target[inside]).sum())
     row["all_sheets_pass_x4"] = all(
         r["four_neighbor_x4"] == "PASS" and r["width_x4"] == "PASS" and r["shared_perimeter_complete"]
@@ -164,6 +164,7 @@ def main() -> None:
     parser.add_argument("--skip-x8", action="store_true")
     parser.add_argument("--target", default=str(TARGET))
     parser.add_argument("--tile-mm", type=float, default=3.9)
+    parser.add_argument("--frame-hex", default="", help="target color that marks frame padding")
     parser.add_argument("--score", default="area", choices=["area", "colors"])
     parser.add_argument("--output", default="")
     args = parser.parse_args()
@@ -173,12 +174,15 @@ def main() -> None:
     target = Path(args.target)
     rgb = np.asarray(Image.open(target).convert("RGB"))
     labels, palette = exact_index(rgb)
+    frame_label = None
+    if args.frame_hex:
+        frame_label = [_hex(c) for c in palette].index(args.frame_hex.upper())
     OUTPUT.mkdir(parents=True, exist_ok=True)
     results = {"target": str(target.resolve().relative_to(ROOT)), "palette": [_hex(c) for c in palette], "variants": []}
     for name in args.variants.split(","):
         config = RevealConfig(
             split_regions=name == "per_cell", beam_width=args.beam, planning_margin_pixels=args.margin,
-            cell_tile_mm=args.tile_mm, beam_score=args.score
+            cell_tile_mm=args.tile_mm, beam_score=args.score, frame_label=frame_label
         )
         results["config"] = config.__dict__
         results["variants"].append(run_variant(name, labels, palette, config))

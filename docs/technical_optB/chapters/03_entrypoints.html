@@ -1,0 +1,68 @@
+<h1>נקודות כניסה ורצף הביצוע של Option B</h1>
+
+<h2>אין נקודת כניסה אחת</h2>
+<div class="box gap"><span class="tag gap">GAP</span> אין במאגר פקודה אחת שהופכת תמונה ל־STL. ל־<code>python -m layerforge_l1</code> (<code>cli.py</code>) אין קשר למסלול הזה. Option B הופק בשש פקודות. שתיים מהן סקריפטים שנשמרו במאגר, וארבע הן קטעי Python חד־פעמיים שהעוזר הריץ. הקוד המדויק של הקטעים החד־פעמיים מופיע בפרק הזה, כי אין לו עותק אחר במאגר.</div>
+
+<h2>תרשים 2: צינור העיבוד מקלט לפלט</h2>
+<div class="flow">
+ <div class="n"><b>קלט:</b> <code>van_gogh_p.jfif</code>: JPEG בגודל 1856 × 2268 (רוחב × גובה), RGB, עם גרדיאנטים ורעש דחיסה</div><div class="a">▼</div>
+ <div class="n adhoc"><b>שלב 1 (ad hoc):</b> <code>extract_palette(original)</code> ← 10 צבעים ← <code>palette.npy</code></div><div class="a">▼</div>
+ <div class="n adhoc"><b>שלב 2 (ad hoc):</b> <code>cv2.resize(INTER_AREA)</code> ל־1676 × 2048, אחר כך <code>snap_to_palette</code> ומסגור magenta ל־2048 × 2048 ← <code>flat_2048_framed.png</code></div><div class="a">▼</div>
+ <div class="n adhoc"><b>שלב 3 (ad hoc, ידני):</b> Option A (קוצים צהובים בלחי ← שחור), ואחריו Option B (פס הכובע ‎#354043 ← שחור) ← <code>flat_2048_framed_optB.png</code></div><div class="a">▼</div>
+ <div class="n"><b>שלב 4:</b> <code>scripts/run_turtle_reveal_planner_poc.py</code>: <code>exact_index</code>, <code>RevealPlanner</code>, <code>closure</code>, <code>beam_search</code>, <code>eliminate_sheets</code>, <code>materialize</code> ו־validators ← <code>planner_optB/</code></div><div class="a">▼</div>
+ <div class="n"><b>שלב 5:</b> <code>scripts/export_reveal_stack_cad.py</code>: מסכה ← פוליגונים ← CadQuery ← STEP/STL ← קריאה חוזרת ← <code>cad_optB/{stl,step}/</code></div><div class="a">▼</div>
+ <div class="n adhoc"><b>שלב 6 (ad hoc):</b> רסטור מחדש של הפוליגונים (supersampled ×4), validators והשוואת הערימה ← <code>cad_revalidation.json</code>, <code>stack_from_cad.png</code></div>
+</div>
+
+<h2>שלב 1: חילוץ פלטה <span class="tag man">AD HOC</span></h2>
+<pre class="plain">o = np.asarray(Image.open('van_gogh_p.jfif').convert('RGB'))
+pal = extract_palette(o)                 # k-means in Lab on the full 1856x2268 image
+lab = snap_to_palette(o, pal)            # used only for the preview flat_native.png
+np.save('artifacts/l1_van_gogh_v1/palette.npy', pal)</pre>
+
+<h2>שלב 2: הקטנה, מיפוי ומסגור <span class="tag man">AD HOC</span></h2>
+<pre class="plain">pal = np.load('artifacts/l1_van_gogh_v1/palette.npy')
+w = round(o.shape[1]*2048/o.shape[0])            # 1676 px = 163.7 mm
+small = cv2.resize(o, (w, 2048), interpolation=cv2.INTER_AREA)
+lab = snap_to_palette(small, pal)
+out = np.full((2048, 2048, 3), (255, 0, 255), np.uint8); x0 = (2048 - w)//2   # x0 = 186
+out[:, x0:x0+w] = pal[lab]
+Image.fromarray(out).save('artifacts/l1_van_gogh_v1/flat_2048_framed.png')</pre>
+<p>שים לב: הפלטה חושבה ברזולוציה המקורית, אבל המיפוי הסופי בוצע על התמונה המוקטנת. 2048 פיקסלים מייצגים 200 מ"מ, ולכן בתמונת היעד כל פיקסל הוא <span class="m">200/2048 = 0.09765625</span> מ"מ, בדיוק כמו ברשת הפיזית. הסבר מלא בפרק 6.</p>
+
+<h2>שלב 3: תיקוני Option A ו־Option B <span class="tag man">AD HOC · USER-REQUESTED</span></h2>
+<pre class="plain">red = (t == RED).all(-1); left = leftmost 4-connected red component; window = its bbox + 60 px
+Y = (t == YELLOW).all(-1)
+k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (17, 17))           # 17 px = 1.66 mm
+thin = Y & ~cv2.morphologyEx(Y, cv2.MORPH_OPEN, k) & window
+a = t.copy(); a[thin] = BLACK                                         # Option A
+b = a.copy(); b[(b == BAND).all(-1)] = BLACK                          # Option B (BAND = #354043)</pre>
+<p>ההסבר המתמטי מופיע בפרק 4.7. מספרים מהקבצים (<span class="tag obs">OBSERVED_IN_FILE</span>): Option A שינה 173 פיקסלים (1.65 מ"מ²), ו־Option B שינה עוד 13,154 פיקסלים (125.4 מ"מ²).</p>
+
+<h2>שלב 4: המתכנן (סקריפט שנשמר)</h2>
+<pre class="plain">PYTHONPATH=src .venv/Scripts/python.exe scripts/run_turtle_reveal_planner_poc.py \
+  --variants per_cell --skip-x8 --beam 8 --tile-mm 2.0 --score colors \
+  --frame-hex "#FF00FF" --target artifacts/l1_van_gogh_v1/flat_2048_framed_optB.png \
+  --output artifacts/l1_van_gogh_v1/planner_optB</pre>
+<p>למרות השם "turtle", זה הסקריפט הכללי. היעד מגיע מ־<code>--target</code>. סדר הקריאות בתוך <span class="ref" data-sym="def run_variant">scripts/run_turtle_reveal_planner_poc.py:52</span>:</p>
+<pre class="code" data-file="scripts/run_turtle_reveal_planner_poc.py" data-lines="174-189"></pre>
+<pre class="code" data-file="scripts/run_turtle_reveal_planner_poc.py" data-lines="54-60"></pre>
+<pre class="code" data-file="scripts/run_turtle_reveal_planner_poc.py" data-lines="76-87"></pre>
+
+<h2>שלב 5: ייצוא CAD (סקריפט שנשמר)</h2>
+<pre class="plain">PYTHONPATH=src .venv/Scripts/python.exe scripts/export_reveal_stack_cad.py \
+  --layers artifacts/l1_van_gogh_v1/planner_optB/per_cell/layers \
+  --output artifacts/l1_van_gogh_v1/cad_optB              # defaults: 225 mm, 1.6 mm, simplify 0.03 mm</pre>
+<p>הקבצים ב־<code>cad_optB</code> נוצרו לפני שהסקריפט קיבל את מבנה התיקיות <code>stl/</code> ו־<code>step/</code>. לכן הם הועברו לתיקיות האלה ידנית, ונתיבי ה־manifest עודכנו. הקוד הנוכחי של הסקריפט כבר כותב ישירות למבנה הזה.</p>
+
+<h2>שלב 6: אימות חוזר של ה־CAD <span class="tag man">AD HOC</span></h2>
+<p>קטע הקוד מופיע במלואו בפרק 11.6, כי זה האימות היחיד שבדק שהפוליגונים שנשלחו ל־CAD זהים למסכות. <span class="tag gap">GAP</span> השלב הזה אינו חלק מהסקריפט במאגר.</p>
+
+<h2>זמני ריצה <span class="tag obs">OBSERVED_IN_FILE</span></h2>
+<table class="t">
+<tr><th>שלב</th><th>זמן</th><th>מקור</th></tr>
+<tr><td>closure (בדיקת היתכנות)</td><td>15.8 שניות</td><td class="l">poc_report.json · closure_seconds</td></tr>
+<tr><td>כל המתכנן (closure + beam + materialize + validators + PNG)</td><td>304.3 שניות</td><td class="l">poc_report.json · total_seconds</td></tr>
+<tr><td>ייצוא STEP/STL וקריאה חוזרת</td><td>122.9 שניות</td><td class="l">cad_manifest.json · total_seconds</td></tr>
+<tr><td>אימות חוזר של ה־CAD</td><td>10.4 שניות</td><td>פלט הקטע החד־פעמי (STATUS.md)</td></tr>
+</table>

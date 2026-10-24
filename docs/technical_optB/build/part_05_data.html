@@ -1,0 +1,178 @@
+<!doctype html><html lang="he" dir="rtl"><head><meta charset="utf-8">
+<title>LayerForge Technical Architecture</title><link rel="stylesheet" href="style.css"></head><body><section class="chapter" data-name="05_data"><h1 id="c5">5. מודלי הנתונים</h1>
+<p>אין במסלול הזה אובייקט <code>LayerStack</code> או סכמה מפורמלת. כל הנתונים הם מערכי numpy, dataclass־ים קפואים (frozen) ומילונים (dict) שמסודרים ל־JSON. הפרק מתאר כל מבנה: מה הוא מייצג, היכן הוא נוצר ומי צורך אותו.</p>
+
+<h2 id="c5s1">5.1 תרשים 4: מבני הנתונים והקשרים ביניהם</h2>
+<div class="flow">
+ <div class="n"><b>labels</b> <code>uint8[2048,2048]</code> + <b>palette</b> <code>uint8[10,3]</code>, מתוך <code>exact_index</code></div><div class="a">▼ build_cells</div>
+ <div class="split"><div class="n"><b>native_cells</b> <code>int32[2048,2048]</code>: מזהה תא לכל פיקסל</div><div class="n"><b>cell_color / cell_region</b> <code>int32[n]</code>, n = 11,498</div></div><div class="a">▼ embed (+perimeter)</div>
+ <div class="n"><b>cell_map</b> <code>int32[2304,2304]</code>, עם 1− במסגרת · <b>perimeter</b> <code>bool[2304,2304]</code></div><div class="a">▼ planning on cell vectors</div>
+ <div class="n dec"><b>covered, reveal</b> <code>bool[n]</code>: מצב החיפוש · <b>beam state</b> <code>(covered, colors, reveals)</code></div><div class="a">▼ materialize</div>
+ <div class="n out"><b>sheet</b> dict: <code>physical_mask</code>, <code>visible_mask</code> <code>bool[2304,2304]</code>, <code>visible_cells</code> <code>bool[n]</code></div><div class="a">▼ PNG + JSON</div>
+ <div class="n out"><code>layers/layer_XX_rrggbb/*.png</code> · <code>poc_report.json</code> → <code>cad_manifest.json</code> · <code>stl/</code> · <code>step/</code></div>
+</div>
+
+<h2 id="c5s2">5.2 RevealConfig</h2>
+<p><span class="ref" data-sym="class RevealConfig">src/layerforge_l1/reveal_planner.py:38</span>: מחלקת dataclass קפואה. בהרצת Option B הסקריפט שינה ארבעה שדות: <code>cell_tile_mm=2.0</code>, <code>beam_width=8</code>, <code>beam_score="colors"</code> ו־<code>frame_label=9</code>.</p>
+<pre class="code" dir="ltr"><span class="src">src/layerforge_l1/reveal_planner.py:37-62</span>
+<span class="ln">  37</span>  @dataclass(frozen=True)
+<span class="ln">  38</span>  class RevealConfig:
+<span class="ln">  39</span>      &quot;&quot;&quot;Physical scale, cell size and search controls.&quot;&quot;&quot;
+<span class="ln">  40</span>  
+<span class="ln">  41</span>      # 512 px artwork = 200 mm; the 32 px perimeter makes the sheet 225 mm.
+<span class="ln">  42</span>      outer_sheet_mm: float = 225.0
+<span class="ln">  43</span>      scale: int = 4
+<span class="ln">  44</span>      # Visible pixels may lie outside the 1.2 mm structural set only as short
+<span class="ln">  45</span>      # nubs (convex corners, stroke ends) within this geodesic distance of it.
+<span class="ln">  46</span>      nub_tolerance_mm: float = 0.5
+<span class="ln">  47</span>      # Cells are region pieces inside square tiles of this size.
+<span class="ln">  48</span>      cell_tile_mm: float = 3.9
+<span class="ln">  49</span>      # Fragments smaller than this merge into a same-region neighbor cell.
+<span class="ln">  50</span>      min_cell_mm2: float = 0.9
+<span class="ln">  51</span>      split_regions: bool = True
+<span class="ln">  52</span>      # Label of artwork-grid pixels that belong to the frame (e.g. side strips of
+<span class="ln">  53</span>      # a portrait image on the square grid): solid on every sheet, never visible.
+<span class="ln">  54</span>      frame_label: int | None = None
+<span class="ln">  55</span>      # The planner&#x27;s footprint exceeds the validator&#x27;s by this many pixels so a
+<span class="ln">  56</span>      # one-pixel diagonal step in the eroded core (which the 4-connected
+<span class="ln">  57</span>      # validator treats as a break) cannot sit exactly at the threshold.
+<span class="ln">  58</span>      planning_margin_pixels: int = 0
+<span class="ln">  59</span>      beam_width: int = 6
+<span class="ln">  60</span>      # &quot;area&quot;: most covered area first; &quot;colors&quot;: fewest unfinished colors first.
+<span class="ln">  61</span>      beam_score: str = &quot;area&quot;
+<span class="ln">  62</span>      max_sheets: int = 24</pre>
+<table class="t small">
+<tr><th>שדה</th><th>ערך ב־Option B</th><th>למה הוא קיים</th></tr>
+<tr><td class="l">outer_sheet_mm</td><td>225.0</td><td>גודל הלוח הפיזי, כולל המסגרת. ממנו נגזר מ"מ לפיקסל.</td></tr>
+<tr><td class="l">scale</td><td>4</td><td>הכפלה של הרשת הבסיסית (512 → 2048) לפי <code>validation_poc_config</code>.</td></tr>
+<tr><td class="l">nub_tolerance_mm</td><td>0.5</td><td>כמה פיקסלים גלויים יכולים לבלוט מחוץ לליבה המבנית (פינות, קצות קווים).</td></tr>
+<tr><td class="l">cell_tile_mm</td><td>2.0</td><td>גודל אריח החיתוך של אזורים לתאים.</td></tr>
+<tr><td class="l">min_cell_mm2</td><td>0.9</td><td>תאים קטנים מזה מתמזגים לשכן מאותו אזור.</td></tr>
+<tr><td class="l">split_regions</td><td>True</td><td>True: עומק לכל תא. False: אזור שלם בעומק אחד (וריאנט ההשוואה).</td></tr>
+<tr><td class="l">frame_label</td><td>9</td><td>התווית שמסמנת את פסי המסגרת הצדדיים (magenta).</td></tr>
+<tr><td class="l">planning_margin_pixels</td><td>0</td><td>הגדלה אופציונלית של גרעין התכנון. לא שימש.</td></tr>
+<tr><td class="l">beam_width / beam_score</td><td>8 / "colors"</td><td>רוחב החיפוש ומפתח הדירוג.</td></tr>
+<tr><td class="l">max_sheets</td><td>24</td><td>גבול עליון לעומק החיפוש.</td></tr>
+</table>
+
+<h2 id="c5s3">5.3 PocConfig והרשת הפיזית</h2>
+<p><span class="ref" data-sym="class PocConfig">src/layerforge_l1/subtractive_poc.py:24</span> מגיע מ־PoC ישן. ממנו נלקחות רק ארבע מידות: <code>analysis_pixels=512</code>, <code>outer_pixels=576</code>, <code>perimeter_pixels=32</code> ו־<code>sheet_size_mm</code>. הפונקציה <span class="ref" data-sym="def validation_poc_config">src/layerforge_l1/hidden_width_repair.py:36</span> מכפילה אותן פי <code>scale</code> ומחליפה את הגודל ל־225 מ"מ:</p>
+<pre class="code" dir="ltr"><span class="src">src/layerforge_l1/hidden_width_repair.py:36-51</span>
+<span class="ln">  36</span>  def validation_poc_config(
+<span class="ln">  37</span>      native: PocConfig = DEFAULT_CONFIG,
+<span class="ln">  38</span>      repair: WidthRepairConfig = WidthRepairConfig(),
+<span class="ln">  39</span>  ) -&gt; PocConfig:
+<span class="ln">  40</span>      &quot;&quot;&quot;Return an isotropically upscaled validation grid at the final size.&quot;&quot;&quot;
+<span class="ln">  41</span>  
+<span class="ln">  42</span>      if repair.validation_scale &lt; 1:
+<span class="ln">  43</span>          raise ValueError(&quot;validation_scale must be positive&quot;)
+<span class="ln">  44</span>      scale = repair.validation_scale
+<span class="ln">  45</span>      return replace(
+<span class="ln">  46</span>          native,
+<span class="ln">  47</span>          sheet_size_mm=repair.physical_size_mm,
+<span class="ln">  48</span>          analysis_pixels=native.analysis_pixels * scale,
+<span class="ln">  49</span>          outer_pixels=native.outer_pixels * scale,
+<span class="ln">  50</span>          perimeter_pixels=native.perimeter_pixels * scale,
+<span class="ln">  51</span>      )</pre>
+<p>תוצאה ב־Option B (<span class="tag obs">OBSERVED</span>): analysis = 2048, outer = 2304, perimeter = 128, sheet = 225 מ"מ.</p>
+
+<h2 id="c5s4">5.4 OptimizationConfig: מרכיבי הרוחב</h2>
+<pre class="code" dir="ltr"><span class="src">src/layerforge_l1/layer_optimization.py:37-52</span>
+<span class="ln">  37</span>  @dataclass(frozen=True)
+<span class="ln">  38</span>  class OptimizationConfig:
+<span class="ln">  39</span>      &quot;&quot;&quot;Bounded, deterministic search and reporting controls.&quot;&quot;&quot;
+<span class="ln">  40</span>  
+<span class="ln">  41</span>      max_states_per_depth: int = 65_536
+<span class="ln">  42</span>      tiny_visible_fraction: float = 0.0005
+<span class="ln">  43</span>      near_full_retained_fraction: float = 0.95
+<span class="ln">  44</span>      region_connectivity: int = 4
+<span class="ln">  45</span>      nominal_connection_width_mm: float = 0.8
+<span class="ln">  46</span>      vectorization_safety_mm: float = 0.2
+<span class="ln">  47</span>      cad_conversion_safety_mm: float = 0.2
+<span class="ln">  48</span>      minimum_contact_pixels_override: int | None = None
+<span class="ln">  49</span>      exempt_thin_decorative_regions_from_contact_width: bool = False
+<span class="ln">  50</span>  
+<span class="ln">  51</span>  
+<span class="ln">  52</span>  DEFAULT_OPTIMIZATION_CONFIG = OptimizationConfig()</pre>
+<p>רק שלושת שדות הרוחב משמשים כאן: <span class="m">0.8+0.2+0.2=1.2</span> מ"מ (נומינלי + מרווח לווקטוריזציה + מרווח להמרת CAD).</p>
+
+<h2 id="c5s5">5.5 מצב המתכנן (RevealPlanner)</h2>
+<pre class="code" dir="ltr"><span class="src">src/layerforge_l1/reveal_planner.py:240-268</span>
+<span class="ln"> 240</span>      def __init__(self, labels: np.ndarray, config: RevealConfig = RevealConfig()):
+<span class="ln"> 241</span>          self.config = config
+<span class="ln"> 242</span>          self.labels = labels
+<span class="ln"> 243</span>          self.grid = physical_grid(config)
+<span class="ln"> 244</span>          self.kernel, self.width_parameters = width_kernel(
+<span class="ln"> 245</span>              self.grid, margin_pixels=config.planning_margin_pixels
+<span class="ln"> 246</span>          )
+<span class="ln"> 247</span>          _, self.perimeter = _outer_and_perimeter(self.grid)
+<span class="ln"> 248</span>          native_cells, self.cell_color, self.cell_region = build_cells(labels, config)
+<span class="ln"> 249</span>          self.native_cells = native_cells
+<span class="ln"> 250</span>          self.cell_map = embed(native_cells, self.grid, -1)
+<span class="ln"> 251</span>          self.cell_count = len(self.cell_color)
+<span class="ln"> 252</span>          self.cell_area = np.bincount(native_cells.ravel(), minlength=self.cell_count)
+<span class="ln"> 253</span>          self.nub_steps = max(
+<span class="ln"> 254</span>              1, int(round(config.nub_tolerance_mm / self.width_parameters[&quot;mm_per_pixel&quot;]))
+<span class="ln"> 255</span>          )
+<span class="ln"> 256</span>          self.start_covered = (
+<span class="ln"> 257</span>              self.cell_color == config.frame_label
+<span class="ln"> 258</span>              if config.frame_label is not None
+<span class="ln"> 259</span>              else np.zeros(self.cell_count, dtype=bool)
+<span class="ln"> 260</span>          )
+<span class="ln"> 261</span>          self.perimeter = self.perimeter | self.cells_mask(self.start_covered)
+<span class="ln"> 262</span>          self.colors = sorted(int(v) for v in np.unique(self.cell_color[~self.start_covered]))
+<span class="ln"> 263</span>  
+<span class="ln"> 264</span>      def cells_mask(self, cells: np.ndarray) -&gt; np.ndarray:
+<span class="ln"> 265</span>          lookup = np.zeros(self.cell_count + 1, dtype=bool)
+<span class="ln"> 266</span>          lookup[np.flatnonzero(cells)] = True
+<span class="ln"> 267</span>          # cell_map uses -1 for the perimeter; index -1 hits the trailing False.
+<span class="ln"> 268</span>          return lookup[self.cell_map]</pre>
+<table class="t small">
+<tr><th>מאפיין</th><th>טיפוס וגודל ב־Option B</th><th>משמעות</th></tr>
+<tr><td class="l">perimeter</td><td class="l">bool[2304,2304]</td><td>טבעת ברוחב 128 פיקסלים, ובנוסף פיקסלי התאים של פסי ה־magenta (שורה 261). זה ה"עוגן" שאליו כל חומר חייב להתחבר.</td></tr>
+<tr><td class="l">native_cells</td><td class="l">int32[2048,2048]</td><td>מזהה תא לכל פיקסל יעד.</td></tr>
+<tr><td class="l">cell_map</td><td class="l">int32[2304,2304]</td><td><code>native_cells</code> מוטמע ברשת הפיזית. במסגרת: 1−.</td></tr>
+<tr><td class="l">cell_color, cell_region</td><td class="l">int32[11498]</td><td>תווית הצבע ומזהה האזור המקורי של כל תא.</td></tr>
+<tr><td class="l">cell_area</td><td class="l">int64[11498]</td><td>מספר פיקסלי היעד בכל תא. משמש לדירוג ה־beam ולסדר ב־eliminate.</td></tr>
+<tr><td class="l">start_covered</td><td class="l">bool[11498]</td><td>תאי המסגרת. הם "מכוסים" מראש, אף פעם לא גלויים, ותמיד חומר.</td></tr>
+<tr><td class="l">colors</td><td class="l">list[int]</td><td>הצבעים שיש לחשוף. ב־Option B יש 9 (כולם חוץ מ־9).</td></tr>
+<tr><td class="l">kernel</td><td class="l">uint8[13,13]</td><td>גרעין הרוחב האליפטי (פרק 6).</td></tr>
+<tr><td class="l">nub_steps</td><td>5</td><td><span class="m">\mathrm{round}(0.5/0.0977)</span>.</td></tr>
+</table>
+<h3>המרה מווקטור תאים למסכה: cells_mask</h3>
+<pre class="code" dir="ltr"><span class="src">src/layerforge_l1/reveal_planner.py:264-271</span>
+<span class="ln"> 264</span>      def cells_mask(self, cells: np.ndarray) -&gt; np.ndarray:
+<span class="ln"> 265</span>          lookup = np.zeros(self.cell_count + 1, dtype=bool)
+<span class="ln"> 266</span>          lookup[np.flatnonzero(cells)] = True
+<span class="ln"> 267</span>          # cell_map uses -1 for the perimeter; index -1 hits the trailing False.
+<span class="ln"> 268</span>          return lookup[self.cell_map]
+<span class="ln"> 269</span>  
+<span class="ln"> 270</span>      def covered_mask(self, covered_cells: np.ndarray) -&gt; np.ndarray:
+<span class="ln"> 271</span>          return self.perimeter | self.cells_mask(covered_cells)</pre>
+<div class="box derived"><span class="tag derived">DERIVED</span> הטריק: טבלת lookup בגודל n+1, שהערך האחרון בה תמיד False. במסגרת <code>cell_map=-1</code>, ובפייתון <code>lookup[-1]</code> הוא האיבר האחרון. כך מתקבלת המסכה בפעולת gather אחת, <span class="m">O(N^2)</span>, בלי לולאה על תאים. <code>covered_mask</code> מוסיף את ה־perimeter: <span class="m">\mathrm{px}(C)=P\cup\{p:\ \mathrm{cell}(p)\in C\}</span>.</div>
+
+<h2 id="c5s6">5.6 מבני הפלט של התכנון</h2>
+<table class="t small">
+<tr><th>מבנה</th><th>שדות</th><th>נוצר ב</th><th>נצרך ב</th></tr>
+<tr><td>closure</td><td class="l">feasible, round_robin_sheet_count, obstruction_cells, covered_cells</td><td class="l">closure()</td><td>הסקריפט: אם False, נוצרת מפת חסימה ולא נוצרים לוחות</td></tr>
+<tr><td>plan</td><td class="l">status, front_to_back_colors, reveals, evaluations, [uncovered_cells]</td><td class="l">beam_search()</td><td class="l">eliminate_sheets, materialize, seam_report</td></tr>
+<tr><td>sheet</td><td class="l">physical_mask, visible_mask, visible_cells</td><td class="l">materialize()</td><td>validators, PNG</td></tr>
+<tr><td>seams</td><td class="l">seam_edge_length_native_pixels/mm, source_regions, ...split...</td><td class="l">seam_report()</td><td class="l">poc_report.json</td></tr>
+</table>
+
+<h2 id="c5s7">5.7 קבצים על הדיסק</h2>
+<table class="t small">
+<tr><th>קובץ</th><th>תוכן</th><th>מי כותב / קורא</th></tr>
+<tr><td class="l">layers/layer_XX_rrggbb/retained_material_mask.png</td><td>מסכת החומר הפיזית, 2304 × 2304, ‏0/255. XX הוא אינדקס אחורה־לפנים (00 = אחורי).</td><td>נכתב בשורה 109 בסקריפט המתכנן, נקרא בייצוא ה־CAD</td></tr>
+<tr><td class="l">…/source_visible_region_mask.png</td><td>הפיקסלים שהלוח הזה מראה.</td><td>נכתב בשורה 115, נקרא באימות החוזר</td></tr>
+<tr><td class="l">…/physical_sheet_preview.png</td><td>תצוגת צבע (1152 × 1152, NEAREST).</td><td>לבדיקה ויזואלית בלבד</td></tr>
+<tr><td class="l">mask_derived_composite.png</td><td>הרכבה front-to-back של מסכות החומר.</td><td>השוואה ליעד (0 פיקסלים שונים)</td></tr>
+<tr><td class="l">visible_depth_map.png</td><td>עומק החשיפה לכל פיקסל (viridis).</td><td>ויזואלי</td></tr>
+<tr><td class="l">poc_report.json</td><td>config, palette, תוצאות closure ו־beam, טבלת לוחות, seams, זמנים.</td><td>הסקריפט</td></tr>
+<tr><td class="l">cad_manifest.json</td><td>סדר הרכבה, נתיבי stl ו־step, ‏<code>assembled_z0_mm</code>, בדיקות לכל שכבה, זמנים.</td><td class="l">export_reveal_stack_cad.py</td></tr>
+<tr><td class="l">cad_revalidation.json</td><td>לכל שכבה: הפרש פיקסלים ותוצאות validators. ‏<code>stack_mismatch_px</code>.</td><td>ad hoc</td></tr>
+</table>
+</section><script src="vendor/katex.min.js"></script><script>
+for (const e of document.querySelectorAll('.m')) katex.render(e.textContent, e, {output:'mathml', throwOnError:true});
+for (const e of document.querySelectorAll('.mb')) katex.render(e.textContent, e, {output:'mathml', displayMode:true, throwOnError:true});
+</script></body></html>

@@ -1,0 +1,273 @@
+<!doctype html><html lang="he" dir="rtl"><head><meta charset="utf-8">
+<title>LayerForge Technical Architecture</title><link rel="stylesheet" href="style.css"></head><body><section class="chapter" data-name="08_planner"><h1 id="c8">8. המתכנן הפעיל: RevealPlanner</h1>
+<p><span class="ref" data-sym="class RevealPlanner">src/layerforge_l1/reveal_planner.py:237</span>. זה <b>מתכנן השכבות היחיד</b> שרץ ב־Option B, במצב <code>split_regions=True</code> ("per_cell"). לאותו קוד יש וריאנט השוואה, <code>split_regions=False</code> ("region_indivisible"), שבו כל אזור הוא תא אחד. הוא מתועד בסעיף 8.9 כי הוא חלק מהסקריפט ומהבדיקות, אבל ב־Option B הוא לא הורץ (<code>--variants per_cell</code>).</p>
+
+<h2 id="c8s1">8.1 המודל: חשיפה מלפנים לאחור</h2>
+<div class="box impl"><span class="tag impl">IMPLEMENTED MATHEMATICS</span> מסמנים את הלוחות לפי עומק <span class="m">k=0,1,\dots,S-1</span> (0 = קדמי). לכל לוח יש צבע <span class="m">c_k</span> וקבוצת תאים שהוא חושף, <span class="m">X_k</span>, וכל תא ב־<span class="m">X_k</span> הוא בצבע <span class="m">c_k</span>. קבוצת התאים המכוסים לפני לוח k:
+<div class="mb">\mathcal C_k=F\ \cup\ \bigcup_{j&lt;k}X_j,\qquad F=\texttt{start\_covered}\ (\text{frame cells})</div>
+<p>מסכת החומר של לוח k (<span class="ref" data-sym="def sheet_mask">src/layerforge_l1/reveal_planner.py:348</span>):</p>
+<div class="mb">M_k=\mathrm{Struct}\big(\,\mathrm{px}(\mathcal C_k\cup X_k)\,\big)\ \cup\ \mathrm{px}(X_k),\qquad \mathrm{px}(\cdot)\ \text{includes the perimeter}\ P</div></div>
+<pre class="code" dir="ltr"><span class="src">src/layerforge_l1/reveal_planner.py:348-351</span>
+<span class="ln"> 348</span>      def sheet_mask(self, covered_cells: np.ndarray, visible_cells: np.ndarray) -&gt; np.ndarray:
+<span class="ln"> 349</span>          covered = self.covered_mask(covered_cells | visible_cells)
+<span class="ln"> 350</span>          visible = self.cells_mask(visible_cells)
+<span class="ln"> 351</span>          return structural_support(covered, self.perimeter, self.kernel) | visible</pre>
+<div class="box derived"><span class="tag derived">DERIVED</span> <b>האינטואיציה הפיזית.</b> פיקסל שכבר נחשף בלוח קדמי מוסתר מאחוריו, ולכן לוח k יכול להחזיק שם חומר בכל צבע (חומר <b>נסתר</b>) כדי לחזק את עצמו. פיקסל שעוד לא נחשף חייב להיות <b>חור</b> בלוח k, כי אחרת הוא יסתיר את הצבע שאמור להופיע מאחור. האינווריאנט <span class="m">\mathrm{Struct}(U)\subseteq U</span> (פרק 7) מבטיח בדיוק את זה: <span class="m">M_k\subseteq \mathrm{px}(\mathcal C_k\cup X_k)</span>.</div>
+<div class="box derived"><span class="tag derived">DERIVED</span> <b>משפט השחזור המדויק.</b> נניח שתא x נחשף בעומק d. לכל <span class="m">k&lt;d</span>, ‏<span class="m">x\notin\mathcal C_k\cup X_k</span>, ולכן <span class="m">x\notin M_k</span>. בעומק d, ‏<span class="m">x\in\mathrm{px}(X_d)\subseteq M_d</span>. לכן הלוח הקדמי ביותר שיש בו חומר ב־x הוא d, וצבעו <span class="m">c_d=\text{color}(x)</span>. <b>השחזור מדויק בהגדרה, בתנאי שכל התאים נחשפו.</b> ההרצה מאשרת זאת: ב־Option B יש 0 פיקסלים שונים.</div>
+
+<h2 id="c8s2">8.2 unsupported_pixels: האם לוח מסוים בנוי היטב?</h2>
+<p><span class="ref" data-sym="def unsupported_pixels">src/layerforge_l1/reveal_planner.py:273</span></p>
+<pre class="code" dir="ltr"><span class="src">src/layerforge_l1/reveal_planner.py:273-288</span>
+<span class="ln"> 273</span>      def unsupported_pixels(
+<span class="ln"> 274</span>          self, covered_cells: np.ndarray, reveal: np.ndarray
+<span class="ln"> 275</span>      ) -&gt; np.ndarray:
+<span class="ln"> 276</span>          &quot;&quot;&quot;Visible pixels of ``reveal`` that the sheet cannot support.&quot;&quot;&quot;
+<span class="ln"> 277</span>  
+<span class="ln"> 278</span>          visible = self.cells_mask(reveal)
+<span class="ln"> 279</span>          covered = self.covered_mask(covered_cells) | visible
+<span class="ln"> 280</span>          support = structural_support(covered, self.perimeter, self.kernel)
+<span class="ln"> 281</span>          reach = _geodesic_reach(support, support | visible, self.nub_steps)
+<span class="ln"> 282</span>          bad = visible &amp; ~reach
+<span class="ln"> 283</span>          if not bad.any():
+<span class="ln"> 284</span>              # Nubs can rebuild a sub-width band the support had cut; check
+<span class="ln"> 285</span>              # the finished sheet exactly as the validator will.
+<span class="ln"> 286</span>              orphan = _orphan_cores(support | visible, self.perimeter, self.kernel)
+<span class="ln"> 287</span>              bad = visible &amp; cv2.dilate(orphan.astype(np.uint8), self.kernel).astype(bool)
+<span class="ln"> 288</span>          return bad</pre>
+<div class="box impl"><span class="tag impl">IMPLEMENTED MATHEMATICS</span> כאשר <span class="m">V=\mathrm{px}(X)</span> ו־<span class="m">U=\mathrm{px}(\mathcal C)\cup V</span>:
+<div class="mb">S=\mathrm{Struct}(U),\qquad \mathrm{Bad}=V\setminus R_5(S,\ S\cup V)</div>
+<div class="mb">\text{if } \mathrm{Bad}=\emptyset:\quad \mathrm{Bad}=V\cap\Big(\big((S\cup V)\ominus K\big)\setminus\mathrm{Anch}_P\big((S\cup V)\ominus K\big)\Big)\oplus K</div>
+<p><b>בדיקה ראשונה:</b> כל פיקסל גלוי חייב להיות בתמיכה, או במרחק של עד 5 צעדים ממנה דרך פיקסלים גלויים. <b>בדיקה שנייה</b> (רק אם הראשונה עברה): הלוח הגמור <span class="m">S\cup V</span> נבדק בדיוק כמו ב־validator. אם יש ליבה יתומה, כל הפיקסלים הגלויים בטווח הגרעין ממנה נכשלים. הבדיקה הזאת נחוצה כי בליטות גלויות שמחוברות זו לזו יכולות לבנות מחדש "פס" צר שהתמיכה חתכה, וליצור ליבה יתומה.</p></div>
+
+<h2 id="c8s3">8.3 maximal_reveal: החשיפה הגדולה ביותר (נקודת שבת)</h2>
+<p><span class="ref" data-sym="def maximal_reveal">src/layerforge_l1/reveal_planner.py:290</span></p>
+<pre class="code" dir="ltr"><span class="src">src/layerforge_l1/reveal_planner.py:290-304</span>
+<span class="ln"> 290</span>      def maximal_reveal(
+<span class="ln"> 291</span>          self, covered_cells: np.ndarray, color: int
+<span class="ln"> 292</span>      ) -&gt; tuple[np.ndarray, int]:
+<span class="ln"> 293</span>          &quot;&quot;&quot;Greatest fixpoint of supportable uncovered cells of one color.&quot;&quot;&quot;
+<span class="ln"> 294</span>  
+<span class="ln"> 295</span>          candidate = (~covered_cells) &amp; (self.cell_color == color)
+<span class="ln"> 296</span>          iterations = 0
+<span class="ln"> 297</span>          while candidate.any():
+<span class="ln"> 298</span>              iterations += 1
+<span class="ln"> 299</span>              bad = self.unsupported_pixels(covered_cells, candidate)
+<span class="ln"> 300</span>              if not bad.any():
+<span class="ln"> 301</span>                  break
+<span class="ln"> 302</span>              bad_cells = np.unique(self.cell_map[bad])
+<span class="ln"> 303</span>              candidate[bad_cells[bad_cells &gt;= 0]] = False
+<span class="ln"> 304</span>          return candidate, iterations</pre>
+<div class="box impl"><span class="tag impl">IMPLEMENTED MATHEMATICS</span>
+<div class="mb">X^{(0)}=\{x:\ x\notin\mathcal C,\ \text{color}(x)=c\},\qquad X^{(i+1)}=X^{(i)}\setminus \mathrm{cells}\big(\mathrm{Bad}(\mathcal C,X^{(i)})\big)</div>
+<p>מתחילים מ<b>כל</b> התאים בצבע c שעוד לא נחשפו, ומוחקים כל תא שיש בו לפחות פיקסל אחד לא נתמך, עד שאין יותר מחיקות. התוצאה יכולה להיות ריקה (אי אפשר לחשוף את הצבע הזה עכשיו).</p></div>
+<div class="box derived"><span class="tag derived">DERIVED</span> <b>למה זו "הגדולה ביותר"?</b> אם תא נכשל ב־<span class="m">X^{(i)}</span>, אז בכל תת־קבוצה <span class="m">Y\subseteq X^{(i)}</span> התמיכה קטנה יותר (מונוטוניות), וגם קבוצת ההגעה קטנה יותר. לכן הוא ייכשל גם שם, וזה בטוח למחוק אותו. מכאן שהתוצאה מכילה כל קבוצת תאים חוקית בצבע c, כלומר זו <b>נקודת השבת הגדולה ביותר</b> (greatest fixpoint), והיא יחידה. <span class="tag unv">CAVEAT</span> הנימוק מניח מונוטוניות מלאה. הבדיקה השנייה (ליבות יתומות של הלוח הגמור) והתיקונים ההיוריסטיים אינם בהכרח מונוטוניים, ולכן זו הצדקת התכנון ולא הוכחה. כל לוח נבדק בסוף בכל מקרה על ידי ה־validator.</div>
+<div class="box derived"><span class="tag derived">DERIVED</span> <b>למה זה טוב לחשוף מקסימום?</b> אם חושפים יותר עכשיו, <span class="m">\mathcal C</span> של כל לוח מאחור גדל, ובזכות המונוטוניות התמיכה שלו רק גדלה. לכן חשיפה מקסימלית לא חוסמת אף אפשרות עתידית. זה מקטין את מרחב החיפוש: מכל מצב ולכל צבע יש בדיוק מעבר אחד.</div>
+
+<h2 id="c8s4">8.4 closure: בדיקת היתכנות שלא תלויה בסדר</h2>
+<p><span class="ref" data-sym="def closure">src/layerforge_l1/reveal_planner.py:353</span></p>
+<pre class="code" dir="ltr"><span class="src">src/layerforge_l1/reveal_planner.py:356-372</span>
+<span class="ln"> 356</span>          covered = self.start_covered.copy()
+<span class="ln"> 357</span>          sequence: list[int] = []
+<span class="ln"> 358</span>          progress = True
+<span class="ln"> 359</span>          while progress and not covered.all():
+<span class="ln"> 360</span>              progress = False
+<span class="ln"> 361</span>              for color in self.colors:
+<span class="ln"> 362</span>                  reveal, _ = self.maximal_reveal(covered, color)
+<span class="ln"> 363</span>                  if reveal.any():
+<span class="ln"> 364</span>                      covered |= reveal
+<span class="ln"> 365</span>                      sequence.append(color)
+<span class="ln"> 366</span>                      progress = True
+<span class="ln"> 367</span>          return {
+<span class="ln"> 368</span>              &quot;feasible&quot;: bool(covered.all()),
+<span class="ln"> 369</span>              &quot;round_robin_sheet_count&quot;: len(sequence),
+<span class="ln"> 370</span>              &quot;obstruction_cells&quot;: np.flatnonzero(~covered).tolist(),
+<span class="ln"> 371</span>              &quot;covered_cells&quot;: covered,
+<span class="ln"> 372</span>          }</pre>
+<p>Round-robin: עוברים על כל הצבעים שוב ושוב, ובכל פעם חושפים את המקסימום האפשרי לצבע, עד שאין התקדמות. אם בסוף <span class="m">\mathcal C</span> מכיל את כל התאים, הבעיה פתירה. אחרת, התאים שנשארו הם <b>קבוצת חסימה</b> (obstruction) מפורשת.</p>
+<div class="box derived"><span class="tag derived">DERIVED</span> <b>למה זה לא תלוי בסדר:</b> במודל מונוטוני, קבוצת התאים שאפשר לכסות היא הסגור (closure) של פעולת "חשוף מקסימום". כל סדר הוגן מגיע לאותה נקודת שבת: מה שנחשף בסדר אחד יישאר חשיף גם בסדר אחר, כי <span class="m">\mathcal C</span> רק גדל. לכן closure היא <b>תנאי הכרחי ומספיק</b> לקיום פתרון, בתוך המודל ובכפוף להסתייגות על מונוטוניות. ב־Option B: feasible = True, ב־12 לוחות round-robin, תוך 15.8 שניות (<span class="tag obs">OBSERVED</span>).</div>
+
+<h2 id="c8s5">8.5 beam_search: מספר לוחות קטן</h2>
+<p><span class="ref" data-sym="def beam_search">src/layerforge_l1/reveal_planner.py:374</span></p>
+<pre class="code" dir="ltr"><span class="src">src/layerforge_l1/reveal_planner.py:377-421</span>
+<span class="ln"> 377</span>          start = self.start_covered.copy()
+<span class="ln"> 378</span>          beam: list[tuple[np.ndarray, list[int], list[np.ndarray]]] = [(start, [], [])]
+<span class="ln"> 379</span>          evaluations = 0
+<span class="ln"> 380</span>          for _ in range(self.config.max_sheets):
+<span class="ln"> 381</span>              expanded: dict[bytes, tuple[np.ndarray, list[int], list[np.ndarray]]] = {}
+<span class="ln"> 382</span>              for covered, colors, reveals in beam:
+<span class="ln"> 383</span>                  for color in self.colors:
+<span class="ln"> 384</span>                      if colors and colors[-1] == color:
+<span class="ln"> 385</span>                          continue  # a repeat would have been revealed already
+<span class="ln"> 386</span>                      reveal, _ = self.maximal_reveal(covered, color)
+<span class="ln"> 387</span>                      evaluations += 1
+<span class="ln"> 388</span>                      if not reveal.any():
+<span class="ln"> 389</span>                          continue
+<span class="ln"> 390</span>                      nxt = covered | reveal
+<span class="ln"> 391</span>                      key = np.packbits(nxt).tobytes()
+<span class="ln"> 392</span>                      if key not in expanded:
+<span class="ln"> 393</span>                          expanded[key] = (nxt, colors + [color], reveals + [reveal])
+<span class="ln"> 394</span>              if not expanded:
+<span class="ln"> 395</span>                  break
+<span class="ln"> 396</span>              complete = [state for state in expanded.values() if state[0].all()]
+<span class="ln"> 397</span>              if complete:
+<span class="ln"> 398</span>                  covered, colors, reveals = complete[0]
+<span class="ln"> 399</span>                  return {
+<span class="ln"> 400</span>                      &quot;status&quot;: &quot;COMPLETE&quot;,
+<span class="ln"> 401</span>                      &quot;front_to_back_colors&quot;: colors,
+<span class="ln"> 402</span>                      &quot;reveals&quot;: reveals,
+<span class="ln"> 403</span>                      &quot;evaluations&quot;: evaluations,
+<span class="ln"> 404</span>                  }
+<span class="ln"> 405</span>              beam = sorted(
+<span class="ln"> 406</span>                  expanded.values(),
+<span class="ln"> 407</span>                  key=self._beam_key,
+<span class="ln"> 408</span>              )[: self.config.beam_width]
+<span class="ln"> 409</span>          best = beam[0]
+<span class="ln"> 410</span>          return {
+<span class="ln"> 411</span>              &quot;status&quot;: &quot;INCOMPLETE&quot;,
+<span class="ln"> 412</span>              &quot;front_to_back_colors&quot;: best[1],
+<span class="ln"> 413</span>              &quot;reveals&quot;: best[2],
+<span class="ln"> 414</span>              &quot;evaluations&quot;: evaluations,
+<span class="ln"> 415</span>              &quot;uncovered_cells&quot;: np.flatnonzero(~best[0]).tolist(),
+<span class="ln"> 416</span>          }
+<span class="ln"> 417</span>  
+<span class="ln"> 418</span>      def _beam_key(self, state: tuple) -&gt; tuple[int, int]:
+<span class="ln"> 419</span>          area = -int(self.cell_area[state[0]].sum())
+<span class="ln"> 420</span>          unfinished = len({int(c) for c in self.cell_color[~state[0]]})
+<span class="ln"> 421</span>          return (unfinished, area) if self.config.beam_score == &quot;colors&quot; else (area, unfinished)</pre>
+<h3>איך זה עובד</h3>
+<ul>
+<li><b>מצב:</b> קבוצת המכוסים <span class="m">\mathcal C</span>, יחד עם רשימת הצבעים ורשימת החשיפות עד כה.</li>
+<li><b>מעבר:</b> לכל צבע, מלבד הצבע של הלוח הקודם (שורה 384: לחזור על אותו צבע מיד אחריו מיותר, כי החשיפה הקודמת כבר הייתה מקסימלית), מבצעים <code>maximal_reveal</code>. אם יצא ריק, מדלגים.</li>
+<li><b>ביטול כפילויות (שורה 391):</b> <span class="ref" data-sym="key = np.packbits">src/layerforge_l1/reveal_planner.py:391</span>. שני מסלולים שמגיעים לאותה קבוצה <span class="m">\mathcal C</span> שקולים לגבי העתיד, ולכן נשמר רק הראשון.</li>
+<li><b>עצירה:</b> (א) נמצא מצב שכל התאים בו מכוסים, ומוחזר הראשון ברשימה, COMPLETE. (ב) אין הרחבות, כלומר כל הצבעים נתקעו. (ג) הגיעו ל־<code>max_sheets=24</code>. ב־(ב) וב־(ג) מוחזר INCOMPLETE עם המצב הטוב ביותר.</li>
+<li><b>דירוג:</b> רק <code>beam_width</code> המצבים הטובים ביותר עוברים לשלב הבא.</li>
+</ul>
+<div class="box impl"><span class="tag impl">IMPLEMENTED MATHEMATICS</span> מפתח הדירוג (<span class="ref" data-sym="def _beam_key">src/layerforge_l1/reveal_planner.py:418</span>). ב־<code>"colors"</code> (Option B) ממיינים לקסיקוגרפית, מהקטן לגדול:
+<div class="mb">\kappa(\mathcal C)=\Big(\ \big|\{\text{color}(x):x\notin\mathcal C\}\big|\ ,\ \ -\!\!\sum_{x\in\mathcal C}\text{area}(x)\ \Big)</div>
+<p>קודם מעדיפים מצבים שבהם פחות צבעים "לא גמורים", כלומר צבעים שעדיין יש מהם תאים חשופים. בשוויון מעדיפים את המצב שכיסה יותר שטח. ב־<code>"area"</code> הסדר הפוך.</p></div>
+<div class="box derived"><span class="tag derived">DERIVED</span> <b>אילו הבטחות יש ואילו אין.</b> החיפוש מתקדם רמה אחר רמה (BFS עם גיזום), ולכן הפתרון הראשון שנמצא הוא הקצר ביותר <b>מבין המצבים ששרדו את הגיזום</b>. <span class="tag unv">UNVERIFIED</span> אין הבטחת אופטימליות גלובלית: מצב שנגזם יכול היה להוביל לפתרון קצר יותר. חסם תחתון טריוויאלי ש<b>כן</b> מוכח: כל צבע צריך לוח אחד לפחות, ולכן <span class="m">S\ge 9</span> ב־Option B. הטענה ב־STATUS.md ש־10 הוא החסם התחתון נשענת על טיעון ידני (השחור חייב להופיע גם לפני וגם אחרי אזור אחר). הקוד לא מוכיח אותה.</div>
+<div class="box impl"><span class="tag impl">IMPLEMENTED MATHEMATICS</span> <b>מספר ההערכות.</b> ברמה הראשונה יש <span class="m">|colors|=9</span> קריאות. בכל רמה אחרת יש לכל היותר <span class="m">B\cdot(|colors|-1)=8\cdot8=64</span>. לכן לפתרון של 10 לוחות: <span class="m">\le 9+9\cdot64=585</span>. בפועל נרשמו 553 (<span class="tag obs">OBSERVED</span>).</div>
+
+<h2 id="c8s6">8.6 eliminate_sheets: מחיקת לוחות בדיעבד</h2>
+<p><span class="ref" data-sym="def eliminate_sheets">src/layerforge_l1/reveal_planner.py:306</span>. ננסה להעביר את כל תאי לוח מסוים ללוח מאוחר יותר באותו צבע. לוחות קטנים נבדקים ראשונים. כל הלוחות שביניהם מאבדים את התאים האלה מקבוצת המכוסים שלהם, ולכן כל אחד מהם נבדק מחדש ב־<code>unsupported_pixels</code>. המהלך נשמר רק אם כולם תקינים. אחרי כל הצלחה מתחילים מחדש. <b>ב־Option B לא נמחק אף לוח</b> (<code>eliminated_sheets: []</code>).</p>
+<pre class="code" dir="ltr"><span class="src">src/layerforge_l1/reveal_planner.py:315-346</span>
+<span class="ln"> 315</span>          colors, reveals = list(colors), [r.copy() for r in reveals]
+<span class="ln"> 316</span>          log: list[dict[str, Any]] = []
+<span class="ln"> 317</span>          changed = True
+<span class="ln"> 318</span>          while changed:
+<span class="ln"> 319</span>              changed = False
+<span class="ln"> 320</span>              order = sorted(range(len(reveals)), key=lambda j: int(self.cell_area[reveals[j]].sum()))
+<span class="ln"> 321</span>              for source in order:
+<span class="ln"> 322</span>                  for target in range(source + 1, len(reveals)):
+<span class="ln"> 323</span>                      if colors[target] != colors[source]:
+<span class="ln"> 324</span>                          continue
+<span class="ln"> 325</span>                      trial = [r.copy() for r in reveals]
+<span class="ln"> 326</span>                      trial[target] |= trial[source]
+<span class="ln"> 327</span>                      trial[source][:] = False
+<span class="ln"> 328</span>                      covered = self.start_covered.copy()
+<span class="ln"> 329</span>                      valid = True
+<span class="ln"> 330</span>                      for depth in range(len(trial)):
+<span class="ln"> 331</span>                          if depth &gt;= source and trial[depth].any():
+<span class="ln"> 332</span>                              if self.unsupported_pixels(covered, trial[depth]).any():
+<span class="ln"> 333</span>                                  valid = False
+<span class="ln"> 334</span>                                  break
+<span class="ln"> 335</span>                          covered |= trial[depth]
+<span class="ln"> 336</span>                      if valid:
+<span class="ln"> 337</span>                          log.append({&quot;removed_front_to_back_depth&quot;: source, &quot;merged_into&quot;: target,
+<span class="ln"> 338</span>                                      &quot;color&quot;: colors[source], &quot;cells_moved&quot;: int(reveals[source].sum())})
+<span class="ln"> 339</span>                          del trial[source]
+<span class="ln"> 340</span>                          del colors[source]
+<span class="ln"> 341</span>                          reveals = trial
+<span class="ln"> 342</span>                          changed = True
+<span class="ln"> 343</span>                          break
+<span class="ln"> 344</span>                  if changed:
+<span class="ln"> 345</span>                      break
+<span class="ln"> 346</span>          return colors, reveals, log</pre>
+
+<h2 id="c8s7">8.7 materialize ו־seam_report</h2>
+<pre class="code" dir="ltr"><span class="src">src/layerforge_l1/reveal_planner.py:426-438</span>
+<span class="ln"> 426</span>          covered = self.start_covered.copy()
+<span class="ln"> 427</span>          sheets = []
+<span class="ln"> 428</span>          for reveal in reveals:
+<span class="ln"> 429</span>              physical = self.sheet_mask(covered, reveal)
+<span class="ln"> 430</span>              sheets.append(
+<span class="ln"> 431</span>                  {
+<span class="ln"> 432</span>                      &quot;physical_mask&quot;: physical,
+<span class="ln"> 433</span>                      &quot;visible_mask&quot;: self.cells_mask(reveal),
+<span class="ln"> 434</span>                      &quot;visible_cells&quot;: reveal.copy(),
+<span class="ln"> 435</span>                  }
+<span class="ln"> 436</span>              )
+<span class="ln"> 437</span>              covered |= reveal
+<span class="ln"> 438</span>          return sheets</pre>
+<p><code>materialize</code> עובר על החשיפות מלפנים לאחור ובונה לכל לוח את <span class="m">M_k</span> ואת <span class="m">V_k</span>. <span class="ref" data-sym="def seam_report">src/layerforge_l1/reveal_planner.py:440</span> סופר זוגות של פיקסלי יעד סמוכים (אופקית ואנכית) שנמצאים בתאים שונים <b>של אותו אזור</b> ובעומקים שונים:</p>
+<div class="mb">\begin{gathered}L_{\text{seam}}=s\cdot\big|\{(a,b)\ \text{4-adjacent}:\ \mathrm{cell}(a)\neq\mathrm{cell}(b),\\ \mathrm{reg}(a)=\mathrm{reg}(b),\ \mathrm{depth}(a)\neq\mathrm{depth}(b)\}\big|\end{gathered}</div>
+<p>ב־Option B: 171 זוגות, כלומר <span class="m">171\cdot 0.09765625=16.7</span> מ"מ. רק אזור אחד (מזהה 0, השחור) פוצל בין שני עומקים.</p>
+
+<h2 id="c8s8">8.8 תרשים 3: זרימת יצירת השכבות</h2>
+<div class="flow">
+ <div class="n">labels ← <code>build_cells</code> ← n תאים · <code>start_covered</code> = תאי המסגרת</div><div class="a">▼</div>
+ <div class="n dec"><b>closure()</b>: האם round-robin של חשיפות מקסימליות מכסה הכול?</div>
+ <div class="split"><div class="n fail">לא: <code>obstruction_cells</code> + <code>obstruction_overlay.png</code>. <b>עצירה, אין לוחות.</b></div><div class="n out">כן: ממשיכים</div></div><div class="a">▼</div>
+ <div class="n dec"><b>beam_search()</b>: בכל רמה, לכל מצב ולכל צבע ≠ הקודם, <code>maximal_reveal</code> ← dedupe ← מיון לפי κ ← B הטובים</div><div class="a">▼</div>
+ <div class="n"><b>eliminate_sheets()</b>: ניסיון למזג לוחות באותו צבע</div><div class="a">▼</div>
+ <div class="n out"><b>materialize()</b>: ‏<span class="m">M_k=\mathrm{Struct}(\cdot)\cup V_k</span> ← validators ← PNG ו־JSON</div>
+</div>
+
+<h2 id="c8s9">8.9 דוגמת ריצה: הפיקסטורה הסינתטית מהבדיקות</h2>
+<p>הפיקסטורה <span class="ref" data-sym="def _fixture">tests/test_reveal_planner.py:20</span> היא איור מקורי (לא מוגן זכויות): פרצוף צהוב עם מתאר שחור, ומעליו פפיון עם מתאר שחור, שתי אונות אדומות ומחיצה שחורה ברוחב 3 פיקסלים בלבד (1.17 מ"מ ברשת של 512 פיקסלים). הרצתי את המתכנן האמיתי עם <code>RevealConfig(scale=2)</code>, כמו בבדיקה (<span class="tag obs">OBSERVED</span>, 20.7 שניות):</p>
+<div class="row"><figure><img src="fig/fixture_target.png" style="width:52mm"><figcaption>יעד 512 × 512 (צבעים: 0 = שמיים, 1 = שחור, 2 = צהוב, 3 = אדום, 4 = לבן)</figcaption></figure>
+<figure><img src="fig/fixture_depth.png" style="width:52mm"><figcaption>עומק החשיפה לכל פיקסל (כהה = קדמי)</figcaption></figure></div>
+<table class="t small">
+<tr><th>נתון</th><th>ערך</th></tr>
+<tr><td>רשת</td><td>outer = 1152 פיקסלים, <span class="m">s=225/1152=0.1953</span> מ"מ, גרעין 7×7, ‏nub = 3 צעדים</td></tr>
+<tr><td>תאים</td><td>2949 (במצב region_indivisible: 11 אזורים)</td></tr>
+<tr><td>חשיפה מקסימלית בצעד הראשון</td><td>שמיים: 2156/2156 תאים (איטרציה אחת). שחור, צהוב, אדום ולבן: 0. בלוח הקדמי השמיים מסביבם עדיין לא חשופים, ולכן חייבים להיות חור. בלי שום חומר נסתר הם היו "איים" שלא מחוברים למסגרת.</td></tr>
+<tr><td>closure</td><td>feasible, ‏6 לוחות round-robin</td></tr>
+<tr><td>beam</td><td>COMPLETE אחרי 49 הערכות. מלפנים לאחור: 0, 1, 2, 3, 1, 4, עם 2156, 153, 512, 74, 51 ו־3 תאים</td></tr>
+<tr><td>לוחות</td><td>6 מתוך 6 עוברים 4-neighbor ו־width. חומר שנשאר: 0.819, 0.839, 0.979, 0.993, 1.0, 1.0</td></tr>
+<tr><td>שחזור</td><td>0 פיקסלים שונים</td></tr>
+<tr><td>תפרים</td><td>אזור אחד מפוצל, 15 זוגות = 5.86 מ"מ</td></tr>
+<tr><td>וריאנט region_indivisible</td><td><b>לא פתיר</b>: closure מחזירה 3 אזורי חסימה</td></tr>
+</table>
+<figure><img src="fig/fixture_sheets.png" style="width:100%"><figcaption>ששת הלוחות הפיזיים, משמאל לימין: עומק 0 (קדמי) עד עומק 5 (אחורי). השחור מופיע פעמיים: בלוח 1 (המתאר החיצוני) ובלוח 4 (המחיצה, שמאחורי האדום)</figcaption></figure>
+<div class="box derived"><span class="tag derived">DERIVED</span> <b>למה השחור צריך שני לוחות:</b> אם המחיצה השחורה (1.17 מ"מ) באותו לוח עם המתאר, לפני האדום, היא פס צר מ־1.27 מ"מ ונפסלת. אם היא מאחורי האדום כחלק מאזור שלם, האונות האדומות נשארות "איים" בלוח האדום. פיצול לתאים מאפשר למתאר להיחשף מוקדם ולמחיצה מאוחר יותר, ואז לוח האדום מחזיק את החומר הנסתר שמאחורי המתאר. זו הסיבה לתוצאה <code>count(BLACK) == 2</code> שבבדיקה.</div>
+
+<h2 id="c8s10">8.10 תשובות לשאלות היסוד מתוך הקוד</h2>
+<table class="t small">
+<tr><th style="width:28%">שאלה</th><th>תשובה</th></tr>
+<tr><td>כמה לוחות?</td><td>מספר הרמות עד שה־beam מוצא מצב מכוסה במלואו, ואחר כך מחיקות ב־eliminate. אין קלט "מספר לוחות".</td></tr>
+<tr><td>איזה צבע לכל לוח?</td><td>הצבע שבחר המעבר ב־beam. כל לוח הוא צבע אחד, ומותר שצבע יחזור (לא ברצף).</td></tr>
+<tr><td>סדר מלפנים לאחור?</td><td>סדר הרמות ב־beam: לוח 0 נבחר ראשון. בפלט המספור הפוך (<code>back_index = S-1-depth</code>).</td></tr>
+<tr><td>מה נשאר חומר?</td><td><span class="m">M_k=\mathrm{Struct}(\mathrm{px}(\mathcal C_k\cup X_k))\cup V_k</span>.</td></tr>
+<tr><td>היכן החורים?</td><td>כל מה שמחוץ ל־<span class="m">M_k</span>: כל התאים שעוד לא נחשפו, וגם חומר נסתר דק שהתמיכה השמיטה.</td></tr>
+<tr><td>איך צבע אחורי נראה?</td><td>לכל k קודם, התא שלו מחוץ ל־<span class="m">\mathcal C_k\cup X_k</span>, ולכן חור בכל הלוחות שלפניו (8.1).</td></tr>
+<tr><td>חומר נסתר?</td><td><span class="m">M_k\cap\mathrm{px}(\mathcal C_k)</span>: גלוי בלוח קדמי ולכן מוסתר, ומשמש כ"שלד" שמחבר את <span class="m">V_k</span> למסגרת.</td></tr>
+<tr><td>גאומטריה דקה או מנותקת?</td><td>גלויה: נדחית (התא חוזר לרשימה ויחכה לשלב שבו יש לו תמיכה). נסתרת: מושמטת בשקט, וזה בטוח.</td></tr>
+<tr><td>קבלה ודחייה?</td><td>תא מתקבל רק אם כל הפיקסלים שלו עוברים את <code>unsupported_pixels</code>. לוח שלם עובר בסוף את ה־validator.</td></tr>
+<tr><td>האם משנה גאומטריה?</td><td>לא. היעד לא משתנה. מתווסף רק חומר נסתר (תחת לוחות קדמיים).</td></tr>
+<tr><td>מתי עוצר?</td><td>COMPLETE, תקיעה, או 24 רמות.</td></tr>
+<tr><td>אם אין פתרון?</td><td>closure = False: אין לוחות, יש <code>obstruction_overlay.png</code> ופירוט לפי צבע. beam INCOMPLETE: הסקריפט עדיין מייצר לוחות חלקיים, והשחזור ייכשל (mismatch &gt; 0).</td></tr>
+</table>
+
+<h2 id="c8s11">8.11 סיבוכיות ומקורות העלות</h2>
+<div class="box derived"><span class="tag derived">DERIVED</span>
+<p>תהי <span class="m">T_u</span> העלות של קריאה ל־<code>unsupported_pixels</code> (כמה פעולות מורפולוגיות על 2304²), <span class="m">I</span> מספר האיטרציות בנקודת השבת, B רוחב ה־beam, ‏Q מספר הצבעים ו־S מספר הלוחות.</p>
+<div class="mb">T_{\text{beam}}\approx O\big(S\cdot B\cdot Q\cdot \bar I\cdot T_u\big),\qquad T_{\text{closure}}\approx O\big(R\cdot Q\cdot\bar I\cdot T_u\big)</div>
+<p>R הוא מספר הסבבים. ב־Option B היו 553 הערכות, וכל המתכנן (כולל closure, validators וכתיבת PNG) רץ 304 שניות. כלומר, פחות מ־0.55 שניות להערכה בממוצע. הזיכרון: כל מצב שומר רשימת וקטורי bool באורך n (11,498), כך שהוא זניח לעומת המסכות. כל מסכה במלוא הרשת תופסת כ־5.3 מגה־בייט, וכמה כאלה קיימות בו־זמנית בכל קריאה. <code>eliminate_sheets</code> עולה במקרה הגרוע <span class="m">O(S^3)</span> בדיקות.</p></div>
+
+<h2 id="c8s12">8.12 תנאי כשל</h2>
+<ul>
+<li><b>מוכח בבדיקה:</b> במצב region_indivisible הפיקסטורה לא פתירה. במצב per_cell היא כן.</li>
+<li><b>מוכח בהיסטוריה:</b> שוליים של 2 פיקסלים בגרעין (<code>planning_margin_pixels</code>) הגדילו את מספר הלוחות (22 לוחות בצב), ובוטלו.</li>
+<li><b>תיאורטי:</b> פרט גלוי צר מ־1.27 מ"מ שאינו "בליטה" קצרה (למשל קו דק וארוך) לא יכול להיתמך בשום עומק, כי התמיכה שלו תמיד דקה מדי. closure תחזיר אותו כחסימה. זו הסיבה לתיקון הידני של הלחי (Option A).</li>
+<li><b>תיאורטי:</b> מכיוון שה־beam לא אופטימלי, ייתכן פתרון קצר יותר שלא נמצא.</li>
+<li><b>תפעולי:</b> זיכרון וזמן גדלים עם רוחב ה־beam. הרצה עם beam 16 על הצב נעצרה בגלל לחץ זיכרון במחשב.</li>
+</ul>
+</section><script src="vendor/katex.min.js"></script><script>
+for (const [sel, display] of [['.m', false], ['.mb', true]])
+  for (const e of document.querySelectorAll(sel)) {
+    const tex = e.textContent;
+    try { katex.render(tex, e, {output: 'mathml', displayMode: display, throwOnError: true}); }
+    catch (err) { e.classList.add('texerr'); e.textContent = 'TeX error: ' + err.message; }
+  }
+</script></body></html>

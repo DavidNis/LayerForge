@@ -1,0 +1,36 @@
+<h1>מילון מונחים</h1>
+<table class="t small">
+<tr><th style="width:24%">מונח</th><th>הגדרה כפי שהיא משמשת בקוד</th></tr>
+<tr><td>לוח / sheet</td><td>שכבה פיזית אחת: מסכה בינארית בגודל 2304², בצבע אחד ובעובי 1.6 מ"מ.</td></tr>
+<tr><td>עומק / depth</td><td>האינדקס מלפנים לאחור (0 = קדמי). בשמות הקבצים המספור הפוך.</td></tr>
+<tr><td>אזור / region</td><td>רכיב 4־קשיר של צבע אחד ביעד.</td></tr>
+<tr><td>תא / cell</td><td>החיתוך של אזור עם אריח (2 מ"מ ב־Option B), אחרי מיזוג פיסות זעירות. זו יחידת ההחלטה של המתכנן.</td></tr>
+<tr><td>חשיפה / reveal <span class="m">X_k</span></td><td>קבוצת התאים שלוח k מראה.</td></tr>
+<tr><td>מכוסים / covered <span class="m">\mathcal C_k</span></td><td>תאים שנחשפו בלוחות שלפני k, וגם תאי המסגרת.</td></tr>
+<tr><td>Perimeter <span class="m">P</span></td><td>טבעת המסגרת ברוחב 128 פיקסלים (12.5 מ"מ), ובמתכנן גם פסי ה־magenta.</td></tr>
+<tr><td>ליבה / core</td><td><span class="m">M\ominus K_{13}</span>: מקומות שאפשר למקם בהם את מרכז ה"מטבע" ברוחב 1.27 מ"מ.</td></tr>
+<tr><td>ליבה יתומה / orphan core</td><td>רכיב 4־קשיר של הליבה שלא נוגע ב־P. בגללה ה־validator נכשל.</td></tr>
+<tr><td>תמיכה מבנית / Struct</td><td><span class="m">(\mathrm{Anch}_P(U\ominus K)\oplus K)\cap U</span>, ועוד גשרים וחיתוכים.</td></tr>
+<tr><td>בליטה / nub</td><td>פיקסל גלוי מחוץ לתמיכה, שנמצא עד 5 צעדים (0.49 מ"מ) ממנה.</td></tr>
+<tr><td>חומר נסתר</td><td>חומר בלוח k במקום שכבר נחשף בלוח קדמי.</td></tr>
+<tr><td>Maximal reveal</td><td>נקודת השבת הגדולה ביותר של תאים נתמכים בצבע נתון.</td></tr>
+<tr><td>Closure</td><td>חזרה של round-robin עם maximal reveal עד שאין התקדמות. זו בדיקת ההיתכנות.</td></tr>
+<tr><td>Obstruction</td><td>תאים שאף סדר לא מצליח לחשוף.</td></tr>
+<tr><td>Beam</td><td>חיפוש רמה־אחר־רמה ששומר רק את B המצבים הטובים ביותר.</td></tr>
+<tr><td>תפר / seam</td><td>גבול בין שני תאים של אותו אזור בעומקים שונים, כלומר מדרגת עובי בתוך שטח בצבע אחד.</td></tr>
+<tr><td>Erosion <span class="m">\ominus</span> / Dilation <span class="m">\oplus</span></td><td>פעולות המינימום והמקסימום של OpenCV עם גרעין K.</td></tr>
+<tr><td>Opening <span class="m">\circ</span></td><td>שחיקה ואחריה התפשטות. משמשת בתיקון Option A ובאבחון הפתחים הצרים.</td></tr>
+<tr><td>4-connected</td><td>שכנות דרך צלע בלבד (למעלה, למטה, ימינה, שמאלה).</td></tr>
+<tr><td>CIELAB (OpenCV 8-bit)</td><td>מרחב צבע: <span class="m">L\cdot2.55</span>, <span class="m">a+128</span>, <span class="m">b+128</span>.</td></tr>
+<tr><td>Douglas–Peucker</td><td>פישוט קווים בסובלנות ε (0.03 מ"מ).</td></tr>
+<tr><td>Watertight</td><td>רשת משולשים סגורה, שכל צלע בה משותפת לשני משולשים.</td></tr>
+<tr><td>STEP / STL</td><td>STEP: מוצק B-Rep מדויק (OCCT). STL: רשת משולשים.</td></tr>
+</table>
+
+<h2>אימות המסמך</h2>
+<ul>
+<li>כל ההפניות <code>path:line</code> נבדקו אוטומטית מול הקבצים בזמן הבנייה (<code>build_pdf.py</code>). אם סמל לא נמצא בשורה, הבנייה נכשלת.</li>
+<li>כל קטעי הקוד במסמך הועתקו אוטומטית מהקבצים עצמם, יחד עם מספרי השורות.</li>
+<li>הדוגמאות A1, A2 וריצת הפיקסטורה חושבו בקריאה לפונקציות הייצור עצמן (<code>compute_examples.py</code>).</li>
+<li>לא שונה אף קובץ קוד, artifact או סטטוס. נוצרו רק קבצים ב־<code>docs/technical_optB/</code> וב־<code>output/pdf/optB/</code>.</li>
+</ul>

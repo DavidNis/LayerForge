@@ -1,0 +1,39 @@
+<!doctype html><html lang="he" dir="rtl"><head><meta charset="utf-8">
+<title>LayerForge Technical Architecture</title><link rel="stylesheet" href="style.css"></head><body><div class="cover">
+  <div class="t1">LayerForge V3</div>
+  <div class="t2">ארכיטקטורה טכנית מוסברת: הקוד שבאמת יצר את Option B</div>
+  <div class="t2" style="font-size:12pt">מתמונה שטוחה ועד לוחות STEP/STL: אלגוריתמים, מתמטיקה ומיקום בקוד</div>
+  <div class="t3">
+    היקף: רק המודולים, הפונקציות והפקודות שהשתתפו בהפקת <code>artifacts/l1_van_gogh_v1/cad_optB/</code><br>
+    מצב המאגר: ענף <code>main</code>, commit <code>1491fbb</code> + שינויים שעוד לא בוצע להם commit (נבדק ב־2026-10-22)<br>
+    אבן דרך: L-1 · מצב: <code>AWAITING_PHYSICAL_TEST</code> · הדפסה פיזית: PENDING<br>
+    המסמך נוצר מקוד המקור: כל הפניה <code>path:line</code> ונתוני הדוגמאות הופקו ונבדקו אוטומטית בזמן הבנייה
+  </div>
+</div>
+
+<section class="chapter" style="break-before:page">
+<h1 class="nonum" style="font-size:17pt">איך לקרוא את המסמך</h1>
+<p>המסמך מתאר <b>רק</b> את מסלול הביצוע שהפיק את Option B של התמונה <code>van_gogh_p.jfif</code>: עשרה לוחות פיזיים בגודל 225 × 225 × 1.6 מ"מ, כל אחד בצבע אחד, עם קובצי STEP ו־STL. במאגר יש עוד הרבה קוד ישן, כמו מתכנני שכבות קודמים, מסלולי flattening ישנים ומתכנן CP-SAT. לבקשתך הקוד הזה <b>לא מוסבר כאן</b>. הוא מופיע רק ברשימת המודולים שלא השתתפו (פרק 2), כדי שתדע שהוא קיים.</p>
+<h3>סימוני אמינות</h3>
+<table class="t">
+<tr><th style="width:30%">סימון</th><th>משמעות</th></tr>
+<tr><td><span class="tag impl">IMPLEMENTED MATHEMATICS</span></td><td>נוסחה שמתארת ישירות פעולה שהקוד מבצע. לכל נוסחה כזאת מצוינים הקובץ והשורה.</td></tr>
+<tr><td><span class="tag derived">DERIVED EXPLANATION</span></td><td>פרשנות מתמטית שהסקתי מהקוד. היא לא כתובה בקוד כנוסחה. כשמופיע נימוק נכונות, הוא מתאר את ההנחות ולא מהווה הוכחה פורמלית מלאה.</td></tr>
+<tr><td><span class="tag theory">THEORETICAL BACKGROUND</span></td><td>רקע שעוזר להבין את הקוד. אינו פונקציונליות שמומשה ב־LayerForge, אלא, למשל, ההגדרה של פונקציה מ־OpenCV.</td></tr>
+<tr><td><span class="tag obs">OBSERVED_IN_FILE</span></td><td>מספר או תוצאה שנקראו מקובץ ממצאים קיים (JSON או PNG) או מהרצה קצרה שבוצעה לצורך המסמך.</td></tr>
+<tr><td><span class="tag man">MANUAL / AD HOC</span></td><td>שלב שבוצע בקטע קוד חד־פעמי שהעוזר (AI) הריץ. הוא לא קיים כקובץ במאגר.</td></tr>
+<tr><td><span class="tag gap">GAP</span></td><td>פער, חוסר שילוב או דבר שלא אומת.</td></tr>
+<tr><td><span class="tag unv">UNVERIFIED</span></td><td>טענה שהקוד אינו מוכיח. לדוגמה, אופטימליות של מספר השכבות.</td></tr>
+</table>
+<h3>מוסכמות</h3>
+<ul>
+<li><b>Front-to-back:</b> המתכנן מתכנן מהלוח הקדמי (עומק 0) אל האחורי. בתיקיות הפלט המספור הפוך: <code>layer_00</code> הוא הלוח <b>האחורי</b> ו־<code>layer_09</code> הוא הקדמי.</li>
+<li><b>פיקסל פיזי:</b> ברשת הפיזית של Option B כל פיקסל הוא <span class="m">s = 225/2304 = 0.09765625</span> מ"מ.</li>
+<li>שמות מזהים, נוסחאות, קוד ונתיבים נשארים משמאל לימין.</li>
+<li>הפניה כמו <span class="ref" data-sym="def structural_support">src/layerforge_l1/reveal_planner.py:171</span> נבדקה בזמן הבנייה: בשורה הזאת אכן מופיע הסמל הנזכר.</li>
+</ul>
+</section>
+<script src="vendor/katex.min.js"></script><script>
+for (const e of document.querySelectorAll('.m')) katex.render(e.textContent, e, {output:'mathml', throwOnError:true});
+for (const e of document.querySelectorAll('.mb')) katex.render(e.textContent, e, {output:'mathml', displayMode:true, throwOnError:true});
+</script></body></html>

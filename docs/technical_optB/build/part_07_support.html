@@ -1,0 +1,118 @@
+<!doctype html><html lang="he" dir="rtl"><head><meta charset="utf-8">
+<title>LayerForge Technical Architecture</title><link rel="stylesheet" href="style.css"></head><body><section class="chapter" data-name="07_support"><h1 id="c7">7. אופרטור התמיכה המבנית</h1>
+<p>זו הליבה המתמטית של המתכנן. הפונקציה <span class="ref" data-sym="def structural_support">src/layerforge_l1/reveal_planner.py:171</span> עונה על השאלה: <b>אם מותר לי להשתמש בחומר רק בתוך הקבוצה U, איזה חלק ממנו אפשר להשאיר כך שהוא מחובר למסגרת דרך מעברים ברוחב 1.27 מ"מ לפחות?</b></p>
+
+<h2 id="c7s1">7.1 הגדרות: שחיקה, התפשטות ועיגון</h2>
+<div class="box theory"><span class="tag theory">THEORETICAL BACKGROUND</span> מורפולוגיה בינארית. A היא קבוצת פיקסלים ו־K גרעין סימטרי שמרכזו בראשית:
+<div class="mb">A\ominus K=\{p:\ p+K\subseteq A\},\qquad A\oplus K=\{p+k:\ p\in A,\ k\in K\},\qquad A\circ K=(A\ominus K)\oplus K</div>
+<p>הפתיחה <span class="m">A\circ K</span> היא איחוד כל ההזזות של K שנמצאות כולן בתוך A, כלומר כל המקומות ש"מטבע" בצורת K יכול לכסות בלי לצאת מ־A.</p></div>
+<div class="box impl"><span class="tag impl">IMPLEMENTED MATHEMATICS</span> <code>cv2.erode</code> מחשב <span class="m">\min_{k\in K} A(p+k)</span> ו־<code>cv2.dilate</code> מחשב <span class="m">\max</span>, והם מממשים בדיוק את ההגדרות האלה. <b>פרט חשוב</b> (הודגם בדוגמה A2 בהמשך): בשחיקה OpenCV מתייחס לפיקסלים <b>מחוץ לתמונה</b> כאל חומר (ערך גבול מקסימלי). ברשת האמיתית התמונה מוקפת במסגרת ברוחב 128 פיקסלים, שרחבה בהרבה מהגרעין, ולכן לזה אין השפעה על התוצאה.</div>
+<div class="box impl"><span class="tag impl">IMPLEMENTED MATHEMATICS</span> <b>עיגון:</b> <span class="ref" data-sym="def _anchored">src/layerforge_l1/reveal_planner.py:216</span>
+<div class="mb">\mathrm{Anch}_P(C)=\bigcup\{\,Q:\ Q\ \text{is a 4-connected component of } C,\ Q\cap P\neq\emptyset\,\}</div>
+<p>הקוד מחשב את הרכיבים ב־<code>cv2.connectedComponents(connectivity=4)</code>, מסמן את התוויות שמופיעות ב־<span class="m">P\cap C</span>, ומחזיר מסכה של כל הפיקסלים שלהן.</p></div>
+<pre class="code" dir="ltr"><span class="src">src/layerforge_l1/reveal_planner.py:211-234</span>
+<span class="ln"> 211</span>  def _orphan_cores(material: np.ndarray, perimeter: np.ndarray, kernel: np.ndarray) -&gt; np.ndarray:
+<span class="ln"> 212</span>      core = cv2.erode(material.astype(np.uint8), kernel).astype(bool)
+<span class="ln"> 213</span>      return core &amp; ~_anchored(core, perimeter)
+<span class="ln"> 214</span>  
+<span class="ln"> 215</span>  
+<span class="ln"> 216</span>  def _anchored(core: np.ndarray, perimeter: np.ndarray) -&gt; np.ndarray:
+<span class="ln"> 217</span>      count, components = cv2.connectedComponents(core.astype(np.uint8), connectivity=4)
+<span class="ln"> 218</span>      keep = np.zeros(count, dtype=bool)
+<span class="ln"> 219</span>      keep[np.unique(components[perimeter &amp; core])] = True
+<span class="ln"> 220</span>      keep[0] = False
+<span class="ln"> 221</span>      return keep[components]
+<span class="ln"> 222</span>  
+<span class="ln"> 223</span>  
+<span class="ln"> 224</span>  _CROSS = cv2.getStructuringElement(cv2.MORPH_CROSS, (3, 3))
+<span class="ln"> 225</span>  
+<span class="ln"> 226</span>  
+<span class="ln"> 227</span>  def _geodesic_reach(seed: np.ndarray, domain: np.ndarray, steps: int) -&gt; np.ndarray:
+<span class="ln"> 228</span>      reach = seed &amp; domain
+<span class="ln"> 229</span>      for _ in range(steps):
+<span class="ln"> 230</span>          grown = cv2.dilate(reach.astype(np.uint8), _CROSS).astype(bool) &amp; domain
+<span class="ln"> 231</span>          if np.array_equal(grown, reach):
+<span class="ln"> 232</span>              break
+<span class="ln"> 233</span>          reach = grown
+<span class="ln"> 234</span>      return reach</pre>
+
+<h2 id="c7s2">7.2 האופרטור הבסיסי</h2>
+<pre class="code" dir="ltr"><span class="src">src/layerforge_l1/reveal_planner.py:183-185</span>
+<span class="ln"> 183</span>      covered_core = cv2.erode(covered.astype(np.uint8), kernel).astype(bool)
+<span class="ln"> 184</span>      anchored = _anchored(covered_core, perimeter)
+<span class="ln"> 185</span>      support = cv2.dilate(anchored.astype(np.uint8), kernel).astype(bool) &amp; covered</pre>
+<div class="box impl"><span class="tag impl">IMPLEMENTED MATHEMATICS</span>
+<div class="mb">\mathrm{Struct}_0(U)=\Big(\mathrm{Anch}_P\big(U\ominus K\big)\oplus K\Big)\cap U</div>
+<p><b>שלב 1:</b> <span class="m">U\ominus K</span> היא ה"ליבה" (core): כל הפיקסלים שאפשר למקם עליהם את מרכז ה"מטבע" ברוחב 1.27 מ"מ. <b>שלב 2:</b> <span class="m">\mathrm{Anch}_P</span> משאיר רק חלקי ליבה שנוגעים במסגרת. <b>שלב 3:</b> <span class="m">\oplus K</span> מחזיר את הרוחב: כל פיקסל ש"מטבע" כזה, שמחובר למסגרת, מכסה. <b>שלב 4:</b> <span class="m">\cap U</span> הוא ביטוח: לא יוצרים חומר מחוץ ל־U.</p></div>
+<div class="box derived"><span class="tag derived">DERIVED</span> <b>פירוש:</b> <span class="m">\mathrm{Struct}_0(U)</span> הוא החלק של הפתיחה <span class="m">U\circ K</span> שמטבע ברוחב 1.27 מ"מ מגיע אליו <b>בהחלקה רציפה מהמסגרת</b>, בלי לצאת מ־U. שני פיקסלי ליבה סמוכים (4 שכנים) p ו־q מקיימים <span class="m">p+K\subseteq U</span> ו־<span class="m">q+K\subseteq U</span>, ולכן מסלול ליבה 4־קשיר מתאר "מסדרון" ברוחב הגרעין לכל אורכו. זה בדיוק מה שה־validator בודק (פרק 10).</div>
+<div class="box derived"><span class="tag derived">DERIVED</span> <b>אינווריאנט: <span class="m">\mathrm{Struct}(U)\subseteq U</span>.</b> בשורות 185 ו־207 יש <code>&amp; covered</code> מפורש. בשורה 196 (גשרים) אין, אבל <code>bridge</code> ⊆ <code>covered_core</code> = <span class="m">U\ominus K</span>. מההגדרה, לכל <span class="m">b\in U\ominus K</span> מתקיים <span class="m">b+K\subseteq U</span>, ולכן <span class="m">\text{bridge}\oplus K\subseteq U</span> (K סימטרי). <b>זה האינווריאנט שמבטיח שהמתכנן לא מוסיף חומר במקומות שצריכים להישאר חורים</b> (פרק 9).</div>
+
+<h2 id="c7s3">7.3 מונוטוניות: הבסיס לכל המתכנן</h2>
+<div class="box derived"><span class="tag derived">DERIVED</span> <b>טענה:</b> אם <span class="m">U\subseteq U'</span>, אז <span class="m">\mathrm{Struct}_0(U)\subseteq\mathrm{Struct}_0(U')</span>.<br>
+<b>נימוק:</b> (1) שחיקה מונוטונית: <span class="m">U\ominus K\subseteq U'\ominus K</span>. (2) כל רכיב Q של הליבה הקטנה שנוגע ב־P מוכל ברכיב Q' של הליבה הגדולה (הוא קשיר וכלול בה), ו־Q' נוגע ב־P באותו פיקסל. לכן <span class="m">\mathrm{Anch}</span> מונוטוני. (3) גם התפשטות וחיתוך מונוטוניים.<br>
+<b>הסתייגות:</b> לולאות התיקון (גשרים וחיתוכים, בהמשך) הן היוריסטיות, והנימוק הזה לא מכסה אותן. ה־docstring של הקובץ טוען למונוטוניות, אבל לגבי הגרסה המלאה עם התיקונים זו הנחה עבודה, לא משפט מוכח.</div>
+<p>המשמעות המעשית: <b>כשקבוצת המכוסים גדלה, התמיכה רק גדלה.</b> מכאן נובע שחשיפה של יותר תאים מוקדם לא מזיקה לאף לוח מאחור (פרק 8).</p>
+
+<h2 id="c7s4">7.4 לולאת הגשרים (bridge loop)</h2>
+<pre class="code" dir="ltr"><span class="src">src/layerforge_l1/reveal_planner.py:186-196</span>
+<span class="ln"> 186</span>      for _ in range(8):
+<span class="ln"> 187</span>          core = cv2.erode(support.astype(np.uint8), kernel).astype(bool)
+<span class="ln"> 188</span>          orphan = core &amp; ~_anchored(core, perimeter)
+<span class="ln"> 189</span>          if not orphan.any():
+<span class="ln"> 190</span>              break
+<span class="ln"> 191</span>          bridge = (
+<span class="ln"> 192</span>              cv2.dilate(orphan.astype(np.uint8), _CROSS).astype(bool) &amp; covered_core &amp; ~core
+<span class="ln"> 193</span>          )
+<span class="ln"> 194</span>          if not bridge.any():
+<span class="ln"> 195</span>              break
+<span class="ln"> 196</span>          support |= cv2.dilate(bridge.astype(np.uint8), kernel).astype(bool)</pre>
+<p><b>הבעיה שהיא פותרת:</b> ברסטר, <span class="m">(\cdot\oplus K)\ominus K</span> אינו בהכרח שווה לקלט. אחרי ההתפשטות, שחיקה חוזרת (בדיוק מה שה־validator עושה) עלולה ליצור פיקסלי ליבה "תועים" שנוגעים בליבה המעוגנת <b>רק באלכסון</b>. ה־validator עובד בקשירות 4, ולכן יספור אותם כ"ליבות יתומות" (orphan cores) ויכשיל את הלוח. זו הייתה התקלה של "מדרגות אלכסוניות" שתוקנה במהלך הפיתוח.</p>
+<div class="box impl"><span class="tag impl">IMPLEMENTED MATHEMATICS</span> בכל איטרציה (עד 8):
+<div class="mb">O=(S\ominus K)\setminus\mathrm{Anch}_P(S\ominus K),\qquad B=(O\oplus C_{3\times3}^{+})\cap(U\ominus K)\setminus(S\ominus K),\qquad S\leftarrow S\cup(B\oplus K)</div>
+<p><span class="m">C^{+}</span> הוא צלב 3×3, כלומר 4 שכנים. B הם פיקסלים שצמודים (4 שכנים) ליתום, נמצאים בליבה המותרת של U, אבל לא נמצאים כרגע בליבה של S. הוספת <span class="m">B\oplus K</span> ל־S הופכת אותם לליבה ומחברת את היתום בחיבור 4־קשיר.</p></div>
+
+<h2 id="c7s5">7.5 לולאת החיתוך (growing-cut prune)</h2>
+<pre class="code" dir="ltr"><span class="src">src/layerforge_l1/reveal_planner.py:197-208</span>
+<span class="ln"> 197</span>      # Where no bridge fits, cut the anchored core next to each orphan so the
+<span class="ln"> 198</span>      # material it implied is dropped (hidden) or reported unsupported (visible).
+<span class="ln"> 199</span>      for attempt in range(16):
+<span class="ln"> 200</span>          core = cv2.erode(support.astype(np.uint8), kernel).astype(bool)
+<span class="ln"> 201</span>          orphan = core &amp; ~_anchored(core, perimeter)
+<span class="ln"> 202</span>          if not orphan.any():
+<span class="ln"> 203</span>              break
+<span class="ln"> 204</span>          size = 5 + 4 * attempt  # grow the cut if the same orphan persists
+<span class="ln"> 205</span>          cut = cv2.dilate(orphan.astype(np.uint8), np.ones((size, size), np.uint8)).astype(bool)
+<span class="ln"> 206</span>          anchored = _anchored(anchored &amp; ~cut, perimeter)
+<span class="ln"> 207</span>          support = cv2.dilate(anchored.astype(np.uint8), kernel).astype(bool) &amp; covered
+<span class="ln"> 208</span>      return support</pre>
+<div class="box impl"><span class="tag impl">IMPLEMENTED MATHEMATICS</span> אם נשארו יתומים, ניסיון t (עד 16):
+<div class="mb">c_t=5+4t,\quad X=O\oplus \square_{c_t},\quad A\leftarrow \mathrm{Anch}_P(A\setminus X),\quad S\leftarrow (A\oplus K)\cap U</div>
+<p><span class="m">\square_c</span> הוא ריבוע מלא c×c (5, 9, 13 וכן הלאה). חותכים את הליבה המעוגנת סביב היתום, ואם היתום נשאר, החיתוך גדל. החומר שהיתום "ייצג" נעלם מהתמיכה: אם הוא היה מוסתר, זה בטוח, ואם הוא היה גלוי, <code>unsupported_pixels</code> יחזיר אותו כפיקסל לא נתמך (פרק 8).</p></div>
+<div class="box gap"><span class="tag gap">LIMITATION</span> אחרי 8 גשרים ו־16 חיתוכים הפונקציה מחזירה את S גם אם נשארו בו יתומים. במקרה כזה ההגנה היא בשכבה העליונה: <code>unsupported_pixels</code> בודק את הלוח הגמור (פרק 8.2), וה־validator בודק כל לוח בסוף.</div>
+
+<h2 id="c7s6">7.6 הגעה גאודזית: הגבול ל"בליטות" (nubs)</h2>
+<div class="box impl"><span class="tag impl">IMPLEMENTED MATHEMATICS</span> <span class="ref" data-sym="def _geodesic_reach">src/layerforge_l1/reveal_planner.py:227</span>
+<div class="mb">R_0=S\cap D,\qquad R_{t+1}=(R_t\oplus C^{+})\cap D,\qquad D=S\cup V,\quad t\le 5</div>
+<p>התוצאה: כל פיקסל גלוי שאפשר להגיע אליו מהתמיכה S במסלול 4־קשיר באורך 5 צעדים לכל היותר, שעובר רק דרך פיקסלים של <span class="m">S\cup V</span>. אלו קצוות של קווים ופינות חדות שבולטים עד 0.49 מ"מ מעבר לחומר הנושא.</p></div>
+
+<h2 id="c7s7">7.7 דוגמה A2: הפונקציה האמיתית על רשת 9×12</h2>
+<p>בדוגמה הזו קראתי ל־<code>structural_support</code> ול־<code>_anchored</code> <b>מתוך הקוד</b>, עם גרעין אליפטי 3×3 (שהוא צלב) במקום 13×13, כדי שהמצבים יהיו קריאים. המסגרת P היא העמודה השמאלית. U כולל גוף ברוחב 5 שמחובר למסגרת, "זיז" ברוחב פיקסל אחד, ובלוק 3×3 שמחובר לגוף רק דרך הזיז.</p>
+<div class="bitsrow">
+<div><table class="bits" dir="ltr"><tr><td class="b1"></td><td class="b1"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td></tr><tr><td class="b1"></td><td class="b1"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td></tr><tr><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b0"></td><td class="b0"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td></tr><tr><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b0"></td><td class="b0"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td></tr><tr><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b0"></td><td class="b0"></td></tr><tr><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td></tr><tr><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td></tr><tr><td class="b1"></td><td class="b1"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td></tr><tr><td class="b1"></td><td class="b1"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td></tr></table>U (covered)</div>
+<div><table class="bits" dir="ltr"><tr><td class="b1"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td></tr><tr><td class="b1"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td></tr><tr><td class="b1"></td><td class="b1"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b1"></td><td class="b1"></td></tr><tr><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td></tr><tr><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td></tr><tr><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td></tr><tr><td class="b1"></td><td class="b1"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td></tr><tr><td class="b1"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td></tr><tr><td class="b1"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td></tr></table><span class="m">U\ominus K</span></div>
+<div><table class="bits" dir="ltr"><tr><td class="b1"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td></tr><tr><td class="b1"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td></tr><tr><td class="b1"></td><td class="b1"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td></tr><tr><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td></tr><tr><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td></tr><tr><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td></tr><tr><td class="b1"></td><td class="b1"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td></tr><tr><td class="b1"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td></tr><tr><td class="b1"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td></tr></table><span class="m">\mathrm{Anch}_P(U\ominus K)</span></div>
+<div><table class="bits" dir="ltr"><tr><td class="b1"></td><td class="b1"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td></tr><tr><td class="b1"></td><td class="b1"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td></tr><tr><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td></tr><tr><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td></tr><tr><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td></tr><tr><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td></tr><tr><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b1"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td></tr><tr><td class="b1"></td><td class="b1"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td></tr><tr><td class="b1"></td><td class="b1"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td><td class="b0"></td></tr></table><code>structural_support</code></div>
+</div>
+<ul>
+<li><b>ליבה:</b> הזיז נעלם בשחיקה כי הוא צר מהגרעין. הבלוק שבימין משאיר ליבה (עמודות 10–11 בשורה 2). את עמודה 11 משאירה רק התנהגות הגבול של OpenCV, שמתייחס לפיקסלים מחוץ לתמונה כחומר. בשורות 0–1 ו־7–8 ליד עמודה 0 קורה אותו דבר.</li>
+<li><b>עיגון:</b> ליבת הבלוק לא מחוברת למסגרת, ולכן היא נזרקת. היא "יתום".</li>
+<li><b>תמיכה:</b> הגוף חוזר לרוחבו המלא (<span class="m">\oplus K</span>), ובנוסף פיקסל אחד מהזיז (שורה 4, עמודה 7), שנמצא בטווח הגרעין מליבת הגוף. הבלוק והחלק החיצוני של הזיז <b>אינם</b> בתמיכה.</li>
+<li><b>מה זה אומר למתכנן:</b> נניח שהבלוק אמור להיות גלוי בלוח הזה. אם הזיז אינו גלוי, ההגעה הגאודזית עוברת רק דרך <span class="m">S\cup V</span> ולא מגיעה לבלוק, ולכן הבלוק נדחה מיד. אם גם הזיז גלוי, הבלוק נמצא 2–3 צעדים מהתמיכה ולכן "מושג". אבל אז בדיקת הלוח הגמור (8.2) מוצאת ליבה יתומה בתוך הבלוק, והוא נדחה בכל זאת.</li>
+</ul>
+
+<h2 id="c7s8">7.8 סיבוכיות</h2>
+<div class="box derived"><span class="tag derived">DERIVED</span> לרשת <span class="m">N\times N</span> (<span class="m">N=2304</span>, כ־5.3 מיליון פיקסלים) וגרעין עם <span class="m">|K|=121</span>: כל שחיקה או התפשטות עולה <span class="m">O(N^2|K|)</span> במקרה הגרוע. OpenCV ממומש ב־SIMD, ולכן הזמן בפועל קטן בהרבה מהחסם. רכיבים קשירים עולים <span class="m">O(N^2)</span>. קריאה אחת כוללת לפחות 2 שחיקות, התפשטות ותיוג, ועוד עד 8 ו־16 סבבי תיקון. בפועל רוב הקריאות יוצאות כבר בסבב הראשון.</div>
+</section><script src="vendor/katex.min.js"></script><script>
+for (const e of document.querySelectorAll('.m')) katex.render(e.textContent, e, {output:'mathml', throwOnError:true});
+for (const e of document.querySelectorAll('.mb')) katex.render(e.textContent, e, {output:'mathml', displayMode:true, throwOnError:true});
+</script></body></html>

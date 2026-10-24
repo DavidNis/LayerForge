@@ -1,0 +1,75 @@
+{
+  "layers": [
+    {
+      "layer": "layer_09_000100",
+      "px_diff_from_mask": 0,
+      "four_neighbor": "PASS",
+      "width_1_2mm": "PASS",
+      "perimeter_complete": true
+    },
+    {
+      "layer": "layer_08_eac007",
+      "px_diff_from_mask": 0,
+      "four_neighbor": "PASS",
+      "width_1_2mm": "PASS",
+      "perimeter_complete": true
+    },
+    {
+      "layer": "layer_07_97cce5",
+      "px_diff_from_mask": 0,
+      "four_neighbor": "PASS",
+      "width_1_2mm": "PASS",
+      "perimeter_complete": true
+    },
+    {
+      "layer": "layer_06_8aa1a2",
+      "px_diff_from_mask": 0,
+      "four_neighbor": "PASS",
+      "width_1_2mm": "PASS",
+      "perimeter_complete": true
+    },
+    {
+      "layer": "layer_05_3d7033",
+      "px_diff_from_mask": 0,
+      "four_neighbor": "PASS",
+      "width_1_2mm": "PASS",
+      "perimeter_complete": true
+    },
+    {
+      "layer": "layer_04_000100",
+      "px_diff_from_mask": 0,
+      "four_neighbor": "PASS",
+      "width_1_2mm": "PASS",
+      "perimeter_complete": true
+    },
+    {
+      "layer": "layer_03_fcfefe",
+      "px_diff_from_mask": 0,
+      "four_neighbor": "PASS",
+      "width_1_2mm": "PASS",
+      "perimeter_complete": true
+    },
+    {
+      "layer": "layer_02_7cae49",
+      "px_diff_from_mask": 0,
+      "four_neighbor": "PASS",
+      "width_1_2mm": "PASS",
+      "perimeter_complete": true
+    },
+    {
+      "layer": "layer_01_609337",
+      "px_diff_from_mask": 0,
+      "four_neighbor": "PASS",
+      "width_1_2mm": "PASS",
+      "perimeter_complete": true
+    },
+    {
+      "layer": "layer_00_bf3934",
+      "px_diff_from_mask": 0,
+      "four_neighbor": "PASS",
+      "width_1_2mm": "PASS",
+      "perimeter_complete": true
+    }
+  ],
+  "stack_mismatch_px": 0
+}

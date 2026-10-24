@@ -290,3 +290,36 @@ reconstruction, every sheet PASS on the unchanged validator at 4x (8x NOT RUN).
 - 2.0 mm cells, color-finishing beam 16: stopped by host memory pressure, no result.
 Hard lower bound by argument: 9 sheets (8 colors + black must precede and
 follow the light-blue body). Not user approved; no CAD exported.
+
+## 2026-10-21 second unseen image: van_gogh_p.jfif
+
+- Automatic palette (k-means in CIELAB on non-edge pixels, merge < 14):
+  10 colors. Full-resolution snap at 2048 px height = 200 mm (width 163.7 mm);
+  side strips treated as frame on every sheet. Flattened target awaits user
+  visual approval. Evidence: `artifacts/l1_van_gogh_v1/`.
+- Planner (2 mm cells, color-finishing beam 8): 13 sheets, exact 4x
+  reconstruction, all 13 PASS the unchanged validator at 4x (8x NOT RUN);
+  2 of 36 regions split (32 mm seams). Lower bound 11 (10 colors + black
+  before and after yellow). Same code and settings as the turtle; no
+  per-image tuning. Character artwork is third-party IP: do not publish.
+
+## 2026-10-21 van_gogh_p user-requested artwork edits
+
+- Option A (cheek junction): 1.6 mm2 of sub-1.6 mm yellow spike tips at the
+  left cheek set to black. Planner: 11 sheets (= lower bound), exact, all PASS
+  at 4x, 1 region split (17 mm seams). `artifacts/l1_van_gogh_v1/planner_optA/`
+- Option B (A + dark hat band -> black, 125 mm2): 10 sheets (= lower bound),
+  exact, all PASS at 4x. `artifacts/l1_van_gogh_v1/planner_optB/`
+- Both edits are proposals awaiting user visual approval. 8x NOT RUN; no CAD.
+
+## 2026-10-21 van_gogh_p option B CAD export
+
+- `scripts/export_reveal_stack_cad.py`: mask -> pixel-edge polygons (0.03 mm
+  simplification) -> existing `geometry.extrude_geometry` (CadQuery) -> STEP +
+  STL, 225 x 225 x 1.6 mm (thickness DESIGN_CHOICE), print placement z = 0.
+- 10/10 layers: 1 STEP solid, watertight STL, 1 mesh component, exact bounds.
+- Re-rasterized CAD (4x supersampled) equals planner masks: 0 px difference on
+  every layer; unchanged validator PASS on every CAD-derived mask; stack rebuilt
+  from CAD matches the planned stack with 0 px mismatch.
+- Time: 122.9 s export + read-back, 10.4 s re-validation.
+  Evidence: `artifacts/l1_van_gogh_v1/cad_optB/`. Physical print PENDING.

@@ -1,0 +1,78 @@
+<h1>בניית CAD וייצוא</h1>
+<p>הסקריפט <span class="ref" data-sym="def main">scripts/export_reveal_stack_cad.py:53</span> קורא את קובצי <code>retained_material_mask.png</code> בלבד, ולא שום מצב אחר של המתכנן. לכן הגאומטריה הפיזית נגזרת בדיוק מהמסכה שעברה אימות.</p>
+
+<h2>תרשים 5: מסכה ← מוצק</h2>
+<div class="flow">
+ <div class="n"><b>מסכה</b> <code>bool[2304,2304]</code> · פיקסל = <span class="m">s=225/2304</span> מ"מ</div><div class="a">▼ <code>cv2.findContours(RETR_CCOMP, CHAIN_APPROX_SIMPLE)</code></div>
+ <div class="n">קווי מתאר חיצוניים וחורים, בקואורדינטות פיקסל (מרכזי פיקסלים)</div><div class="a">▼ מיפוי למ"מ + היפוך y ← <code>shapely.Polygon(shell, holes)</code></div>
+ <div class="n"><code>unary_union(buffer(0))</code> → <code>buffer(+s/2, mitre)</code> → <code>simplify(0.03, preserve_topology)</code> → <code>buffer(0)</code></div><div class="a">▼ <code>geometry.extrude_geometry(geom, 1.6)</code></div>
+ <div class="n">CadQuery: <code>Wire.makePolygon</code> → <code>Face.makeFromWires(outer, holes)</code> → <code>Solid.extrudeLinear</code> → fuse</div><div class="a">▼</div>
+ <div class="split"><div class="n out"><code>step/layer_XX.step</code></div><div class="n out"><code>stl/layer_XX.stl</code> (tol 0.02 mm, 0.2 rad)</div></div><div class="a">▼ קריאה חוזרת</div>
+ <div class="n dec"><code>importStep</code>: מספר solids · <code>trimesh</code>: watertight, רכיבים, נפח, גבולות ← <code>cad_manifest.json</code></div>
+</div>
+
+<h2>mask_to_geometry: ממסכה לפוליגונים</h2>
+<p><span class="ref" data-sym="def mask_to_geometry">scripts/export_reveal_stack_cad.py:29</span></p>
+<pre class="code" data-file="scripts/export_reveal_stack_cad.py" data-lines="29-50"></pre>
+<h3>שלב א: מעקב קווי מתאר</h3>
+<p><code>RETR_CCOMP</code> מחזיר היררכיה בשתי רמות: קווי מתאר חיצוניים (ההורה הוא 1−) וחורים, שהם הילדים שלהם, ונעבור עליהם בעזרת <code>hierarchy[...][2]</code> (ילד ראשון) ו־<code>[0]</code> (אח הבא). אי שבתוך חור מופיע שוב כקו מתאר חיצוני ברמה העליונה. <code>CHAIN_APPROX_SIMPLE</code> משאיר רק את קצוות הקטעים הישרים (אופקיים, אנכיים ואלכסוניים). OpenCV עוקב אחרי <b>מרכזי</b> פיקסלי הגבול של החומר, גם בחורים.</p>
+<h3>שלב ב: מעבר למ"מ והיפוך ציר</h3>
+<div class="box impl"><span class="tag impl">IMPLEMENTED MATHEMATICS</span> שורה 36:
+<div class="mb">X=(x+0.5)\,s,\qquad Y=(H-y-0.5)\,s,\qquad H=2304,\ s=0.09765625\ \text{mm}</div>
+<p>פיקסל <span class="m">(x,y)</span> תופס ב־CAD את התיבה <span class="m">[xs,(x+1)s]\times[(H-y-1)s,(H-y)s]</span>, ו־<span class="m">(X,Y)</span> הוא מרכזה. y של התמונה גדל כלפי מטה, ו־Y של ה־CAD כלפי מעלה, ולכן יש היפוך. <b>דוגמה:</b> הפיקסל השמאלי־עליון <span class="m">(0,0)</span> ממופה ל־<span class="m">(0.0488,\ 224.95)</span> מ"מ.</p></div>
+<h3>שלב ג: הרחבה בחצי פיקסל</h3>
+<div class="box derived"><span class="tag derived">DERIVED</span> הפוליגון עובר דרך מרכזי פיקסלי הגבול, ולכן הוא קטן בחצי פיקסל מהמסכה האמיתית בכל צד. <code>buffer(s/2, join_style=2, mitre_limit=2.0)</code> מזיז כל צלע החוצה ב־<span class="m">s/2</span> עם פינות חדות (mitre). בצלעות אופקיות ואנכיות, הגבול עובר בדיוק לקצה הפיקסל. בחור, הקו עובר דרך מרכזי החומר שסביבו, וההרחבה מזיזה אותו <b>לתוך</b> החור, שוב בדיוק לקצה. בצלעות אלכסוניות של <code>CHAIN_APPROX_SIMPLE</code> התוצאה היא קו ישר ולא מדרגות, ולכן יש סטייה תת־פיקסלית.</div>
+<h3>שלב ד: פישוט Douglas–Peucker</h3>
+<div class="box theory"><span class="tag theory">THEORETICAL BACKGROUND</span> <code>simplify(ε=0.03, preserve_topology=True)</code> מסיר קודקודים כל עוד המרחק של כל קודקוד שהוסר מהמיתר החדש קטן מ־ε, כלומר 0.03 מ"מ ≈ 0.31 פיקסל. <code>preserve_topology</code> מבטיח שטבעות לא יחצו זו את זו ושחורים לא ייעלמו. <code>buffer(0)</code> בסוף מתקן פוליגונים לא תקינים.</div>
+<div class="box impl"><span class="tag impl">IMPLEMENTED MATHEMATICS</span> בדיקת השטח (שורה 93):
+<div class="mb">\Delta_A=100\cdot\frac{A_{\text{poly}}-n_{\text{px}}\,s^2}{n_{\text{px}}\,s^2}\ \%</div>
+<p>ב־Option B: בין 0.0% (הלוח האחורי) ל־0.085% (הלוח הקדמי, עם 10,595 קודקודים).</p></div>
+<div class="box gap"><span class="tag gap">LIMITATION</span> בשורה 39 קווי מתאר עם פחות מ־3 נקודות מושמטים. רכיב של פיקסל בודד או שני פיקסלים היה נעלם. מסכה שעברה את בדיקה 1 היא רכיב אחד גדול, ולכן זה לא משפיע כאן, אבל זה עלול להשפיע על חורים זעירים.</div>
+
+<h2>extrude_geometry: CadQuery / OpenCascade</h2>
+<p><span class="ref" data-sym="def extrude_geometry">src/layerforge_l1/geometry.py:97</span> (קוד קיים, ללא שינוי)</p>
+<pre class="code" data-file="src/layerforge_l1/geometry.py" data-lines="84-109"></pre>
+<div class="box impl"><span class="tag impl">IMPLEMENTED MATHEMATICS</span>
+<div class="mb">\text{Solid}=\mathrm{Face}(\partial_{\text{out}},\{\partial_{\text{hole}}\})\times[z_0,\ z_0+t],\qquad t=1.6\ \text{mm},\ z_0=0,\qquad V=A\cdot t</div>
+<p>החורים הם wires פנימיים של ה־face, ולכן אחרי ה־extrusion הם <b>חורים אמיתיים</b> שעוברים דרך כל העובי, כמו שנדרש ב־AGENTS.md. אם יש כמה פוליגונים, הם מאוחדים ב־<code>fuse</code>. ב־Option B יש פוליגון אחד בכל לוח, ולכן אין צורך ב־fuse. העובי 1.6 מ"מ הוא <span class="tag obs">DESIGN_CHOICE</span>, ברירת המחדל של <code>--thickness-mm</code>.</p></div>
+
+<h2>ייצוא ובדיקת קריאה חוזרת</h2>
+<pre class="code" data-file="scripts/export_reveal_stack_cad.py" data-lines="72-80"></pre>
+<table class="t small">
+<tr><th>בדיקה</th><th>חישוב</th><th>מה זה מוכיח</th></tr>
+<tr><td class="l">step_solids</td><td>מספר ה־Solids ב־<code>importStep</code></td><td>שהקובץ נפתח ושיש בו מוצק אחד ולא רסיסים</td></tr>
+<tr><td class="l">stl_watertight</td><td><code>mesh.is_watertight</code></td><td>שכל צלע משותפת לשני משולשים בדיוק, כלומר רשת סגורה</td></tr>
+<tr><td class="l">stl_components</td><td><code>len(mesh.split())</code></td><td>שאין איים ברשת</td></tr>
+<tr><td class="l">volume_vs_area_x_thickness_pct</td><td><span class="m">100(V_{\text{mesh}}-A\,t)/(A\,t)</span></td><td>שהמשולשים תואמים לפוליגון</td></tr>
+<tr><td class="l">stl_bounds_mm</td><td><code>mesh.bounds</code></td><td>שהלוח בגודל 225 × 225 × 1.6 ובמקום הנכון</td></tr>
+</table>
+<div class="box derived"><span class="tag derived">DERIVED</span> כל הצלעות ישרות (אין קשתות), ולכן טולרנס ה־tessellation של STL (0.02 מ"מ) לא משנה את הגאומטריה. כל פאה מתחלקת למשולשים בלי קירוב. זה מתאים לסטייה של 0.0% בנפח.</div>
+
+<h2>קואורדינטות הרכבה וקואורדינטות הדפסה</h2>
+<pre class="code" data-file="scripts/export_reveal_stack_cad.py" data-lines="101-116"></pre>
+<ul>
+<li><b>הדפסה:</b> כל קובץ STL/STEP נמצא ב־<span class="m">z\in[0,1.6]</span>, עם הפאה הרחבה על המשטח, ו־XY זהים בכל הלוחות (רישום משותף).</li>
+<li><b>הרכבה:</b> רק מספר ב־manifest: <span class="m">z_0^{(i)}=1.6\,i</span>, כאשר i=0 הוא הלוח האחורי (<code>layer_00</code>) ו־i=9 הקדמי, ב־14.4 מ"מ.</li>
+<li><span class="tag gap">GAP</span> לא נוצר קובץ הרכבה תלת־ממדי ולא תצוגה מפוצצת (exploded) <b>מתוך המוצקים</b>. ההרכבה שהוצגה (<code>stack_from_cad.png</code>) נבנתה מרסטור מחדש של הפוליגונים, כלומר מהגאומטריה שנכנסה ל־CAD, ולא מקריאת קובצי STEP/STL עצמם.</li>
+</ul>
+
+<h2>אימות חוזר אחרי CAD <span class="tag man">AD HOC</span></h2>
+<p>הקוד המלא שהורץ (אינו במאגר):</p>
+<pre class="plain">N=2304; mm=225/N; S=4
+def raster_ss(geom):                          # 4x supersampled, 1/16 sub-pixel precision
+    img=np.zeros((N*S,N*S),np.uint8)
+    f=lambda cs: np.round(np.array([(x/mm*S,(N-y/mm)*S) for x,y in cs])*16-8).astype(np.int32)
+    for poly in polygons(geom):
+        cv2.fillPoly(img,[f(poly.exterior.coords)],1,shift=4)
+        for r in poly.interiors: cv2.fillPoly(img,[f(r.coords)],0,shift=4)
+    return img.reshape(N,S,N,S).sum((1,3))>=(S*S)/2
+for d in layers (front first):
+    m = retained mask; v = visible mask
+    r = raster_ss(mask_to_geometry(m, mm, 0.03))
+    edge = audit_edge_connectivity(r); width = audit_connection_width(r, (v&r)[p:-p,p:-p], grid, DEFAULT_OPTIMIZATION_CONFIG)
+    px_diff = (r != m).sum(); cad_stack[r & ~shown] = layer colour; shown |= r
+stack_mismatch = (cad_stack != mask_derived_composite) inside the artwork</pre>
+<div class="box impl"><span class="tag impl">IMPLEMENTED MATHEMATICS</span>
+<div class="mb">u=\frac{X}{s}S,\quad v=\Big(H-\frac{Y}{s}\Big)S,\qquad r(p)=\Big[\sum_{0\le i,j\le 3}\mathrm{in}(p,i,j)\ \ge 8\Big]</div>
+<p>הפוליגון נצבע ברשת פי 4, עם דיוק של 1/16 פיקסל (<code>shift=4</code>; ההיסט 8− הוא חצי פיקסל). פיקסל נחשב "מלא" אם לפחות חצי מ־16 תתי־הפיקסלים שלו בפנים. <b>תוצאות</b> (<span class="tag obs">OBSERVED</span>, <code>cad_revalidation.json</code>): לכל 10 הלוחות 0 פיקסלים שונים מהמסכה, 4-neighbor PASS, width PASS, מסגרת מלאה. <code>stack_mismatch_px = 0</code>.</p></div>
+<div class="box note">ניסיון ראשון עם <code>fillPoly</code> רגיל (בלי supersampling) הראה הפרשים, אבל הם נבעו מכלל המילוי של ה־rasterizer ולא מהגאומטריה. ההרצה המחודשת ב־supersampling הראתה 0 הפרשים, ורק היא נשמרה בקובץ.</div>

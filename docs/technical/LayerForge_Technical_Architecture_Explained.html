@@ -1,0 +1,440 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<title>LayerForge Technical Architecture Explained</title>
+<style>
+@page{size:A4;margin:18mm 17mm 19mm 17mm}
+*{box-sizing:border-box}
+body{font-family:Arial,"David Libre",sans-serif;color:#172033;background:white;font-size:10.3pt;line-height:1.55;margin:0}
+h1,h2,h3,h4{color:#102a43;line-height:1.25;break-after:avoid;margin:1.1em 0 .45em}
+h1{font-size:25pt;border-bottom:3px solid #168aad;padding-bottom:5mm}
+h2{font-size:18pt;border-bottom:1px solid #9ccad8;padding-bottom:2mm}
+h3{font-size:13.5pt;color:#0b7285}
+h4{font-size:11.2pt;color:#334e68}
+p{margin:.35em 0 .65em;text-align:justify;orphans:3;widows:3}
+ul,ol{margin:.3em 0 .8em;padding-right:1.5em}
+li{margin:.2em 0}
+table{width:100%;border-collapse:collapse;margin:.6em 0 1em;font-size:8.6pt;break-inside:avoid}
+th,td{border:1px solid #b8c4ce;padding:5px 6px;vertical-align:top}
+th{background:#e8f4f7;color:#102a43;font-weight:700}
+tr:nth-child(even) td{background:#f8fafc}
+code,pre,.ltr,.math{direction:ltr;unicode-bidi:embed;text-align:left;font-family:Consolas,"Courier New",monospace}
+code{background:#eef2f6;padding:1px 3px;border-radius:3px;font-size:.92em}
+pre{white-space:pre-wrap;background:#101827;color:#e6edf3;padding:9px 11px;border-radius:6px;font-size:8.2pt;line-height:1.42;break-inside:avoid}
+.math{background:#f4f8fb;border-right:4px solid #168aad;padding:8px 12px;margin:.6em 0;font-family:"Cambria Math",Consolas,monospace;font-size:10pt}
+.page{break-before:page}
+.cover{height:255mm;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;background:linear-gradient(145deg,#f5fbfd,#e8f4f7 58%,#fff5e8);padding:25mm;border:1px solid #bfdbe4}
+.cover h1{font-size:34pt;border:0;margin:0;color:#0b486b}
+.cover .sub{font-size:17pt;color:#486581;margin-top:7mm}
+.cover .meta{margin-top:25mm;padding:5mm 8mm;border-top:1px solid #9ccad8;border-bottom:1px solid #9ccad8;font-size:10pt}
+.badge{display:inline-block;padding:2px 7px;border-radius:12px;background:#e8f4f7;color:#0b7285;font-weight:700;margin:2px}
+.fact{border-right:5px solid #2f9e44;background:#eefaf0;padding:8px 10px;margin:.7em 0}
+.warn{border-right:5px solid #f08c00;background:#fff8e8;padding:8px 10px;margin:.7em 0}
+.gap{border-right:5px solid #c92a2a;background:#fff1f1;padding:8px 10px;margin:.7em 0}
+.note{border-right:5px solid #168aad;background:#edf8fb;padding:8px 10px;margin:.7em 0}
+.label{font-size:8pt;font-weight:700;letter-spacing:.04em;color:#526777}
+.diagram{direction:ltr;text-align:center;margin:10px 0 14px;break-inside:avoid}
+.flow{display:flex;align-items:stretch;justify-content:center;gap:5px;flex-wrap:wrap}
+.box{border:1.5px solid #168aad;background:#eff9fc;border-radius:6px;padding:7px 8px;min-width:88px;max-width:145px;font-size:8.2pt;direction:ltr}
+.box.exp{border-style:dashed;background:#fff8e8;border-color:#f08c00}
+.box.manual{border-color:#6f42c1;background:#f4f0ff}
+.arrow{align-self:center;font-size:15pt;color:#54788a}
+.caption{direction:rtl;text-align:center;font-size:8.3pt;color:#526777;margin-top:5px}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:10px;direction:ltr}
+.two>*{direction:rtl}
+.figure{border:1px solid #cbd5df;padding:7px;border-radius:5px;background:#fff;break-inside:avoid}
+.figure img{max-width:100%;display:block;margin:auto;image-rendering:auto}
+.small{font-size:8.5pt;color:#526777}
+.source{direction:ltr;text-align:left;color:#334e68;font-size:8.2pt;margin:.2em 0 .8em}
+.toc ol{columns:2;column-gap:12mm}
+.toc li{break-inside:avoid;margin:.45em 0}
+.chapter{break-before:page}
+.keep{break-inside:avoid}
+.matrix{direction:ltr;text-align:center;font-family:Consolas,monospace;white-space:pre;line-height:1.35}
+.status-active{color:#0b7285;font-weight:700}.status-exp{color:#b35c00;font-weight:700}.status-manual{color:#6f42c1;font-weight:700}
+.footer{position:fixed;bottom:-12mm;left:0;right:0;text-align:center;color:#73808c;font-size:7.5pt;direction:ltr}
+</style>
+</head>
+<body>
+<div class="footer">LayerForge V3 | Technical Architecture | October 2026</div>
+
+<section class="cover">
+  <div class="badge">מסמך מבוסס קוד</div>
+  <div class="badge">L-1 / L1 ניסויי</div>
+  <h1>LayerForge V3</h1>
+  <div class="sub">הארכיטקטורה הטכנית מוסברת מן המקור</div>
+  <p style="text-align:center;max-width:130mm;margin-top:12mm">מדריך מפורט בעברית למודלי הנתונים, עיבוד התמונה, תכנון שכבות חיסורי, אימות מבני, בניית CAD, אלגוריתמי החיפוש והמתמטיקה שממומשת בפועל במאגר.</p>
+  <div class="meta">
+    <div>נבדק מול revision <span class="ltr">1491fbb03b6368369147e74690ef128413a3b62a</span> בענף <span class="ltr">main</span></div>
+    <div>סביבת מקור: <span class="ltr">Python 3.12.1</span>, Windows, קובצי המקור תחת <span class="ltr">src/layerforge_l1/</span></div>
+    <div>תאריך בדיקה: 21 באוקטובר 2026</div>
+  </div>
+</section>
+
+<section class="chapter">
+<h1>הקדמה, היקף ומתודולוגיית אימות</h1>
+<p>מסמך זה מתאר את מה שקיים בקוד, ולא ארכיטקטורה רצויה לעתיד. כל טענה מרכזית קושרה לקובץ, לפונקציה ולטווח שורות. מסמכי הפרויקט שימשו להבנת הכוונה והמעמד, אך ההתנהגות הטכנית נקבעה לפי המימוש, הבדיקות ודוחות ההרצה הקיימים.</p>
+<div class="fact"><span class="label">ממצא מאומת</span><br>אין כיום מנוע יחיד שמחבר תמונה שרירותית ישירות ל-CAD דרך CLI אחד. קיימים כמה נתיבים: הוכחת CAD ידנית; מסלול אוטומטי ישן עם מחברים; מתכנני מסכות חיסוריים; CP-SAT ניסויי; ו-<span class="ltr">RevealPlanner</span> חדש יותר שמופעל מסקריפטים.</div>
+<div class="warn"><span class="label">משמעות</span><br>המונח "המתכנן הפעיל" תלוי בנקודת הכניסה. פקודת <span class="ltr">auto</span> של ה-CLI מפעילה את האלגוריתם הישן מבוסס המחברים. <span class="ltr">RevealPlanner</span> הוא המתכנן הניסויי העדכני ביותר שמגובה בארטיפקטים, אך אינו פקודת CLI ציבורית. פקודת <span class="ltr">build</span> בונה תוכנית ידנית מ-manifest.</div>
+<h2>סימוני אמינות</h2>
+<table><tr><th>סימון</th><th>משמעות במסמך</th></tr>
+<tr><td>ממומש</td><td>נראה ישירות בפונקציה פעילה או בסקריפט ביצוע.</td></tr>
+<tr><td>הסבר נגזר</td><td>נוסחה או אינווריאנט שמתרגמים פעולה קיימת לשפה מתמטית.</td></tr>
+<tr><td>רקע תאורטי</td><td>הקשר לימודי בלבד; אינו טענה שקוד זה מממש את כל התאוריה.</td></tr>
+<tr><td>ניסויי</td><td>מודול או סקריפט שקיים ועובד, אך אינו משולב בנתיב המוצר הראשי.</td></tr>
+<tr><td>פער</td><td>חיבור חסר, ראיה חסרה, או מגבלה מפורשת במימוש.</td></tr></table>
+<h2>מצב המאגר בזמן הבדיקה</h2>
+<p>העבודה נעשתה במצב קריאה בלבד ביחס לקוד. המאגר כבר הכיל שינויים לא-מחויבים ב-<span class="ltr">STATUS.md</span>, <span class="ltr">scripts/run_turtle_reveal_planner_poc.py</span>, <span class="ltr">fullres_flatten.py</span> ו-<span class="ltr">reveal_planner.py</span>, וכן קבצים לא-מנוהלים. הם נחשבו למצב קיים של המשתמש ולא שונו לצורך התיעוד.</p>
+</section>
+
+<section class="chapter toc">
+<h1>תוכן עניינים</h1>
+<ol>
+<li>מטרת המערכת ומודל המוצר</li><li>מפת המאגר והארכיטקטורה</li><li>נקודות כניסה ונתיבי ביצוע</li><li>קליטת תמונה והכנת נתונים</li><li>מודלי נתונים פנימיים</li><li>משפחת אלגוריתמי תכנון השכבות</li><li>המתמטיקה הממומשת</li><li>בניית מסכות חומר וחיתוכים</li><li>אימות חיבוריות ורוחב פיזי</li><li>נרמול קווי מתאר ותיקון נסתר</li><li>בניית CAD ויצוא</li><li>דוגמאות עבודה מלאות</li><li>בדיקות, ראיות ומגבלות</li><li>מדריך ניווט למפתח</li><li>מילון מונחים</li><li>אינדקס מקור</li>
+</ol>
+<h2>מפת קריאה מהירה</h2>
+<p>קורא שרוצה להבין קודם את ליבת התכנון יתחיל בפרקים 6 עד 9. מי שמתחזק יצוא CAD יתחיל בפרקים 8, 10 ו-11. מי שמנסה להבין איזה מנוע רץ בפועל חייב לקרוא את פרק 3 ואת טבלת ההשוואה בפרק 6.</p>
+</section>
+
+<section class="chapter">
+<h1>1. מטרת המערכת ומודל המוצר</h1>
+<p>LayerForge מייצג איור שטוח כערימה מסודרת של יריעות פיזיות. יריעה אינה "אובייקט סמנטי" כמו עין או ענן. היא מסכת חומר בצבע יחיד, בעלת היקף חיצוני משותף, שיכולה לשאת כמה אזורים חזותיים נפרדים. חורים ביריעות קדמיות חושפים צבע מיריעות עמוקות יותר.</p>
+<div class="diagram"><div class="flow"><div class="box">Target indexed image<br>T(x,y)</div><div class="arrow">→</div><div class="box">Front sheet<br>M0, color c0</div><div class="arrow">→</div><div class="box">Deeper sheets<br>M1...Mk-1</div><div class="arrow">→</div><div class="box">First visible material<br>R(x,y)</div></div><div class="caption">העיקרון החיסורי: הצבע המוצג בכל פיקסל הוא צבע היריעה הקדמית ביותר שמכילה חומר באותו מיקום.</div></div>
+<div class="math"><b>IMPLEMENTED MATHEMATICS</b><br>R(x,y) = c<sub>min { d : M<sub>d</sub>(x,y)=1 }</sub></div>
+<p>כאן <span class="ltr">d=0</span> הוא העומק הקדמי ביותר, <span class="ltr">M_d</span> היא מסכת החומר הבינרית ו-<span class="ltr">c_d</span> הוא צבע היריעה. המימוש מופיע בצורות שונות ב-<span class="ltr">subtractive_poc._compose</span>, ב-<span class="ltr">run_turtle_reveal_planner_poc.run_variant</span> וב-<span class="ltr">hidden_width_repair.compose_back_to_front</span>.</p>
+<p>היקף משותף נוצר כרצועה סביב aperture האמנות. בנתיב הידני הוא פוליגון טבעתי אמיתי; בנתיבי raster הוא מסכה שבה אזור הגבול קבוע ל-<span class="ltr">True</span>. מטרתו רישום XY וחיבור מכני, לא מסגרת חיצונית למוצר.</p>
+<h2>אינווריאנטים מרכזיים בקוד</h2>
+<ul><li>צבע יחיד ליריעה פיזית.</li><li>החומר המצטבר של שכבה קדמית כולל חומר חזותי שלה וחומר נסתר שמותר מאחורי שכבות שכבר מכסות את המקום.</li><li>הקומפוזיט חייב להיות זהה ליעד האינדקסי במסלולים החיסוריים והגלובליים.</li><li>חיבוריות פיזית נבדקת ב-4 שכנים, לא במגע אלכסוני בלבד.</li><li>רוחב מבני נבדק באמצעות erosion של מסכת החומר, ולא באמצעות עובי של חור.</li></ul>
+</section>
+
+<section class="chapter">
+<h1>2. מפת המאגר והארכיטקטורה</h1>
+<div class="diagram"><div class="flow">
+<div class="box manual">Manual manifest<br>pipeline.py</div><div class="box">Legacy auto<br>auto_pipeline.py</div><div class="box">Subtractive PoC<br>subtractive_poc.py</div><div class="box">Region search<br>layer_optimization.py</div><div class="box">Width-aware beam<br>width_aware_planner.py</div><div class="box exp">CP-SAT<br>experimental_global_planner.py</div><div class="box exp">Per-cell reveal<br>reveal_planner.py</div>
+</div><div class="caption">שבעה מוקדי תכנון/בנייה. הסגול ידני, הכתום ניסויי מבודד. אין ביניהם שרשרת אחת אוטומטית מלאה.</div></div>
+<table><tr><th>תחום</th><th>קבצים עיקריים</th><th>תפקיד בפועל</th></tr>
+<tr><td>CLI</td><td class="ltr">cli.py, __main__.py</td><td>פענוח פקודות וייבוא עצל של תת-המערכת המתאימה.</td></tr>
+<tr><td>CAD ידני</td><td class="ltr">pipeline.py, geometry.py, raster.py</td><td>קריאת manifest, Boolean 2D, extrusion, STEP/STL, read-back ו-previews.</td></tr>
+<tr><td>אוטומציה ישנה</td><td class="ltr">auto_pipeline.py</td><td>K-means, שכבה לצבע, חיבור רכיבים בנתיבים נראים, יצוא CAD.</td></tr>
+<tr><td>חיסור raster</td><td class="ltr">subtractive_poc.py</td><td>אינדוקס, קבוצות ספק, מסכות מצטברות, קומפוזיט מדויק.</td></tr>
+<tr><td>חיפוש אזורים</td><td class="ltr">layer_optimization.py, width_aware_planner.py</td><td>גרף רכיבים, bitsets, beam, דירוג, בדיקת גאומטריה אמיתית.</td></tr>
+<tr><td>תכנון גלובלי</td><td class="ltr">experimental_global_planner.py</td><td>CP-SAT בעומק קבוע, זרימה לחיבור prefix, oracle גאומטרי.</td></tr>
+<tr><td>Reveal</td><td class="ltr">reveal_planner.py</td><td>פיצול אזור לתאים, maximal reveal, תמיכה נסתרת וחיפוש רצף צבעים.</td></tr>
+<tr><td>אימות ותיקון</td><td class="ltr">connectivity_repair.py, hidden_width_repair.py</td><td>4-neighbor, erosion core, orphan cores ונתיבי הרחבה נסתרים.</td></tr>
+<tr><td>הכנת תמונה</td><td class="ltr">fullres_flatten.py, contour_normalization.py, contour_consistency.py, tiny_region_cleanup.py</td><td>ניסויי flattening ונרמול קווי מתאר לפני תכנון.</td></tr></table>
+<h2>תלויות מדויקות</h2>
+<p>החבילה דורשת <span class="ltr">Python >=3.12,<3.13</span>. התלויות המוצמדות הן CadQuery 2.6.1, NumPy 2.2.6, OpenCV 4.10.0.84, Pillow 10.3.0, SciPy 1.14.0, Shapely 2.0.6, Trimesh 4.8.3 ו-Matplotlib 3.9.0. OR-Tools 9.14.6206 היא תלות אופציונלית בשם <span class="ltr">global-planner</span>.</p>
+<div class="source">pyproject.toml:5-26</div>
+</section>
+
+<section class="chapter">
+<h1>3. נקודות כניסה ונתיבי ביצוע</h1>
+<p>נקודת הכניסה המותקנת היא <span class="ltr">layerforge-l1 = layerforge_l1.cli:main</span>. הקובץ <span class="ltr">__main__.py</span> מפנה לאותה פונקציה. ה-CLI מגדיר פקודות רבות ומבצע imports רק לאחר parsing, כדי שפקודות 2D לא ישלמו את עלות טעינת CadQuery.</p>
+<div class="source">src/layerforge_l1/cli.py:33-130, 132-258; pyproject.toml:25-26</div>
+<table><tr><th>פקודה</th><th>נתיב אמיתי</th><th>פלט עיקרי</th></tr>
+<tr><td class="ltr">build / verify</td><td class="ltr">pipeline.build / pipeline.verify</td><td>CAD ידני של Orbit Bloom ואימות עץ ארטיפקטים.</td></tr>
+<tr><td class="ltr">auto</td><td class="ltr">auto_pipeline.run_auto_case</td><td>הצעה אוטומטית ישנה, CAD ודו"ח התאמה.</td></tr>
+<tr><td class="ltr">poc2d</td><td class="ltr">subtractive_poc.run_poc_case</td><td>מסכות חיסוריות בלבד.</td></tr>
+<tr><td class="ltr">optimize2d</td><td class="ltr">layer_optimization.run_optimization_case</td><td>אופטימיזציית סדר אזורים.</td></tr>
+<tr><td class="ltr">plan-width-aware2d</td><td class="ltr">width_aware_planner.run_width_aware_case</td><td>beam עם oracle רוחב.</td></tr>
+<tr><td class="ltr">validate-direct2d</td><td class="ltr">shadowbox_simplification.run_direct_case</td><td>בדיקת יעד ישיר והפעלת אותו planner.</td></tr>
+</table>
+<p><span class="ltr">experimental_global_planner.main</span> הוא entrypoint של מודול עצמאי, ו-<span class="ltr">RevealPlanner</span> מופעל דרך סקריפטים כגון <span class="ltr">scripts/run_turtle_reveal_planner_poc.py</span>. לכן הם ממומשים אך לא "ברירת המחדל" של ה-CLI.</p>
+<div class="gap">אין פונקציה אחת שמקבלת כיום PNG כללי, בוחרת אוטומטית בין preprocessing, CP-SAT או Reveal, וממשיכה באופן מאומת ל-CAD. יצוא CAD ממסכות Reveal נמצא בסקריפט נפרד.</div>
+</section>
+
+<section class="chapter">
+<h1>4. קליטת תמונה והכנת נתונים</h1>
+<h2>4.1 המסלול הישן: quantization גלובלי</h2>
+<p><span class="ltr">auto_pipeline.quantize_image</span> קורא RGBA, מרכיב alpha על לבן, משנה גודל וממיר ל-Lab. K-means של OpenCV מייצר מרכזים, התוויות מקנונות בסדר דטרמיניסטי, ורכיבים קטנים מוחלפים לפי טבעת שכנים. רקע נבחר לפי משקל של פיקסלי מסגרת כפול שלוש ועוד שטח; הצבע הכהה ביותר לפי ערוץ L.</p>
+<div class="source">src/layerforge_l1/auto_pipeline.py:99-190</div>
+<div class="math"><b>IMPLEMENTED MATHEMATICS</b><br>alpha composite: C = α C<sub>src</sub> + (1-α)·255<br>nearest palette: label(p)=arg min<sub>j</sub> || Lab(p)-μ<sub>j</sub> ||²</div>
+<p>המרחק הוא אוקלידי במרחב Lab של OpenCV. זוהי קירוב פרקטי לדמיון תפיסתי, לא Delta E תקני מלא. K-means ממזער סכום ריבועי מרחקים; הוא אינו מבין עצמים, הצללה או קווי מתאר.</p>
+<h2>4.2 המסלול החיסורי</h2>
+<p><span class="ltr">subtractive_poc.analyze_image</span> מבצע bilateral filter, דגימת פיקסלים, K-means ב-Lab, מיזוג מרכזים קרובים, שיוך nearest-center וניקוי רכיבים זעירים. אחר כך <span class="ltr">_provider_regions</span> מפיק רכיבי 4-neighbor וקבוצות צבע שנגישות מן החוץ.</p>
+<div class="source">src/layerforge_l1/subtractive_poc.py:60-199, 202-301</div>
+<h2>4.3 מתאם lossless</h2>
+<p><span class="ltr">experimental_global_planner.exact_index</span> משתמש ב-<span class="ltr">np.unique</span> על שלשות RGB. כל צבע קיים מקבל אינדקס, בלי יצירת צבע ביניים. <span class="ltr">load_lossless_target</span> משתמש ב-nearest-neighbor אם נדרש resize. בבדיקת benchmark נשמרו בדיוק ארבעת הצבעים.</p>
+<div class="source">src/layerforge_l1/experimental_global_planner.py:73-122; tests/test_experimental_global_planner.py:24-29</div>
+<h2>4.4 flattening וניקוי</h2>
+<p><span class="ltr">fullres_flatten</span> מבצע bilateral, בחירת palette מפיקסלים שאינם edges, nearest Lab, הצבעת רוב בחלון ומיזוג fragments. <span class="ltr">flat_color_workflow.flatten_art_cells</span> שונה: הוא מזהה גבולות חזקים באמצעות הפרשי Lab, Canny וקו דיו כהה, יוצר תאי אמנות ב-4-connectivity, ומחליף תא רק אם פיזור הצבע שלו נראה חד-שיאי. תאים סמוכים מתמזגים רק כאשר הפרש Lab קטן והתפר אינו נתמך בקו כהה.</p>
+<div class="source">src/layerforge_l1/fullres_flatten.py:1-210; src/layerforge_l1/flat_color_workflow.py:93-364</div>
+<div class="warn">אלה מסלולים ניסויים נפרדים. אין ב-CLI מנגנון שבוחר ביניהם באופן אוטומטי לפי איכות.</div>
+</section>
+
+<section class="chapter">
+<h1>5. מודלי נתונים פנימיים</h1>
+<table><tr><th>מושג</th><th>ייצוג</th><th>יוצר</th><th>צרכנים</th></tr>
+<tr><td>תמונת יעד</td><td class="ltr">labels: ndarray[H,W], palette_rgb: ndarray[C,3]</td><td class="ltr">analyze_image / exact_index</td><td>כל המתכננים</td></tr>
+<tr><td>RegionNode</td><td>אינדקס, צבע, שטח, bounds, centroid, bits</td><td class="ltr">build_region_graph</td><td>optimizer, width-aware, CP-SAT</td></tr>
+<tr><td>מצב bitset</td><td class="ltr">int</td><td class="ltr">SearchRecord.state</td><td>beam ו-memoization</td></tr>
+<tr><td>Provider</td><td>קבוצה של region IDs בעומק ובצבע אחד</td><td class="ltr">_provider_regions / _materialize_analysis</td><td class="ltr">construct_layers</td></tr>
+<tr><td>יריעת raster</td><td class="ltr">physical_mask, cutout_mask, visible_aperture</td><td class="ltr">construct_layers / RevealPlanner.materialize</td><td>validator, preview, CAD script</td></tr>
+<tr><td>שכבת manifest</td><td>JSON עם additive, cutouts, transforms, צבע ועובי</td><td>fixture ידני או auto manifest</td><td class="ltr">pipeline.build</td></tr>
+<tr><td>LayerBuild</td><td>spec, Shapely area, CadQuery solid, paths ו-footprints</td><td class="ltr">pipeline.build</td><td>preview ו-validation</td></tr></table>
+<h2>bitsets</h2>
+<p>רכיב מספר <span class="ltr">r</span> מיוצג בביט <span class="ltr">1&lt;&lt;r</span>. איחוד קבוצות הוא OR; בדיקת שייכות היא AND; מספר רכיבים הוא <span class="ltr">bit_count()</span>. זה חוסך אובייקטי set ומשמש כמפתח hash דטרמיניסטי.</p>
+<div class="math"><b>DERIVED EXPLANATION</b><br>S' = S ∨ G &nbsp;&nbsp;&nbsp; uncovered = ALL ∧ ¬S &nbsp;&nbsp;&nbsp; |S| = bit_count(S)</div>
+<p>הזהות של מצב ב-<span class="ltr">layer_optimization</span> וב-<span class="ltr">width_aware_planner</span> היא בעיקר קבוצת האזורים שכבר שובצו. נתיבים שונים שמגיעים לאותו bitset נחשבים שקולים לצורך ההמשך, אף שסדר העבר נשמר רק ברשומה הטובה שנבחרה. זוהי הנחת דחיסה חשובה.</p>
+</section>
+
+<section class="chapter">
+<h1>6. אלגוריתמי תכנון השכבות שממומשים בפועל</h1>
+<h2>6.1 המתכנן האוטומטי הישן: שכבה לצבע ומחברי MST</h2>
+<p><span class="ltr">auto_pipeline.propose</span> מנסה סדרי צבע מוגבלים. לכל צבע, <span class="ltr">_shortest_connector_tree</span> מוצא רכיבי connected components ומרכזים, מוסיף node וירטואלי לקצה, בונה עץ פורש מינימלי במשקל מסלול, ומשרטט קווים ישירים או בצורת L. העלות מעדיפה חומר בצבע עצמו ואז אזורים שכבר מכוסים.</p>
+<p>לאחר dilation של המחברים והוספת registration band מתקבלת מסכה פיזית. <span class="ltr">_route_order</span> מרכיב קומפוזיט וסופר mismatch ופיקסלי connector נראים. האלגוריתם מסוגל להפיק CAD, אך המחברים עלולים לשנות את התמונה. הוא אינו planner חיסורי גלובלי.</p>
+<div class="source">src/layerforge_l1/auto_pipeline.py:193-337, 339-487, 739-820</div>
+<h2>6.2 Subtractive PoC: קבוצות ספק greedy</h2>
+<p><span class="ltr">_provider_regions</span> מחלץ רכיבי צבע ב-4 שכנים ואת יחסי המגע ביניהם. בכל סבב הוא לוקח את כל האזורים הנגישים של צבע נבחר, מסמן אותם כסופקו, וחוזר. כך אותו צבע יכול להופיע שוב בעומק מאוחר. <span class="ltr">discover_order</span> אינו מחפש סדר חלופי אמיתי; הוא בודק את סדר קבוצות הספק שכבר נגזר.</p>
+<div class="source">src/layerforge_l1/subtractive_poc.py:202-410</div>
+<p>לכל depth, החומר בתוך aperture הוא איחוד כל האזורים שנמצאים בחזית הנוכחית או עמוק ממנה לפי מיפוי provider. ההיקף מתווסף תמיד. החורים הם המשלים בתוך aperture.</p>
+<h2>6.3 אופטימיזציית Region Bitset</h2>
+<p><span class="ltr">build_region_graph</span> יוצר node לכל רכיב 4-neighbor, adjacency bitsets, bits לפי צבע ו-border bits. <span class="ltr">optimize_region_sequence</span> מחזיק beam של <span class="ltr">SearchRecord</span>. פעולה חוקית בוחרת צבע ולוקחת את כל האזורים של אותו צבע שנגישים במצב הנוכחי. הדירוג כולל מספר שכבות, חזרות צבע, חומר נשמר וגבול תחתון לפי צבעים שנותרו.</p>
+<div class="source">src/layerforge_l1/layer_optimization.py:55-72, 98-358</div>
+<div class="warn">החיפוש מוגבל ב-<span class="ltr">max_states</span> וב-beam, ולכן תוצאה היא הטובה שנמצאה תחת התקציב. הוא אינו הוכחת optimum.</div>
+<h2>6.4 Width-aware beam</h2>
+<p>המודול מוסיף evaluator של המסכה הפיזית האמיתית לכל bitset. <span class="ltr">_candidate_groups</span> כולל קבוצות legacy וגם cohorts בעלי חתימת topology משותפת: supports, מגע בגבול וצבעי עתיד. כך subsets של אותו צבע יכולים לחלוק יריעה.</p>
+<p>הדירוג החדש בוחן המשכים חוקיים, סכנת dead-end, אזורים וצבעים נגישים, orphan cores, שכבות וחזרות צבע. בחירת beam שומרת מחצית מהקיבולת לחתימות המשך שונות ואז ממקסמת מרחק Jaccard בין assigned sets. כל transition עדיין מקומי ובלתי הפיך.</p>
+<div class="source">src/layerforge_l1/width_aware_planner.py:99-161, 163-333, 335-519, 532-853</div>
+<h2>6.5 CP-SAT גלובלי בעומק קבוע</h2>
+<p>זהו backend מבודד. לכל region ולעומק יש boolean <span class="ltr">x[r,d]</span>; לכל עומק וצבע <span class="ltr">y[d,c]</span>; ו-<span class="ltr">p[r,d]</span> מציין אם region כבר מופיע ב-prefix עד עומק d. כל region משויך בדיוק לעומק אחד וכל שכבה בדיוק לצבע אחד ואינה ריקה. התאמת צבע נאכפת על ידי <span class="ltr">x[r,d] ≤ y[d,color(r)]</span>.</p>
+<p>חיבוריות prefix נאכפת בקירוב טופולוגי מדויק לגרף באמצעות single-commodity flow מן perimeter root. רוחב raster אינו ב-CP-SAT; הוא oracle חיצוני. הצעה שנכשלת מוסיפה exact-prefix no-good בלבד, כלומר נאסר רק אותו bitset בעומק הכושל.</p>
+<div class="source">src/layerforge_l1/experimental_global_planner.py:131-309, 334-405, 438-742</div>
+<div class="gap">Connected source-color region אינו יכול להתפצל בין עומקים. מספר השכבות K קבוע בכל ריצה וכל שכבה חייבת להיות לא ריקה. לכן INFEASIBLE מוכיח רק חוסר פתרון במודל המוגבל הזה.</div>
+<h2>6.6 RevealPlanner: תכנון reveal לפי תאים</h2>
+<p>זהו backend הניסויי החדש ביותר שמגובה בדוחות הנוכחיים. הוא מפצל region צבעוני לתאים לפי grid פיזי, ומאחד fragments קטנים לאותו source region. מצב הוא boolean vector של תאים שכבר מכוסים מלפנים. עבור כל צבע, <span class="ltr">maximal_reveal</span> מתחיל בכל התאים הבלתי מכוסים של הצבע ומסיר שוב ושוב תאים שיש בהם פיקסלים לא נתמכים עד נקודת שבת.</p>
+<p><span class="ltr">structural_support</span> שוחק את תחום ה-covered, שומר cores המחוברים להיקף, מרחיב אותם חזרה, ומנסה לתקן מגעים אלכסוניים דרך footprints שנשארים בתוך covered. תאים גלויים מצורפים לאחר מכן. מכיוון שכל חומר תמיכה נמצא מאחורי משהו שכבר כוסה, הוא אינו משנה את הקומפוזיט.</p>
+<p><span class="ltr">beam_search</span> בוחר רצף צבעים קצר של maximal reveals, deduplicates states באמצעות <span class="ltr">np.packbits</span>, ומדרג לפי שטח מכוסה או מספר צבעים לא גמורים. <span class="ltr">eliminate_sheets</span> מנסה להעביר reveal לשכבה מאוחרת באותו צבע ורק אם כל שכבות הביניים נשארות חוקיות.</p>
+<div class="source">src/layerforge_l1/reveal_planner.py:37-158, 171-234, 237-460</div>
+<h2>השוואה מדויקת</h2>
+<table><tr><th>מנוע</th><th>יחידת החלטה</th><th>גלובלי?</th><th>רוחב בזמן תכנון</th><th>סטטוס שילוב</th></tr>
+<tr><td>Legacy auto</td><td>צבע + components</td><td>לא</td><td>לא</td><td>CLI auto</td></tr>
+<tr><td>Subtractive greedy</td><td>provider regions</td><td>לא</td><td>אחרי בנייה</td><td>CLI poc2d</td></tr>
+<tr><td>Region optimizer</td><td>כל reachable region בצבע</td><td>beam מוגבל</td><td>בעיקר topology</td><td>CLI optimize2d</td></tr>
+<tr><td>Width-aware</td><td>קבוצת regions</td><td>beam מוגבל</td><td>כן, actual mask</td><td>CLI</td></tr>
+<tr><td>CP-SAT</td><td>region שלם לעומק</td><td>joint fixed-K</td><td>oracle איטרטיבי</td><td>מודול עצמאי</td></tr>
+<tr><td>Reveal</td><td>תא בתוך region</td><td>beam על רצף צבעים</td><td>כן, construction-aware</td><td>סקריפטים ניסויים</td></tr></table>
+</section>
+
+<section class="chapter">
+<h1>7. יסודות מתמטיים של המימוש</h1>
+<h2>7.1 המרת יחידות ומורפולוגיה</h2>
+<div class="math"><b>IMPLEMENTED MATHEMATICS</b><br>m<sub>px</sub> = S<sub>mm</sub> / N<sub>outer</sub><br>w<sub>enforced</sub> = w<sub>nominal</sub> + w<sub>vector</sub> + w<sub>CAD</sub><br>q = ceil(w<sub>enforced</sub> / m<sub>px</sub>)<br>k = q if q odd, else q+1</div>
+<p><span class="ltr">m_px</span> הוא מילימטר לפיקסל, <span class="ltr">S_mm</span> גודל היריעה, ו-<span class="ltr">N_outer</span> מספר הפיקסלים כולל perimeter. ערכי ברירת המחדל הם 0.8 + 0.2 + 0.2 = 1.2 מ"מ. kernel אליפטי חייב להיות אי-זוגי כדי שיהיה לו פיקסל מרכז.</p>
+<div class="source">src/layerforge_l1/connectivity_repair.py:114-149</div>
+<p><b>דוגמה מספרית.</b> ביריעה 200 מ"מ וברשת 2304 פיקסלים, <span class="ltr">m_px=0.086806 mm/px</span>. דרישת 1.2 מ"מ היא 13.824 פיקסלים; ceiling נותן 14 ולכן kernel ממורכז הוא 15x15. הקוד בודק footprint דיסקרטי של 15 פיקסלים, כלומר מעט שמרני יותר מן הערך הרציף.</p>
+<h2>7.2 erosion core</h2>
+<div class="math"><b>IMPLEMENTED MATHEMATICS</b><br>Core = M ⊖ K<br>Anchored = CC<sub>4</sub>(Core) that intersects Perimeter<br>Orphan = Core \ Anchored</div>
+<p>ה-erosion משאיר רק מרכזים שבהם footprint K נכנס כולו בחומר. אם core משמעותי אינו מחובר ל-core המעוגן בהיקף, לפחות neck אחד נעלם תחת דרישת הרוחב. PASS מתקבל רק כאשר אין orphan cores. רכיב גלוי שלא שורד erosion מסווג כ-thin decorative warning ולא ככשל load-bearing.</p>
+<div class="source">src/layerforge_l1/connectivity_repair.py:152-165, 227-350</div>
+<h2>7.3 חיבוריות 4 שכנים</h2>
+<p>גרף raster כולל קשתות רק בין פיקסלים שחולקים צלע. שני פיקסלים שנוגעים בפינה נמצאים ברכיבים שונים. OpenCV מופעל עם <span class="ltr">connectivity=4</span>. הבדיקה מדווחת גם 8-neighbor להשוואה, אך PASS תלוי ברכיב 4-neighbor יחיד.</p>
+<h2>7.4 IoU והתאמת projection</h2>
+<div class="math"><b>IMPLEMENTED MATHEMATICS</b><br>IoU(A,B) = |A ∩ B| / |A ∪ B|</div>
+<p>במסלול CAD הידני raster של המקור מושווה ל-footprints שנקראו מחדש מן STL. נמדדים IoU של silhouette ושל כל צבע, coverage ומספר mismatch pixels. זו התאמת projection, לא הוכחה לטולרנס מכני או לחוזק.</p>
+<div class="source">src/layerforge_l1/pipeline.py:257-315</div>
+<h2>7.5 CP-SAT flow</h2>
+<div class="math"><b>IMPLEMENTED MATHEMATICS</b><br>Σ<sub>d</sub>x<sub>r,d</sub>=1; &nbsp; Σ<sub>c</sub>y<sub>d,c</sub>=1<br>p<sub>r,d</sub>=Σ<sub>i=0..d</sub>x<sub>r,i</sub><br>Σ incoming(r)-Σ outgoing(r)=p<sub>r,d</sub><br>min Σ<sub>r,d</sub> area(r)(K-d)x<sub>r,d</sub></div>
+<p>הזרימה דורשת יחידת flow לכל region פעיל ב-prefix. ה-root שולח את סכום היחידות. קיבולת edge מוגבלת לאפס אם אחד מקצותיה אינו ב-prefix. פונקציית המטרה מענישה region שמופיע מוקדם משום שהוא נשמר כחומר נסתר במספר רב יותר של prefixes.</p>
+<h2>7.6 נקודת שבת של maximal reveal</h2>
+<div class="math"><b>DERIVED EXPLANATION</b><br>C<sub>0</sub> = {cells of color c not covered}<br>C<sub>i+1</sub> = C<sub>i</sub> \ Unsupported(covered,C<sub>i</sub>)<br>stop when C<sub>i+1</sub>=C<sub>i</sub></div>
+<p>המועמד רק קטן, ולכן הלולאה מסתיימת אחרי לכל היותר מספר התאים של הצבע. התוצאה היא נקודת שבת של פונקציית הסרה הספציפית למימוש. אין כאן הוכחה כללית שהיא הקבוצה הגדולה ביותר בכל מודל גאומטרי אפשרי, מפני ש-<span class="ltr">structural_support</span> עצמו heuristic raster מוגבל.</p>
+</section>
+
+<section class="chapter">
+<h1>8. מסכות פיזיות, חומר וחיתוכים</h1>
+<h2>8.1 Boolean CAD ידני</h2>
+<div class="math"><b>IMPLEMENTED MATHEMATICS</b><br>LayerArea = union(AdditiveRegions) \ union(CutoutRegions)</div>
+<p><span class="ltr">geometry.layer_area</span> מממש union באמצעות Shapely, difference ואז <span class="ltr">buffer(0)</span> לתיקון topology. Hole נשמר כ-interior ring של Polygon. <span class="ltr">extrude_geometry</span> יוצר CadQuery Face מן exterior וה-holes ומבצע extrusion.</p>
+<div class="source">src/layerforge_l1/geometry.py:29-109</div>
+<h2>8.2 מסכה מצטברת חיסורית</h2>
+<p>ב-Subtractive PoC וב-CP-SAT, region בעל depth <span class="ltr">δ(r)</span> שייך לחומר של prefix d אם <span class="ltr">δ(r)≤d</span>. הוא נראה בשכבה d אם <span class="ltr">δ(r)=d</span>. ההיקף מתווסף מחוץ ל-aperture.</p>
+<div class="math"><b>IMPLEMENTED MATHEMATICS</b><br>Retained<sub>d</sub>(x,y) = [δ(region(x,y)) ≤ d]<br>Visible<sub>d</sub>(x,y) = [δ(region(x,y)) = d]<br>Physical<sub>d</sub> = Perimeter ∪ Retained<sub>d</sub><br>Cutout<sub>d</sub> = Aperture \ Retained<sub>d</sub></div>
+<div class="source">src/layerforge_l1/subtractive_poc.py:412-465; src/layerforge_l1/experimental_global_planner.py:334-347</div>
+<h2>8.3 Reveal material</h2>
+<p>ב-RevealPlanner, החומר אינו כל covered pixels. <span class="ltr">structural_support</span> בוחר subset רחב ומעוגן של covered domain; אחר כך union עם visible. זו הבחנה חשובה: המתכנן רשאי להשמיט חומר נסתר שאינו נחוץ.</p>
+<div class="note">האלגוריתם אינו משנה צבע גלוי: support מותר רק בתחום שכבר מכוסה מלפנים. אם פיקסל support לא נמצא בתחום הזה, הוא עלול להיחשף ולכן אינו חוקי.</div>
+<h2>8.4 קוטביות מסכות</h2>
+<p>בכל מסכות retained שנשמרות, לבן/255 מייצג חומר ו-0 מייצג ריק. cutout הוא המשלים בתוך ה-aperture. Preview צבעוני מצייר את צבע הפילמנט היכן שהמסכה true ולבן היכן שאין חומר. אין inversion ב-<span class="ltr">run_turtle_reveal_planner_poc</span>.</p>
+</section>
+
+<section class="chapter">
+<h1>9. אימות פיזי וחזותי</h1>
+<h2>9.1 shared perimeter</h2>
+<p>ב-CAD הידני נבדקים bounds, Hausdorff distance בין outer rings, שטח perimeter חסר ושטח מחוץ למעטפת. ב-raster נבדק שכל פיקסל ב-perimeter mask הוא חומר. אלה שתי בדיקות שונות לאותו אינווריאנט.</p>
+<div class="source">src/layerforge_l1/geometry.py:148-211; scripts/run_turtle_reveal_planner_poc.py:128-139</div>
+<h2>9.2 חיבוריות</h2>
+<p><span class="ltr">audit_edge_connectivity</span> מפיק labels נפרדים ב-4 וב-8 שכנים, מזהה אילו רכיבי 4 נוגעים בגבול, וסופר orphan components. הסטטוס PASS דורש בדיוק רכיב 4-neighbor אחד בכל מסכת החומר.</p>
+<h2>9.3 רוחב load-bearing</h2>
+<p>לאחר erosion, כל core שאינו מחובר ל-perimeter core הוא כשל. <span class="ltr">_measure_orphan_bottlenecks</span> מריץ kernels אי-זוגיים מ-1 עד הדרישה ומדווח את ה-kernel הגדול האחרון שבו היעד עדיין נגע ב-core מחובר. זהו מדד דיסקרטי, לא מדידת neck רציפה.</p>
+<h2>9.4 decorative מול structural</h2>
+<p>רכיב גלוי ללא חפיפה ל-core מסווג כ-<span class="ltr">thin_decorative_visible</span>. רכיב גלוי שחופף orphan core מסווג structural bottleneck. PASS אינו נכשל בגלל warning דקורטיבי בלבד. Narrow openings אינם עוברים כלל דרך בדיקת retained width.</p>
+<div class="warn">בכמה סקריפטים קיימת בדיקת פתחים נפרדת באמצעות morphological opening וסף 0.8 מ"מ, אך היא diagnostic בלבד ואינה חלק מ-PASS של 1.2 מ"מ.</div>
+<h2>9.5 דיוק קומפוזיט</h2>
+<p>הקומפוזיט נבנה מן המסכות עצמן. במסלולים החיסוריים נדרש <span class="ltr">geometry_mismatched_pixels == 0</span> וגם <span class="ltr">visible_automatic_connector_pixels == 0</span>. המסלול האוטומטי הישן מדווח mismatch אך עשוי להגיע ל-READY_FOR_USER_TEST גם כאשר הפיקסלים אינם זהים, כל עוד בדיקות היריעות עברו; זו סמנטיקה שונה.</p>
+<h2>מה PASS אינו מוכיח</h2>
+<ul><li>אין סימולציית עומסים, כיפוף או שבר.</li><li>אין הוכחת printability של כל חור צר.</li><li>אין פיצוי shrinkage של חומר או טולרנס מדפסת.</li><li>אין הוכחת minimum global layer count.</li><li>אין בדיקת frame או mounting, שהם מחוץ להיקף.</li></ul>
+</section>
+
+<section class="chapter">
+<h1>10. נרמול קווי מתאר ותיקון רוחב נסתר</h1>
+<h2>10.1 Zhang-Suen ו-tracing</h2>
+<p><span class="ltr">contour_normalization.zhang_suen_thinning</span> מבצע שתי תת-איטרציות של thinning. פיקסל מוסר רק אם מספר השכנים ומספר מעברי 0→1 סביבו עומדים בתנאים, ובכל תת-איטרציה נשמרים חיבורים בכיוונים מסוימים. התוצאה היא skeleton בעובי פיקסל.</p>
+<p><span class="ltr">trace_skeleton_segments</span> הופך את ה-skeleton לגרף, מסיר shortcut אלכסוני כאשר קיים צעד אורתוגונלי, ומפרק strokes בנקודות degree שאינו 2. רוחב אפקטיבי נמדד מ-distance transform ב-resolution מוגדל.</p>
+<div class="source">src/layerforge_l1/contour_normalization.py:73-242</div>
+<h2>10.2 restroking</h2>
+<p>לכל path נבחר target width לפי maximum בין 1.2 מ"מ לבין רוחב נומינלי נגזר. path מצויר מחדש ברזולוציה גבוהה, מורד ל-raster דיסקרטי, ונפסל אם הוא מחבר component כהה זר או משנה component counts של צבעים שאינם contour. <span class="ltr">contour_consistency</span> מבצע restroking מלא של path כדי למנוע blobs מקומיים.</p>
+<h2>10.3 תיקון חומר נסתר</h2>
+<p><span class="ltr">hidden_width_repair.hidden_addition_domain</span> מגדיר היכן מותר להוסיף חומר: רק איחוד מסכות קדמיות שמסתירות את התוספת. <span class="ltr">_shortest_existing_material_paths</span> מבצע BFS ב-4 שכנים בתוך חומר קיים בין core מחובר לבין orphan goals. הנתיב מעובה ב-kernel, אבל רק בתוך domain המותר.</p>
+<div class="source">src/layerforge_l1/hidden_width_repair.py:36-274</div>
+<div class="fact">בדיקת regression סינתטית מאמתת שאפשר לתקן neck נסתר בלי לשנות את הקומפוזיט; בדיקה נוספת מאמתת שהאלגוריתם מסרב להוסיף חומר כאשר domain ריק.</div>
+<div class="source">tests/test_hidden_width_repair.py:41-90</div>
+</section>
+
+<section class="chapter">
+<h1>11. בניית CAD ויצוא</h1>
+<h2>11.1 מסלול manifest הידני</h2>
+<div class="diagram"><div class="flow"><div class="box manual">layer_stack.json</div><div class="arrow">→</div><div class="box">Shapely<br>union - cutouts</div><div class="arrow">→</div><div class="box">CadQuery Face<br>with holes</div><div class="arrow">→</div><div class="box">Extrude Z</div><div class="arrow">→</div><div class="box">STEP + STL</div><div class="arrow">→</div><div class="box">CadQuery + Trimesh<br>read-back</div></div><div class="caption">הנתיב היציב של L-1: מקור ידני, Boolean אמיתי, solids וקריאה חוזרת.</div></div>
+<p><span class="ltr">pipeline.build</span> קורא manifest, בונה לכל layer את Shapely area ואת CadQuery solid, מייצא STEP ו-STL, פותח מחדש, ובודק validity, solid count, watertightness, component count, bounds, volume, bed fit ו-footprint.</p>
+<div class="source">src/layerforge_l1/pipeline.py:407-675; src/layerforge_l1/geometry.py:91-130</div>
+<p>Assembly transform ו-print transform נשמרים בנפרד. ה-solid עצמו נבנה בקואורדינטות model; placement להדפסה אינו משנה את גאומטריית ההרכבה. Rim אופציונלי נבנה כהפרש בין האזור לבין erosion פנימי ומקבל extrusion נוסף.</p>
+<h2>11.2 CAD ממסכות Reveal</h2>
+<p>הסקריפט <span class="ltr">export_reveal_stack_cad.py</span> מוצא contours עם hierarchy מסוג CCOMP, ממיר מרכזי פיקסלים למ"מ, בונה Polygon עם holes, מבצע buffer של חצי פיקסל כדי לעבור מקווי מרכז לקצוות פיקסל, simplify טופולוגי, extrusion ויצוא.</p>
+<div class="math"><b>IMPLEMENTED MATHEMATICS</b><br>x<sub>mm</sub>=(x+0.5)m<sub>px</sub><br>y<sub>mm</sub>=(H-y-0.5)m<sub>px</sub><br>G = simplify(buffer(union(polygons), 0.5m<sub>px</sub>), ε)</div>
+<div class="source">scripts/export_reveal_stack_cad.py:29-50, 53-119</div>
+<p>STEP נפתח ב-CadQuery ונבדק מספר solids. STL נפתח ב-Trimesh ונבדקים watertightness, components, bounds, משולשים ונפח מול <span class="ltr">area × thickness</span>. הסקריפט כותב סדר assembly back-to-front ו-<span class="ltr">assembled_z0_mm=i·thickness</span>, בעוד כל STL מיועד ל-<span class="ltr">z=0</span> להדפסה.</p>
+<div class="gap">יצוא Reveal אינו מודול production משולב. הוא סקריפט נפרד, אינו יוצר cutout-mask CAD נפרד, ואינו מחובר ל-CLI. התאמת raster למסכה נבדקה בארטיפקטים, אך אין schema מאוחד עם manifest הידני.</div>
+</section>
+
+<section class="chapter">
+<h1>12. דוגמאות עבודה</h1>
+<h2>דוגמה A: מטריצת מסכות קטנה</h2>
+<p>ניקח יעד 5x5 עם רקע כחול B, פנים צהובות Y ושני פרטים שחורים K. המטרה היא לא ליצור "שתי עיניים שחורות" כחלקים נפרדים, אלא לחשוף יריעה שחורה דרך חורים בצהוב.</p>
+<div class="two"><div class="figure"><div class="matrix">TARGET
+B B B B B
+B Y K Y B
+B Y Y Y B
+B Y K Y B
+B B B B B</div></div><div class="figure"><div class="matrix">FRONT Y MASK
+0 0 0 0 0
+0 1 0 1 0
+0 1 1 1 0
+0 1 0 1 0
+0 0 0 0 0
+
+BACK K MASK
+1 1 1 1 1
+1 1 1 1 1
+1 1 1 1 1
+1 1 1 1 1
+1 1 1 1 1</div></div></div>
+<p>בקומפוזיט front-to-back, פיקסל Y מוצג במקום שבו מסכת Y היא 1. בשני החורים מסכת Y היא 0 ולכן K העמוק נראה. אין צורך לחבר שתי נקודות K זו לזו: יריעת K רציפה ממילא. זהו בדיוק עקרון <span class="ltr">_compose</span> ו-<span class="ltr">RevealPlanner.materialize</span>.</p>
+<h2>דוגמה B: benchmark אמיתי של ארבעה צבעים</h2>
+<div class="two"><div class="figure"><img src="../../fixtures/known_feasible_benchmark/source_composite_only.png"><div class="caption">הקומפוזיט היחיד שנמסר למתכנן.</div></div><div class="figure"><img src="../../fixtures/known_feasible_benchmark/private_reference_masks/layer_03_preview.png"><div class="caption">דוגמת יריעת reference לצורך אימות בלבד; אינה קלט למתכנן.</div></div></div>
+<p>המתאם lossless שומר 512x512 וארבעה צבעים: <span class="ltr">#242939, #ED852B, #F2C84B, #FAF7F0</span>. graph מכיל 19 regions; ספירת regions לפי צבע היא 9, 5, 3, 2; ורק region אחד נוגע בגבול. מודל CP-SAT בן חמש שכבות יוצר 95 משתני <span class="ltr">x</span> ו-20 משתני <span class="ltr">y</span>, בנוסף prefixes, depth variables ו-flow.</p>
+<div class="source">tests/test_experimental_global_planner.py:24-58</div>
+<p>ה-reference הידני כולל חמש יריעות, כאשר לבן חוזר בשני עומקים. fixture report מדווח 4-neighbor component יחיד, אפס orphan cores ו-zero roundtrip mismatch לכל היריעות, אך גם מציין במפורש שהוא היה provisional ונדרש אימות LayerForge עצמאי. בדיקות הקוד מאמתות שהמתכנן אינו קורא את תיקיית <span class="ltr">private_reference_masks</span>.</p>
+<h2>דוגמה C: RevealPlanner על turtle</h2>
+<p>דוח <span class="ltr">l1_turtle_reveal_planner_poc_v1</span> מתעד 4,005 תאים, closure אפשרי ב-19 סבבים, חיפוש COMPLETE ב-825 הערכות, 18 יריעות, אפס mismatch ב-x4 וכל היריעות PASS ב-4-neighbor וברוחב. זמן כולל היה 864.7 שניות. גרסת full-resolution מאוחרת יותר תיעדה 3,957 תאים ו-16 יריעות; גרסת tile 2.0 מ"מ תיעדה 12,011 תאים ו-15 יריעות.</p>
+<p>אלה ראיות ביצוע קיימות, לא ריצה שבוצעה לצורך המסמך. הן גם ממחישות trade-off: פיצול עדין יותר מגדיל מספר תאים ועלות חישוב, אך יכול להפחית seams ושכבות.</p>
+<h2>דוגמה D: CAD קיים ממסכות Reveal</h2>
+<p>בארטיפקט Van Gogh option B קיימות 10 יריעות CAD. manifest מדווח STEP עם solid יחיד בכל שכבה, STL watertight ורכיב יחיד, bounds של 225x225x1.6 מ"מ. סטיית traced-area המרבית מול מסכה היא 0.085%. דו"ח revalidation מדווח <span class="ltr">px_diff_from_mask=0</span>, PASS בחיבוריות וברוחב לכל 10 היריעות, ו-<span class="ltr">stack_mismatch_px=0</span>.</p>
+<div class="warn">האיור הוא נכס משתמש ולא משמש כאן כהוכחת זכויות לפרסום. המסמך מציג רק מדדים; אין להעתיקו למאגר ציבורי ללא רישיון.</div>
+</section>
+
+<section class="chapter">
+<h1>13. בדיקות, סטטוס ומגבלות</h1>
+<h2>מפת בדיקות</h2>
+<table><tr><th>קובץ בדיקה</th><th>מה הוא מגן</th></tr>
+<tr><td class="ltr">test_l1_feasibility.py</td><td>6 שכבות Orbit Bloom, STEP/STL read-back, bounds, holes, previews, transforms והיקף משותף.</td></tr>
+<tr><td class="ltr">test_subtractive_poc.py</td><td>קומפוזיט מדויק, חורים חושפי צבע, repeated depths ואי-הוספת bridges.</td></tr>
+<tr><td class="ltr">test_width_aware_planner.py</td><td>actual-mask width gate, 4-neighbor, bear regression וכשלים מפורשים.</td></tr>
+<tr><td class="ltr">test_experimental_global_planner.py</td><td>lossless palette, 19-region model, אי-שימוש במסכות פרטיות.</td></tr>
+<tr><td class="ltr">test_reveal_planner.py</td><td>מקרה שבו region indivisible נתקע אך per-cell מוצא stack מדויק של 6 שכבות.</td></tr>
+<tr><td class="ltr">test_contour_normalization.py</td><td>קווים ישרים, עקומים, אלכסוניים וצמתים.</td></tr>
+<tr><td class="ltr">test_hidden_width_repair.py</td><td>תיקון נסתר ששומר קומפוזיט וסירוב לשינוי גלוי לא מורשה.</td></tr></table>
+<h2>סטטוס לפי MILESTONES</h2>
+<p>L-1 מוגדר עדיין READY_FOR_USER_TEST או AWAITING_PHYSICAL_TEST בהתאם לארטיפקט. קיימת הוכחת CAD ידנית מלאה, אך אישור הדפסה פיזית ממתין. עבודות L1 האוטומטיות הן ניסויים ואינן מאושרות כמוצר. אין בסיס להצהיר על מעבר ל-L0 או milestone מאוחר.</p>
+<h2>מגבלות מוכחות</h2>
+<ul><li>המסלול האוטומטי הישן יוצר bridges נראים בדוגמאות מורכבות.</li><li>המתכנן greedy עלול להפיק הרבה repeated-color depths.</li><li>width-aware beam יכול להתכנס ל-dead end תחת beam קטן.</li><li>CP-SAT אינו מפצל connected region בין עומקים.</li><li>RevealPlanner יכול לפצל region, אך הוא heuristic, יקר ומייצר seams פוטנציאליים.</li><li>פתחים צרים מדווחים בנפרד ואין gate מוצר אחיד עבורם.</li><li>CAD מ-Reveal קיים בסקריפט נפרד, לא ב-pipeline האוטומטי המאוחד.</li></ul>
+<h2>פערים שלא אומתו</h2>
+<div class="gap">לא בוצעה ריצת optimization חדשה למסמך. לכן אין טענה שהארטיפקט העדכני הוא optimum, שאין regression לאחר השינויים הלא-מחויבים, או שכל הסקריפטים עדיין משחזרים byte-for-byte את הדוחות. לא בוצעה הדפסה פיזית.</div>
+</section>
+
+<section class="chapter">
+<h1>14. מדריך ניווט למפתח</h1>
+<table><tr><th>שאלה</th><th>התחל כאן</th><th>המשך לכאן</th></tr>
+<tr><td>איך בנוי solid?</td><td class="ltr">geometry.build_layer_solid</td><td class="ltr">pipeline._export_layer</td></tr>
+<tr><td>איך חור חושף צבע?</td><td class="ltr">subtractive_poc.construct_layers</td><td class="ltr">_compose</td></tr>
+<tr><td>איך נמדדת חיבוריות?</td><td class="ltr">connectivity_repair.audit_edge_connectivity</td><td class="ltr">audit_connection_width</td></tr>
+<tr><td>איך CP-SAT מחבר prefix?</td><td class="ltr">build_fixed_depth_model</td><td class="ltr">_validate_assignment_geometry</td></tr>
+<tr><td>איך Reveal מוצא שכבה?</td><td class="ltr">maximal_reveal</td><td class="ltr">structural_support, beam_search</td></tr>
+<tr><td>מה באמת מופעל ב-CLI?</td><td class="ltr">cli.parser</td><td class="ltr">cli.main</td></tr>
+<tr><td>איך CAD נקרא מחדש?</td><td class="ltr">pipeline._load_step, _load_stl</td><td class="ltr">pipeline.build</td></tr></table>
+<h2>כללי שינוי בטוח שנגזרים מן הקוד</h2>
+<ol><li>אל תשנה קוטביות מסכה בלי לעדכן preview, compose ו-validator יחד.</li><li>אל תחליף 4-neighbor ב-8-neighbor; corner contact אינו חיבור ברוחב חיובי.</li><li>שמור הפרדה בין retained width לבין opening width.</li><li>אם משנים resolution, חשב מחדש <span class="ltr">mm_per_pixel</span> ואת kernel האי-זוגי.</li><li>ב-CP-SAT, no-good חייב להישאר sound וממוקד ב-prefix המדויק.</li><li>ב-Reveal, חומר תמיכה חדש חייב להיות subset של covered domain.</li><li>STEP/STL ו-previews חייבים להיגזר מאותה גאומטריה.</li></ol>
+</section>
+
+<section class="chapter">
+<h1>15. מילון מתמטי וטכני</h1>
+<table><tr><th>מונח</th><th>הגדרה בהקשר LayerForge</th></tr>
+<tr><td>aperture</td><td>המלבן הפנימי שבו נמצאת האמנות, ללא היקף הרישום.</td></tr>
+<tr><td>retained material</td><td>פיקסלים/שטח שנשארים כחומר מוצק ביריעה.</td></tr>
+<tr><td>through-cutout</td><td>חור אמיתי ביריעה שמאפשר לראות יריעה עמוקה יותר.</td></tr>
+<tr><td>prefix</td><td>קבוצת כל האזורים שכבר הופיעו מן החזית עד depth נתון.</td></tr>
+<tr><td>hidden support</td><td>חומר שמחבר מבנה אך מוסתר על ידי שכבה קדמית.</td></tr>
+<tr><td>structural core</td><td>החומר ששורד erosion של footprint דרישת הרוחב.</td></tr>
+<tr><td>orphan core</td><td>core שאינו מחובר ב-4 שכנים ל-core של ההיקף.</td></tr>
+<tr><td>maximal reveal</td><td>נקודת שבת של קבוצת תאים מאותו צבע שניתנים לחשיפה יחד.</td></tr>
+<tr><td>no-good cut</td><td>אילוץ שמונע חזרה על assignment גאומטרי שנדחה.</td></tr>
+<tr><td>region seam</td><td>גבול בתוך source region כאשר תאים שלו שובצו לעומקים שונים.</td></tr>
+<tr><td>watertight mesh</td><td>mesh סגור טופולוגית; תנאי נדרש אך לא מספיק להדפסה מוצלחת.</td></tr></table>
+<h2>מערכות צירים</h2>
+<p>תמונת raster משתמשת בראשית בפינה שמאלית-עליונה ו-y כלפי מטה. מודל CAD משתמש בראשית תחתונה-שמאלית ו-y כלפי מעלה. <span class="ltr">raster._pixel_ring</span> ו-<span class="ltr">export_reveal_stack_cad.to_mm</span> מבצעים היפוך y פעם אחת. Z של assembly גדל לפי סדר back-to-front; קובצי print עצמם נשארים על Z=0.</p>
+</section>
+
+<section class="chapter">
+<h1>16. אינדקס מקור מאומת</h1>
+<table><tr><th>קונספט</th><th>קובץ ופונקציה</th><th>שורות</th></tr>
+<tr><td>CLI dispatch</td><td class="ltr">cli.py: parser, main</td><td class="ltr">33-258</td></tr>
+<tr><td>Boolean layer</td><td class="ltr">geometry.py: layer_area</td><td class="ltr">62-69</td></tr>
+<tr><td>Extrusion with holes</td><td class="ltr">geometry.py: _face, extrude_geometry</td><td class="ltr">91-109</td></tr>
+<tr><td>Shared outline</td><td class="ltr">geometry.py: validate_shared_area</td><td class="ltr">148-189</td></tr>
+<tr><td>Manual CAD pipeline</td><td class="ltr">pipeline.py: build</td><td class="ltr">407-675</td></tr>
+<tr><td>Legacy connector planner</td><td class="ltr">auto_pipeline.py: _shortest_connector_tree, _route_order</td><td class="ltr">213-318</td></tr>
+<tr><td>Subtractive preprocessing</td><td class="ltr">subtractive_poc.py: analyze_image</td><td class="ltr">137-199</td></tr>
+<tr><td>Provider grouping</td><td class="ltr">subtractive_poc.py: _provider_regions</td><td class="ltr">202-301</td></tr>
+<tr><td>Mask construction</td><td class="ltr">subtractive_poc.py: construct_layers</td><td class="ltr">420-465</td></tr>
+<tr><td>Region graph</td><td class="ltr">layer_optimization.py: build_region_graph</td><td class="ltr">98-204</td></tr>
+<tr><td>Bitset search</td><td class="ltr">layer_optimization.py: optimize_region_sequence</td><td class="ltr">222-358</td></tr>
+<tr><td>Width-aware candidates</td><td class="ltr">width_aware_planner.py: _candidate_groups</td><td class="ltr">163-333</td></tr>
+<tr><td>Diverse beam</td><td class="ltr">width_aware_planner.py: _select_diverse_beam, _search</td><td class="ltr">459-806</td></tr>
+<tr><td>4-neighbor audit</td><td class="ltr">connectivity_repair.py: audit_edge_connectivity</td><td class="ltr">82-111</td></tr>
+<tr><td>Width conversion</td><td class="ltr">connectivity_repair.py: _width_parameters</td><td class="ltr">114-149</td></tr>
+<tr><td>Orphan-core audit</td><td class="ltr">connectivity_repair.py: audit_connection_width</td><td class="ltr">227-350</td></tr>
+<tr><td>CP-SAT model</td><td class="ltr">experimental_global_planner.py: build_fixed_depth_model</td><td class="ltr">166-309</td></tr>
+<tr><td>Geometry oracle</td><td class="ltr">experimental_global_planner.py: run_checkpoint</td><td class="ltr">438-742</td></tr>
+<tr><td>Reveal cells</td><td class="ltr">reveal_planner.py: build_cells</td><td class="ltr">85-158</td></tr>
+<tr><td>Hidden support</td><td class="ltr">reveal_planner.py: structural_support</td><td class="ltr">171-208</td></tr>
+<tr><td>Maximal reveal</td><td class="ltr">reveal_planner.py: maximal_reveal</td><td class="ltr">290-304</td></tr>
+<tr><td>Reveal beam</td><td class="ltr">reveal_planner.py: beam_search</td><td class="ltr">374-421</td></tr>
+<tr><td>Contour skeleton</td><td class="ltr">contour_normalization.py: zhang_suen_thinning</td><td class="ltr">73-121</td></tr>
+<tr><td>Hidden repair</td><td class="ltr">hidden_width_repair.py: repair_one_mask</td><td class="ltr">165-275</td></tr>
+<tr><td>Mask-to-CAD</td><td class="ltr">scripts/export_reveal_stack_cad.py: mask_to_geometry</td><td class="ltr">29-50</td></tr></table>
+<h2>סיכום מצב אמיתי</h2>
+<p>LayerForge כבר מכיל ליבה משמעותית: Boolean geometry, CAD solids אמיתיים, מסכות חיסוריות, אימות raster פיזי, כמה אסטרטגיות חיפוש וראיות ל-stacks מדויקים. עם זאת, הארכיטקטורה עדיין מחקרית ורב-מסלולית. הוכחת CAD הידנית יציבה; מנוע התמונה-לשכבות עדיין אינו נתיב מוצר מאוחד; CP-SAT ו-Reveal הם ניסויים בעלי מגבלות שונות; ואישור פיזי נותר ממתין.</p>
+<div class="fact"><b>מסקנת ניווט:</b> לצורך הבנת ההתנהגות העדכנית ביותר של תכנון פיזי יש לקרוא את <span class="ltr">reveal_planner.py</span> יחד עם סקריפטי ההרצה. לצורך הבנת ה-CLI הציבורי יש להתחיל ב-<span class="ltr">cli.py</span>. לצורך CAD המאומת ביותר יש להתחיל ב-<span class="ltr">pipeline.py</span> וב-<span class="ltr">geometry.py</span>.</div>
+</section>
+
+<script>
+const qaSection = location.hash.startsWith("#section-")
+  ? location.hash.slice("#section-".length)
+  : new URLSearchParams(location.search).get("section");
+if (qaSection !== null) {
+  const section = document.querySelectorAll("section")[Number(qaSection)];
+  if (section) section.scrollIntoView();
+}
+</script>
+</body>
+</html>
