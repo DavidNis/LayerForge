@@ -323,3 +323,69 @@ follow the light-blue body). Not user approved; no CAD exported.
   from CAD matches the planned stack with 0 px mismatch.
 - Time: 122.9 s export + read-back, 10.4 s re-validation.
   Evidence: `artifacts/l1_van_gogh_v1/cad_optB/`. Physical print PENDING.
+
+## 2026-10-24 user approval of L-1 result and L0 gate exception
+
+- USER_REQUIRED: the user explicitly approved the L-1 result and authorized
+  starting L0 — Reusable Geometry Core.
+- L-G10 physical print-and-assembly gate: **PENDING / NOT VERIFIED**. No
+  physical print, stacking, or appearance evidence exists in this repository.
+- The user authorized starting L0 despite the outstanding physical test. This
+  is recorded as an explicit **milestone-gate exception**, not as evidence that
+  the physical test passed.
+- L0 regression baseline: van_gogh_p option B, 10 sheets, committed at
+  `789b02a` (`artifacts/l1_van_gogh_v1/planner_optB/`, `cad_optB/`), recorded
+  by `scripts/capture_l0_reference_baseline.py` in
+  `artifacts/l0_core_v1/baseline/pre_refactor_baseline.json`.
+
+## 2026-10-24 L0 reusable geometry core
+
+- State: **L0 IMPLEMENTED — full-size reference regeneration NOT VERIFIED**
+  (not yet `READY_FOR_USER_TEST`). L-G10 remains PENDING (gate exception above).
+- New `src/layerforge_l1/core/` (model/manifest, planner wrapper, validation,
+  CAD export + STL read-back, previews, reference regression) and `stack-*`
+  CLI commands; API and data flow in `ARCHITECTURE.md`. `reveal_planner.py`,
+  validators and `geometry.extrude_geometry` unchanged; `mask_to_geometry`
+  moved verbatim into `core/cad.py`.
+- Tests: before 72 PASS / 51 FAIL / 0 SKIP; after 97 PASS / 51 FAIL / 0 SKIP.
+  The 51 failures are pre-existing: tests read artifact trees deleted in
+  commit `2c375e5`; none involve the reveal planner or the L0 core.
+  New `tests/test_l0_core.py`: 25 PASS (original synthetic fixture, scale 1).
+- Accepted reference via the new core, verified: legacy migration of the
+  committed van_gogh option-B masks validates PASS (10 sheets, 0 reconstruction
+  mismatches over 3,432,448 px); all 10 committed STL files re-rasterize to
+  the planner masks with 0 px difference; STL-derived previews equal the plan.
+- NOT VERIFIED: `stack-reference --name van_gogh_optB` (full re-planning +
+  re-export, compared against
+  `artifacts/l0_core_v1/baseline/pre_refactor_baseline.json`). The run was
+  stopped by host low-memory protection during planning and produced no result.
+
+## 2026-10-25 L0 test-suite cleanup and focused geometry regression
+
+- State: **L0 — READY_FOR_USER_TEST**. L-G10 physical test is still PENDING (gate
+  exception above). L1/GUI not started. The reveal planner and its helpers are unchanged
+  (empty diff against `789b02a`).
+- Tests: before 97 PASS / 51 FAIL / 0 SKIP; after **91 PASS / 0 FAIL / 0 SKIP**
+  (`$env:PYTHONPATH='src'; .\.venv\Scripts\python.exe -m pytest`, 29 dependency
+  deprecation warnings). Classification: 43 obsolete (removed), 8 valuable (converted to
+  regenerated fixtures), 0 genuine non-artifact failures. A further 15 vacuous passes
+  were removed and one synthetic regression test was added. Details are in
+  `tests/REMOVED_TESTS.md`. No test reads a deleted or untracked artifact folder.
+- Fixed: `pipeline._guide` path bug that tied the orbit_bloom build to one output folder.
+- Focused regression `stack-reference --name van_gogh_optB --from-accepted`: **PASS**
+  (485 s, exit 0). 10 sheets; validation PASS; independent pre-refactor baseline
+  identical (mask bits, colors/order, components, holes, validator results); 10 STEP
+  valid single solids; 10 STL watertight single components; STL footprint XOR vs accepted
+  CAD 0.0 mm² on every sheet with 0 count differences; reconstruction from reopened STL
+  0 / 3,432,448 px mismatched; STL-derived assembled preview 0 px diff. Evidence:
+  `artifacts/l0_core_v1/reference_van_gogh_optB_from_accepted/reference_regression.json`.
+- Not run: full-size re-planning (`stack-reference` without `--from-accepted`). It
+  exercises only the unchanged planner and was previously stopped by host memory.
+
+## 2026-10-25 L0 approved
+
+- USER_REQUIRED: the user approved **L0 — Reusable Geometry Core** based on the software
+  verification above, and approved the 58 test removals listed in `tests/REMOVED_TESTS.md`.
+  A full-size planner re-run was explicitly not required.
+- L0 state: **APPROVED**. L-G10 physical print-and-stack test: **PENDING / NOT VERIFIED**.
+- L1 not started; it awaits a separate user instruction.

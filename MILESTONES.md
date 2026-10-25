@@ -24,11 +24,16 @@ Goal: prove one original, controlled flat-color artwork can become **aligned, or
 
 ## L0: reusable geometry core
 
-Status: `BLOCKED_BY_L-1`.
+Status: `APPROVED` by the user on 2026-10-25 based on software verification (started
+2026-10-24 under a user-authorized gate exception). **L-G10 physical print test remains
+PENDING**; this approval is not physical evidence.
 
-- [ ] Refactor proven L-1 geometry, serialization and validators into reproducible Python modules and CLI with tests.
-- [ ] Keep L-1 reference regression tests.
-- [ ] Version manifests and preserve export/preview parity across refactors.
+- [x] Refactor proven L-1 geometry, serialization and validators into reproducible Python modules and CLI with tests (`src/layerforge_l1/core/`, `stack-*` commands).
+- [x] Keep L-1 reference regression tests (`tests/test_reveal_planner.py` unchanged; baseline recorded).
+- [x] Version manifests and preserve export/preview parity across refactors (`layerforge.sheet_stack` 1.0.0; STL-derived previews).
+- [x] Full-size reference geometry matches the recorded baseline: `stack-reference --from-accepted` PASS on 2026-10-25 (validation, STEP/STL export + read-back, previews; planner not re-run, unchanged since `789b02a`).
+- [x] Test suite independent of deleted experiment artifacts: 91 PASS / 0 FAIL / 0 SKIP.
+- [x] Explicit user approval of L0 (2026-10-25; a full-size planner re-run was not required).
 
 ## L1: automatic layer-candidate proposals (critical product milestone)
 

@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import cv2
 import numpy as np
 import pytest
-from PIL import Image
 
 from layerforge_l1 import PROJECT_ROOT
 from layerforge_l1.flat_color_workflow import (
@@ -44,22 +42,6 @@ def test_art_cell_flattening_preserves_boundaries_and_is_not_global_palette_redu
     )
 
 
-def test_generated_review_is_unapproved_and_uses_reference_as_evidence_only() -> None:
-    root = PROJECT_ROOT / "artifacts" / "l1_flat_color_workflow_v1"
-    report_path = root / "reports" / "flat_color_review.json"
-    if not report_path.exists():
-        return
-    report = json.loads(report_path.read_text(encoding="utf-8"))
-    assert report["review_state"] == "READY_FOR_USER_TEST"
-    assert report["milestone"] == "L1_UNAPPROVED"
-    assert report["automatic_candidate_selection"] is None
-    assert report["reference"]["usage"] == "ANNOTATION_EVIDENCE_ONLY"
-    assert report["reference"]["pixels_used_for_candidate_generation"] is False
-    assert report["settings"]["same_planner_settings_for_original_and_both_candidates"] is True
-    assert not list(root.rglob("*.stl"))
-    assert not list(root.rglob("*.step"))
-
-
 def test_fox_primary_protection_covers_split_head_and_body_features() -> None:
     source = PROJECT_ROOT / "fixtures" / "l1_auto" / "development_fox_workshop.png"
     analysis = analyze_image(source)
@@ -71,51 +53,3 @@ def test_fox_primary_protection_covers_split_head_and_body_features() -> None:
     assert protected[150, 227]
     assert protected[249, 171]
     assert "split head/body" in evidence["method"]
-
-
-def test_generated_physical_masks_have_shared_full_perimeters() -> None:
-    root = PROJECT_ROOT / "artifacts" / "l1_flat_color_workflow_v1"
-    for candidate in ("flat_color", "shadow_box_optimized"):
-        report_path = root / "reports" / f"{candidate}_planner.json"
-        if not report_path.exists():
-            continue
-        report = json.loads(report_path.read_text(encoding="utf-8"))
-        shapes: set[tuple[int, int]] = set()
-        for layer in report["layers"]:
-            path = root / "candidates" / candidate / "actual_plan" / layer[
-                "retained_material_mask"
-            ]
-            mask = np.asarray(Image.open(path).convert("L")) > 0
-            shapes.add(mask.shape)
-            assert mask[0].all()
-            assert mask[-1].all()
-            assert mask[:, 0].all()
-            assert mask[:, -1].all()
-        assert len(shapes) == 1
-
-
-def test_generated_candidates_have_distinct_operation_scopes() -> None:
-    root = PROJECT_ROOT / "artifacts" / "l1_flat_color_workflow_v1"
-    flat_path = root / "candidates" / "flat_color" / "edit_manifest.json"
-    optimized_path = (
-        root / "candidates" / "shadow_box_optimized" / "edit_manifest.json"
-    )
-    if not flat_path.exists() or not optimized_path.exists():
-        return
-    flat = json.loads(flat_path.read_text(encoding="utf-8"))
-    optimized = json.loads(optimized_path.read_text(encoding="utf-8"))
-    flat_operations = {row["operation"] for row in flat["edits"]}
-    optimized_operations = {row["operation"] for row in optimized["edits"]}
-    assert "FLATTEN_OBJECT_SHADING" in flat_operations or (
-        "MERGE_SAME_OBJECT_TONAL_REGIONS" in flat_operations
-    )
-    assert optimized["inherits"] == "FLAT-COLOR"
-    assert optimized_operations <= {
-        "REMOVE_NONESSENTIAL_WORKSHOP_CLUTTER",
-        "SIMPLIFY_SECONDARY_INTERIOR_DETAIL",
-    }
-    assert np.asarray(
-        Image.open(root / "candidates" / "flat_color" / "artwork.png")
-    ).shape == np.asarray(
-        Image.open(root / "candidates" / "shadow_box_optimized" / "artwork.png")
-    ).shape

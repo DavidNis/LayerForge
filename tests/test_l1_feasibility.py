@@ -7,6 +7,7 @@ from pathlib import Path
 import cadquery as cq
 import numpy as np
 import trimesh
+import pytest
 from PIL import Image
 from shapely.geometry import Point
 
@@ -19,8 +20,8 @@ from layerforge_l1.geometry import (
 )
 from layerforge_l1.pipeline import (
     DEFAULT_MANIFEST,
-    DEFAULT_OUTPUT,
     METRIC_PIXELS,
+    build,
     create_source_fixture,
     read_manifest,
     sha256,
@@ -33,8 +34,21 @@ def manifest() -> dict:
     return read_manifest(DEFAULT_MANIFEST)
 
 
-def validation() -> dict:
-    return json.loads((DEFAULT_OUTPUT / "reports" / "validation.json").read_text(encoding="utf-8"))
+@pytest.fixture(scope="module")
+def built(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """Build the committed orbit_bloom_v1 manifest into a fresh temporary tree.
+
+    The tests verify CAD regenerated from the fixture, not a stored artifact
+    folder, so they stay reproducible after old artifact trees are deleted.
+    """
+
+    output = tmp_path_factory.mktemp("orbit_bloom_v1")
+    build(DEFAULT_MANIFEST, output)
+    return output
+
+
+def validation(output: Path) -> dict:
+    return json.loads((output / "reports" / "validation.json").read_text(encoding="utf-8"))
 
 
 def test_t_l01_layer_count_depth_and_repeated_color() -> None:
@@ -62,7 +76,7 @@ def test_t_l02_multi_region_layer_is_one_sheet() -> None:
     assert connected_component_count(layer_area(gold)) == 1
 
 
-def test_t_l03_upper_cutout_reveals_lower_gold() -> None:
+def test_t_l03_upper_cutout_reveals_lower_gold(built: Path) -> None:
     data = manifest()
     coral = data["layers"][3]
     coral_area = layer_area(coral)
@@ -71,7 +85,7 @@ def test_t_l03_upper_cutout_reveals_lower_gold() -> None:
     assert hole_count(coral_area) >= 1
     assert coral_area.covers(reveal_point) is False
     assert gold_area.covers(reveal_point) is True
-    report = validation()
+    report = validation(built)
     assert report["critical_detail_checks"]["gold_reveal_window"] == "PASS"
     assert report["layers"][3]["mesh_footprint_holes"] >= 1
 
@@ -94,12 +108,12 @@ def test_t_l05_common_xy_and_separate_transforms() -> None:
         assert layer["print_transform"] != layer["assembly_transform"]
 
 
-def test_t_l06_step_stl_reopen_and_validate() -> None:
-    report = validation()
+def test_t_l06_step_stl_reopen_and_validate(built: Path) -> None:
+    report = validation(built)
     assert len(report["layers"]) == 6
     for row in report["layers"]:
-        step = cq.importers.importStep(str(DEFAULT_OUTPUT / row["step"])).val()
-        mesh = trimesh.load_mesh(DEFAULT_OUTPUT / row["stl"], process=True)
+        step = cq.importers.importStep(str(built / row["step"])).val()
+        mesh = trimesh.load_mesh(built / row["stl"], process=True)
         assert row["status"] == "PASS"
         assert step.isValid()
         assert len(step.Solids()) == 1
@@ -112,7 +126,7 @@ def test_t_l06_step_stl_reopen_and_validate() -> None:
         assert abs(sum(s.Volume() for s in step.Solids()) - abs(mesh.volume)) < 0.5
 
 
-def test_t_l07_all_cad_derived_previews_exist() -> None:
+def test_t_l07_all_cad_derived_previews_exist(built: Path) -> None:
     data = manifest()
     preview_names = [f"{layer['id']}.png" for layer in data["layers"]]
     preview_names += [
@@ -122,23 +136,23 @@ def test_t_l07_all_cad_derived_previews_exist() -> None:
         "comparison_overlay.png",
     ]
     for name in preview_names:
-        path = DEFAULT_OUTPUT / "previews" / name
+        path = built / "previews" / name
         assert path.is_file() and path.stat().st_size > 1_000
-    side = np.asarray(Image.open(DEFAULT_OUTPUT / "previews" / "assembled_side.png").convert("RGB"))
+    side = np.asarray(Image.open(built / "previews" / "assembled_side.png").convert("RGB"))
     for color in {layer["color"]["hex"] for layer in data["layers"]}:
         rgb = np.asarray(tuple(int(color[i : i + 2], 16) for i in (1, 3, 5)))
         assert np.count_nonzero(np.all(side == rgb, axis=2)) > 10
 
 
-def test_t_l08_source_projection_metrics_meet_controlled_thresholds() -> None:
-    metrics = validation()["visual_metrics"]
+def test_t_l08_source_projection_metrics_meet_controlled_thresholds(built: Path) -> None:
+    metrics = validation(built)["visual_metrics"]
     assert metrics["silhouette_iou"] >= 0.95
     assert metrics["mismatched_pixels"] > 0  # honest tessellation/raster differences are retained
     assert all(row["iou"] >= 0.95 for row in metrics["per_color"].values())
 
 
-def test_t_l09_no_undeclared_disconnected_island_or_bed_overflow() -> None:
-    report = validation()
+def test_t_l09_no_undeclared_disconnected_island_or_bed_overflow(built: Path) -> None:
+    report = validation(built)
     for row in report["layers"]:
         assert row["planned_components"] == 1
         assert row["exported_mesh_components"] == 1
@@ -178,13 +192,13 @@ def test_t_l11_print_layout_cannot_change_assembly_geometry() -> None:
     assert layer_area(changed).equals_exact(layer_area(layer), tolerance=0.0)
 
 
-def test_t_l12_deterministic_source_and_artifact_tree(tmp_path: Path) -> None:
+def test_t_l12_deterministic_source_and_artifact_tree(built: Path, tmp_path: Path) -> None:
     data = manifest()
     regenerated = tmp_path / "source.png"
     regenerated_hash = create_source_fixture(data, regenerated)
     assert regenerated_hash == data["artwork"]["sha256"]
-    assert regenerated_hash == sha256(DEFAULT_OUTPUT / "source" / "source.png")
-    report = verify(DEFAULT_OUTPUT)
+    assert regenerated_hash == sha256(built / "source" / "source.png")
+    report = verify(built)
     assert report["status"] == "READY_FOR_USER_TEST"
     assert report["planned_physical_layers"] == 6
     assert report["exported_printable_components"] == 6

@@ -350,13 +350,13 @@ def _render_comparison(
     combined.save(output)
 
 
-def _guide(manifest: dict[str, Any], builds: list[LayerBuild]) -> str:
+def _guide(manifest: dict[str, Any], builds: list[LayerBuild], output_root: Path) -> str:
     rows = []
     for build in builds:
         spec = build.spec
         z = spec["assembly_transform"]["translate_xyz_mm"][2]
         rows.append(
-            f"{spec['order_back_to_front'] + 1}. `{build.stl_path.relative_to(DEFAULT_OUTPUT).as_posix()}` "
+            f"{spec['order_back_to_front'] + 1}. `{build.stl_path.relative_to(output_root).as_posix()}` "
             f"— {spec['color']['name']} / {spec['color']['hex']}, base {spec['nominal_thickness_mm']} mm, assembled Z={z} mm."
         )
     return f"""# Orbit Bloom print and temporary stack guide
@@ -639,7 +639,7 @@ def build(manifest_path: Path = DEFAULT_MANIFEST, output_root: Path = DEFAULT_OU
     }
     write_json(output_root / "reports" / "validation.json", validation)
     (output_root / "reports" / "print_and_stack_guide.md").write_text(
-        _guide(manifest, builds), encoding="utf-8"
+        _guide(manifest, builds, output_root), encoding="utf-8"
     )
     commands = f"""# Actual/reproducible L-1 commands (PowerShell, repository root)
 py -3.12 -m venv .venv

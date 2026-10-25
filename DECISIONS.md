@@ -244,3 +244,53 @@ an order-independent monotone closure; a bounded beam searches sheet counts.
 The existing validator is reused unchanged for acceptance (OBSERVED_IN_FILE:
 the planner applies a stricter visible-support rule than the validator's
 thin-decorative warnings).
+
+## D-V3-023 | 2026-10-24 | L0 core wraps the accepted reveal-planner engine without changing it
+
+**Status:** IMPLEMENTED; awaiting user review (L0 READY_FOR_USER_TEST).
+
+- OBSERVED_IN_FILE: the latest validated stack (van_gogh option B, commit
+  `789b02a`) was produced by `reveal_planner.RevealPlanner` through
+  `scripts/run_turtle_reveal_planner_poc.py` and exported by
+  `scripts/export_reveal_stack_cad.py`. It is the L0 regression baseline.
+- DESIGN_CHOICE: the reusable core is the new subpackage
+  `src/layerforge_l1/core/`. It calls the existing planner, validators and
+  CadQuery extrusion unchanged; only `mask_to_geometry` was moved (verbatim).
+  Experimental planners stay in place and are not called by the core.
+- DESIGN_CHOICE: the persisted stack is mask-based (`layerforge.sheet_stack`
+  1.0.0: JSON + binary PNG masks with decoded-bit SHA-256). The vector
+  `LayerStack` of the orbit_bloom fixture is a different, older format and
+  keeps its own `build` command; no conversion between them is claimed.
+- DESIGN_CHOICE: CAD read-back and previews are derived from the reopened STL
+  (union of upward-facing triangles, 4x supersampled majority raster), so the
+  previews show the exported geometry. The earlier ad hoc re-validation
+  re-rasterized traced polygons; that check is preserved as
+  `geometry_px_diff_from_mask`.
+- USER_REQUIRED: L0 started under an explicit gate exception; L-G10 physical
+  validation remains PENDING.
+
+## D-V3-024 | 2026-10-25 | Test suite no longer depends on deleted experiment artifacts
+
+**Status:** IMPLEMENTED; awaiting user review with L0.
+
+- USER_REQUIRED: the historical experiment reports deleted in `2c375e5` are not needed
+  and must not be restored just to make tests pass.
+- OBSERVED_IN_FILE: all 51 failures were missing-artifact errors; none was a genuine
+  algorithm failure. A further 15 passing tests were vacuous. Four asserted "no CAD
+  in <deleted folder>", and 11 `return`ed early when their folder was missing.
+- DESIGN_CHOICE: there were 58 report-reading or vacuous tests of superseded experiments
+  (43 failing + 4 + 11). They were removed and listed with justification in
+  `tests/REMOVED_TESTS.md`; the code remains in git at `789b02a`. Eight valuable tests
+  now regenerate their inputs: orbit_bloom CAD is built into a temp folder, and the
+  l1_auto manifest is generated from the committed PNG. One synthetic test replaces the
+  fox "diagonal-only orphan" report check.
+- OBSERVED_IN_FILE: `pipeline._guide` hard-coded `DEFAULT_OUTPUT`, so `build()` into any
+  other folder crashed. It now uses the actual output root. Report text only; no geometry change.
+- DESIGN_CHOICE: `stack-reference --from-accepted` performs the focused L0 regression at
+  full size without re-planning. It loads the committed accepted masks, then runs
+  validation, the independent pre-refactor baseline comparison, STEP/STL export and
+  read-back, the STL footprint comparison against the accepted CAD, and STL-derived
+  previews. Justification: `reveal_planner.py` and every helper it imports are
+  byte-identical to `789b02a`, and planner equivalence and determinism through the core
+  are tested on the synthetic fixture. UNVERIFIED: a full-size re-planning run through
+  the core has still not completed on this host.

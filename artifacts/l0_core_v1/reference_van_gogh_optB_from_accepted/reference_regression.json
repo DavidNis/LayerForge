@@ -1,0 +1,188 @@
+{
+  "reference": "van_gogh_optB",
+  "planning": {
+    "mode": "ACCEPTED_MASKS_NO_REPLANNING",
+    "note": "reveal planner not re-run; accepted_mask_comparison is therefore identical by construction",
+    "sheet_count": 10,
+    "planning_seconds": null
+  },
+  "validation_status": "PASS",
+  "validation_failures": [],
+  "baseline_comparison": {
+    "identical": true,
+    "stack_differences": {},
+    "sheet_differences": {},
+    "checked": [
+      "front_to_back_colors",
+      "outer_pixels",
+      "outer_sheet_mm",
+      "perimeter_pixels",
+      "reconstruction_mismatched_pixels",
+      "sheet_count",
+      "per-sheet: mask bits, pixel count, components, holes, validator results"
+    ]
+  },
+  "accepted_mask_comparison": {
+    "sheet_count": [
+      10,
+      10
+    ],
+    "ids_equal": true,
+    "sheets": {
+      "layer_00_bf3934": {
+        "accepted_id": "layer_00_bf3934",
+        "retained_px_diff": 0,
+        "visible_px_diff": 0
+      },
+      "layer_01_609337": {
+        "accepted_id": "layer_01_609337",
+        "retained_px_diff": 0,
+        "visible_px_diff": 0
+      },
+      "layer_02_7cae49": {
+        "accepted_id": "layer_02_7cae49",
+        "retained_px_diff": 0,
+        "visible_px_diff": 0
+      },
+      "layer_03_fcfefe": {
+        "accepted_id": "layer_03_fcfefe",
+        "retained_px_diff": 0,
+        "visible_px_diff": 0
+      },
+      "layer_04_000100": {
+        "accepted_id": "layer_04_000100",
+        "retained_px_diff": 0,
+        "visible_px_diff": 0
+      },
+      "layer_05_3d7033": {
+        "accepted_id": "layer_05_3d7033",
+        "retained_px_diff": 0,
+        "visible_px_diff": 0
+      },
+      "layer_06_8aa1a2": {
+        "accepted_id": "layer_06_8aa1a2",
+        "retained_px_diff": 0,
+        "visible_px_diff": 0
+      },
+      "layer_07_97cce5": {
+        "accepted_id": "layer_07_97cce5",
+        "retained_px_diff": 0,
+        "visible_px_diff": 0
+      },
+      "layer_08_eac007": {
+        "accepted_id": "layer_08_eac007",
+        "retained_px_diff": 0,
+        "visible_px_diff": 0
+      },
+      "layer_09_000100": {
+        "accepted_id": "layer_09_000100",
+        "retained_px_diff": 0,
+        "visible_px_diff": 0
+      }
+    },
+    "identical": true
+  },
+  "cad_revalidation_pass": true,
+  "cad_stack_mismatch_px": 0,
+  "cad_reconstruction_from_stl": {
+    "evaluated": true,
+    "compared_pixels": 3432448,
+    "mismatched_pixels": 0,
+    "sheet_colors_missing_from_target": [],
+    "visible_mask_disagreement_pixels": 0
+  },
+  "cad_all_step_valid_single_solid": true,
+  "cad_all_stl_watertight_single_component": true,
+  "cad_comparison": {
+    "identical": true,
+    "layers": {
+      "layer_00_bf3934": {
+        "count_differences": {},
+        "stl_footprint_xor_mm2": 0.0,
+        "stl_footprint_area_mm2": 50625.0
+      },
+      "layer_01_609337": {
+        "count_differences": {},
+        "stl_footprint_xor_mm2": 0.0,
+        "stl_footprint_area_mm2": 50182.1226
+      },
+      "layer_02_7cae49": {
+        "count_differences": {},
+        "stl_footprint_xor_mm2": 0.0,
+        "stl_footprint_area_mm2": 49341.8775
+      },
+      "layer_03_fcfefe": {
+        "count_differences": {},
+        "stl_footprint_xor_mm2": 0.0,
+        "stl_footprint_area_mm2": 48024.3169
+      },
+      "layer_04_000100": {
+        "count_differences": {},
+        "stl_footprint_xor_mm2": 0.0,
+        "stl_footprint_area_mm2": 46559.5231
+      },
+      "layer_05_3d7033": {
+        "count_differences": {},
+        "stl_footprint_xor_mm2": 0.0,
+        "stl_footprint_area_mm2": 45834.2553
+      },
+      "layer_06_8aa1a2": {
+        "count_differences": {},
+        "stl_footprint_xor_mm2": 0.0,
+        "stl_footprint_area_mm2": 43114.8286
+      },
+      "layer_07_97cce5": {
+        "count_differences": {},
+        "stl_footprint_xor_mm2": 0.0,
+        "stl_footprint_area_mm2": 40234.7219
+      },
+      "layer_08_eac007": {
+        "count_differences": {},
+        "stl_footprint_xor_mm2": 0.0,
+        "stl_footprint_area_mm2": 32690.1755
+      },
+      "layer_09_000100": {
+        "count_differences": {},
+        "stl_footprint_xor_mm2": 0.0,
+        "stl_footprint_area_mm2": 21445.0039
+      }
+    },
+    "thickness_mm": [
+      1.6,
+      1.6
+    ]
+  },
+  "previews": {
+    "mask_source": "reopened STL in cad/stl",
+    "files": [
+      "sheets/layer_00_bf3934.png",
+      "sheets/layer_01_609337.png",
+      "sheets/layer_02_7cae49.png",
+      "sheets/layer_03_fcfefe.png",
+      "sheets/layer_04_000100.png",
+      "sheets/layer_05_3d7033.png",
+      "sheets/layer_06_8aa1a2.png",
+      "sheets/layer_07_97cce5.png",
+      "sheets/layer_08_eac007.png",
+      "sheets/layer_09_000100.png",
+      "assembled_front.png",
+      "exploded.png",
+      "source_comparison.png"
+    ],
+    "sheet_mask_px_diff_from_planned": {
+      "layer_00_bf3934": 0,
+      "layer_01_609337": 0,
+      "layer_02_7cae49": 0,
+      "layer_03_fcfefe": 0,
+      "layer_04_000100": 0,
+      "layer_05_3d7033": 0,
+      "layer_06_8aa1a2": 0,
+      "layer_07_97cce5": 0,
+      "layer_08_eac007": 0,
+      "layer_09_000100": 0
+    },
+    "assembled_px_diff_from_planned": 0,
+    "source_comparison_mismatched_pixels": 0
+  },
+  "regression_status": "PASS"
+}

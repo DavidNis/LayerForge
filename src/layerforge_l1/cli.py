@@ -126,12 +126,19 @@ def parser() -> argparse.ArgumentParser:
     flat_color_command.add_argument("--input", type=Path, required=True)
     flat_color_command.add_argument("--reference", type=Path, required=True)
     flat_color_command.add_argument("--output", type=Path, required=True)
+    from .core.commands import add_parsers as add_stack_parsers
+
+    add_stack_parsers(commands)
     return result
 
 
 def main() -> int:
     args = parser().parse_args()
     _progress("CLI_READY", command=args.command)
+    if args.command.startswith("stack-"):
+        from .core.commands import run as run_stack_command
+
+        return run_stack_command(args, _progress)
     if args.command == "build":
         from .pipeline import build
 

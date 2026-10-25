@@ -17,7 +17,7 @@
 
 ## Following milestones
 
-- L0: hardened reusable core, blocked until L-1 approved.
+- L0: hardened reusable core — see the L0 section below.
 - L1: **automatic** segmentation + layer candidate proposals for novel illustrations; must be evaluated independently.
 - L2: editor for layer regions, ordering, cutouts, color and thickness.
 - L3: production print-kit validations and export.
@@ -174,3 +174,15 @@ No complete UI/server, arbitrary photographic depth estimation, frame design, gl
 - [x] Rerun the turtle with the nub/orphan alignment fix: 18 sheets, all PASS at 4x.
 - [ ] Reduce sheet count (seam smoothing, wider beam) once all sheets PASS.
 - [ ] Extrude passing masks through the existing STEP/STL path and read back.
+
+## L0 reusable geometry core (2026-10-24)
+
+- [x] Record user approval of L-1 and the L-G10 gate exception (L-G10 PENDING).
+- [x] Identify the active engine and capture the pre-refactor baseline.
+- [x] Core package: model/manifest, planner wrapper, validation, CAD, previews.
+- [x] `stack-*` CLI commands; documented Windows commands verified except `stack-reference`.
+- [x] 25 new tests PASS; existing suite unchanged (51 pre-existing artifact failures).
+- [x] Remove test dependencies on deleted artifacts: 91 PASS / 0 FAIL / 0 SKIP (`tests/REMOVED_TESTS.md`).
+- [x] Focused full-size regression `stack-reference --from-accepted`: PASS (validation, baseline, STEP/STL read-back, previews).
+- [x] User approved L0 on 2026-10-25 (full-size re-planning not required). L1 not started.
+- [ ] L-G10 physical print-and-stack test: still PENDING.

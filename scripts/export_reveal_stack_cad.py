@@ -16,38 +16,12 @@ import time
 from pathlib import Path
 
 import cadquery as cq
-import cv2
 import numpy as np
 import trimesh
 from PIL import Image
-from shapely.geometry import Polygon
-from shapely.ops import unary_union
 
+from layerforge_l1.core.cad import mask_to_geometry  # moved here unchanged in L0
 from layerforge_l1.geometry import extrude_geometry, polygons
-
-
-def mask_to_geometry(mask: np.ndarray, mm_per_pixel: float, simplify_mm: float):
-    """Polygons whose edges follow pixel edges (not pixel centres)."""
-
-    contours, hierarchy = cv2.findContours(
-        mask.astype(np.uint8), cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE
-    )
-    height = mask.shape[0]
-    to_mm = lambda c: [((x + 0.5) * mm_per_pixel, (height - y - 0.5) * mm_per_pixel) for x, y in c[:, 0]]
-    shells = []
-    for index, contour in enumerate(contours):
-        if hierarchy[0][index][3] != -1 or len(contour) < 3:
-            continue
-        holes = []
-        child = hierarchy[0][index][2]
-        while child != -1:
-            if len(contours[child]) >= 3:
-                holes.append(to_mm(contours[child]))
-            child = hierarchy[0][child][0]
-        shells.append(Polygon(to_mm(contour), holes))
-    half = 0.5 * mm_per_pixel
-    geometry = unary_union([s.buffer(0) for s in shells]).buffer(half, join_style=2, mitre_limit=2.0)
-    return geometry.simplify(simplify_mm, preserve_topology=True).buffer(0)
 
 
 def main() -> None:

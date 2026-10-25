@@ -93,3 +93,28 @@ LayerForge/
     REVIEW_LAYER_FEASIBILITY.md
     NEXT_MILESTONE.md
 ```
+
+## L0 core: sheet-stack commands (Windows PowerShell, tested 2026-10-24)
+
+From the repository root with the project venv:
+
+```powershell
+$env:PYTHONPATH='src'
+# Plan, save and validate a stack from an exact flat-palette PNG (approved planner)
+.\.venv\Scripts\python.exe -m layerforge_l1 stack-plan --target <target.png> --output <stack_dir> --tile-mm 2.0 --beam 8 --score colors --frame-hex "#FF00FF"
+# Migrate a pre-L0 planner layers/ directory to a versioned stack
+.\.venv\Scripts\python.exe -m layerforge_l1 stack-import --layers artifacts\l1_van_gogh_v1\planner_optB\per_cell\layers --target artifacts\l1_van_gogh_v1\flat_2048_framed_optB.png --frame-hex "#FF00FF" --output <stack_dir>
+.\.venv\Scripts\python.exe -m layerforge_l1 stack-validate --stack <stack_dir> --report <stack_dir>\validation.json
+.\.venv\Scripts\python.exe -m layerforge_l1 stack-export --stack <stack_dir> --output <cad_dir>
+.\.venv\Scripts\python.exe -m layerforge_l1 stack-preview --stack <stack_dir> --cad <cad_dir> --output <preview_dir>
+# Focused regression: accepted masks -> validate -> full-size STEP/STL -> read-back -> compare (no re-planning)
+.\.venv\Scripts\python.exe -m layerforge_l1 stack-reference --name van_gogh_optB --from-accepted --output artifacts\l0_core_v1\reference_van_gogh_optB_from_accepted
+# Full re-planning + comparison (memory-heavy; stopped by host low-memory protection on 2026-10-24)
+.\.venv\Scripts\python.exe -m layerforge_l1 stack-reference --name van_gogh_optB --output artifacts\l0_core_v1\reference_van_gogh_optB
+# Complete suite (no test depends on deleted artifact trees; see tests\REMOVED_TESTS.md)
+.\.venv\Scripts\python.exe -m pytest
+```
+
+Exit codes: 0 PASS, 1 a validation/regression check failed, 2 invalid input.
+API and module map: `ARCHITECTURE.md`, section "L0 reusable geometry core".
+The van_gogh reference is third-party character art: private use only.

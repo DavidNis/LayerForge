@@ -1,0 +1,21 @@
+{
+  "van_gogh_optB": {
+    "description": "Accepted L-1 reveal-planner stack (commit 789b02a): van_gogh_p option B, 10 sheets, 225 mm outer, 200 mm artwork grid.",
+    "rights": "Third-party character artwork. Private evaluation only; do not publish or redistribute.",
+    "manual_steps": "Palette extraction, 2048 px snapping, magenta frame strips and the option A/B colour edits were ad hoc, user-requested preprocessing (technical PDF ch. 3). The target PNG is their saved result; L0 does not regenerate it.",
+    "target": "artifacts/l1_van_gogh_v1/flat_2048_framed_optB.png",
+    "planning": {
+      "outer_sheet_mm": 225.0,
+      "scale": 4,
+      "cell_tile_mm": 2.0,
+      "beam_width": 8,
+      "beam_score": "colors",
+      "planning_margin_pixels": 0,
+      "frame_color": "#FF00FF",
+      "thickness_mm": 1.6
+    },
+    "baseline": "artifacts/l0_core_v1/baseline/pre_refactor_baseline.json",
+    "accepted_layers": "artifacts/l1_van_gogh_v1/planner_optB/per_cell/layers",
+    "accepted_cad": "artifacts/l1_van_gogh_v1/cad_optB"
+  }
+}
