@@ -52,10 +52,15 @@ art, with no automatic simplification in L1 (D-V3-026). Final verification: comp
 
 ## L2: reviewed layer editor
 
-Status: `BLOCKED_BY_L-1`.
+Status: **APPROVED** by the user on 2026-10-25, including the three refinements of
+D-V3-028 (L-G10 physical printing still PENDING; started under user instruction after L1
+approval). All documented limitations remain (STATUS.md). Design: DECISIONS D-V3-027 and the requested
+refinement D-V3-028 (hybrid vector edits extruded exactly, optional per-sheet rim, export names
+from current order/color); evidence: STATUS.md. Complete suite 119 PASS; L0 reference PASS.
 
-- [ ] Allow user to reorder/merge/split region masks and layers, edit cutout Boolean geometry, material color, sheet/rim thickness, and handle islands.
-- [ ] Save/load edits and check reproducible export from reviewed plan.
+- [x] Allow user to reorder/merge/split region masks and layers, edit cutout Boolean geometry, material color, sheet/rim thickness, and handle islands (`core/editing.py`, `stack-edit apply`: reorder/move, merge/split, add/subtract/fill_hole, recolor, thickness, perimeter rim, island detection + bridge/remove_island; invalid edits reported as `DRAFT_INVALID`, never repaired).
+- [x] Save/load edits and check reproducible export from reviewed plan (manifest 1.1.0 `review` block + `review/base`; reload and log replay bit-identical; edited stacks export to valid STEP/STL with 0 px read-back mismatch, tested on an L1 proposal and the accepted bear; invalid drafts refused).
+- [x] Explicit user review and approval of L2 (2026-10-25).
 
 ## L3: hardened print kit
 
@@ -63,6 +68,11 @@ Status: `BLOCKED_BY_L-1`.
 
 - [ ] Finalize layer exports, print placements, exact source/preview comparisons, and error reports across several distinct artworks.
 - [ ] Optional 3MF packaging only when proven. No mandatory box/glue structure.
+- [ ] Validate FDM printability of edited geometry. L2 keeps exact sub-pixel vector geometry
+  through STEP/STL, but exact is not printable: openings, slots, holes and other negative
+  features below the nozzle/extrusion width may close up or vanish when sliced. Minimum
+  printable openings and negative features are not yet checked (only the 1.2 mm positive
+  material width is) and need a measured rule, ideally confirmed by the L-G10 print.
 
 ## L4: application user experience
 

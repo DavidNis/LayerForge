@@ -12,9 +12,15 @@ Typical use::
     cad_check, stl_masks = core.revalidate_cad(stack, cad_dir)
     previews = core.generate_previews(stack, preview_dir, stl_masks, "reopened STL")
 
+    # L2 review: explicit edits on a loaded stack, logged in a project directory
+    edited, change = core.apply_edit(stack, {"op": "recolor", "sheet": "<id>", "color": "#112233"})
+    core.review.start_review(stack_dir, project_dir)
+    core.review.apply_to_project(project_dir, {"op": "subtract", "sheet": "<id>", "shape": {...}})
+
 The layer-generation algorithm itself is ``layerforge_l1.reveal_planner``.
 """
 
+from . import review
 from .cad import export_stack, mask_to_geometry, rasterize_geometry, rasterize_stl, revalidate_cad, stl_footprint
 from .model import (
     SCHEMA,
@@ -28,11 +34,14 @@ from .model import (
     load_stack,
     save_stack,
 )
+from .editing import EDIT_OPS, EditError, apply_edit
 from .planning import PlanningConfig, PlanningError, plan_stack
 from .preview import generate_previews
 from .validation import validate_stack
 
 __all__ = [
+    "EDIT_OPS",
+    "EditError",
     "SCHEMA",
     "SCHEMA_VERSION",
     "ManifestError",
@@ -42,6 +51,7 @@ __all__ = [
     "SheetStack",
     "StackError",
     "StackGrid",
+    "apply_edit",
     "export_stack",
     "generate_previews",
     "import_planner_output",
@@ -51,6 +61,7 @@ __all__ = [
     "rasterize_geometry",
     "rasterize_stl",
     "revalidate_cad",
+    "review",
     "save_stack",
     "stl_footprint",
     "validate_stack",

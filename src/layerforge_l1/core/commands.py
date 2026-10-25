@@ -17,7 +17,8 @@ from .planning import PlanningConfig, PlanningError, plan_stack
 from .validation import validate_stack
 
 DEFAULT_REGISTRY = PROJECT_ROOT / "fixtures" / "reference_stacks.json"
-STACK_COMMANDS = ("stack-plan", "stack-import", "stack-validate", "stack-export", "stack-preview", "stack-reference")
+STACK_COMMANDS = ("stack-plan", "stack-import", "stack-validate", "stack-export", "stack-preview", "stack-reference",
+                  "stack-propose", "stack-edit")
 
 
 def add_parsers(commands: Any) -> None:
@@ -78,6 +79,36 @@ def add_parsers(commands: Any) -> None:
     pro.add_argument("--max-colors", type=int, default=12)
     pro.add_argument("--min-color-mm2", type=float, default=2.0)
     pro.add_argument("--no-cad", action="store_true", help="skip STEP/STL export of the selected candidate")
+
+    edit = commands.add_parser("stack-edit", help="L2: review and edit a saved sheet stack (project directory)")
+    steps = edit.add_subparsers(dest="edit_command", required=True)
+    init = steps.add_parser("init", help="start a review project from a saved stack (e.g. an L1 candidate)")
+    init.add_argument("--from", dest="source", type=Path, required=True)
+    init.add_argument("--project", type=Path, required=True)
+    for name, text in (("inspect", "list sheets, islands, edits and status"),
+                       ("validate", "run the L0 validators on the current draft"),
+                       ("verify", "reload and replay the edit log from the base; must reproduce the geometry")):
+        step = steps.add_parser(name, help=text)
+        step.add_argument("--project", type=Path, required=True)
+        step.add_argument("--report", type=Path, default=None)
+    app = steps.add_parser("apply", help="apply one edit: OP key=value ... (values are JSON when they parse)")
+    app.add_argument("--project", type=Path, required=True)
+    app.add_argument("--op-file", type=Path, default=None, help="JSON file with one edit dict")
+    app.add_argument("op", nargs="?", default=None)
+    app.add_argument("params", nargs="*", default=[])
+    und = steps.add_parser("undo", help="drop the last edit(s) by replaying the rest from the base")
+    und.add_argument("--project", type=Path, required=True)
+    und.add_argument("--steps", type=int, default=1)
+    rev = steps.add_parser("revert", help="keep only the first N edits (0 = the unedited base)")
+    rev.add_argument("--project", type=Path, required=True)
+    rev.add_argument("--to", type=int, required=True)
+    prv = steps.add_parser("preview", help="previews of the draft plus a visible/hidden change map")
+    prv.add_argument("--project", type=Path, required=True)
+    prv.add_argument("--output", type=Path, required=True)
+    prv.add_argument("--against", choices=["base", "previous"], default="base")
+    out = steps.add_parser("export", help="export STEP/STL with the L0 pipeline; refused for invalid drafts")
+    out.add_argument("--project", type=Path, required=True)
+    out.add_argument("--output", type=Path, required=True)
 
 
 def _write(path: Path, value: Any) -> None:
@@ -152,6 +183,12 @@ def _run(args: argparse.Namespace, progress: Callable[..., None]) -> int:
 
     if args.command == "stack-export":
         stack = load_stack(args.stack)
+        if stack.review is not None:
+            # An edited draft is exported only when it validates (L2); plain stacks as before.
+            validation = validate_stack(stack)
+            if validation["status"] != "PASS":
+                print(json.dumps({"status": "REFUSED_INVALID_DRAFT", "failures": validation["failures"]}, indent=2))
+                return 1
         _, check, _ = _export_and_check(stack, args.output, progress, args.simplify_mm)
         progress("STACK_EXPORTED", output=args.output.as_posix(), cad_revalidation=check["pass"])
         return 0 if check["pass"] else 1
@@ -162,7 +199,7 @@ def _run(args: argparse.Namespace, progress: Callable[..., None]) -> int:
         if args.cad:
             from .cad import rasterize_stl
 
-            masks = [rasterize_stl(args.cad / "stl" / f"{s.id}.stl", stack.grid) for s in stack.sheets]
+            masks = [rasterize_stl(args.cad / "stl" / f"{name}.stl", stack.grid) for name in stack.export_names()]
             source = f"reopened STL in {args.cad.as_posix()}"
         report = generate_previews(stack, args.output, masks, source)
         _write(args.output / "preview_report.json", report)
@@ -184,7 +221,73 @@ def _run(args: argparse.Namespace, progress: Callable[..., None]) -> int:
         print(json.dumps({"status": result["status"], "selected": result["selected"], "palette": result["palette"],
                           "flags": [f"{f['severity']}: {f['code']}" for f in result["flags"]]}, indent=2))
         return 0 if result["status"] == READY else 1
+
+    if args.command == "stack-edit":
+        return _edit(args, progress)
     raise StackError(f"unknown stack command {args.command}")
+
+
+def _edit_op(args: argparse.Namespace) -> dict[str, Any]:
+    if args.op_file:
+        return json.loads(args.op_file.read_text(encoding="utf-8"))
+    if not args.op:
+        raise StackError("apply needs an OP (e.g. recolor sheet=<id> color=#RRGGBB) or --op-file")
+    op: dict[str, Any] = {"op": args.op}
+    for item in args.params:
+        key, sep, value = item.partition("=")
+        if not sep:
+            raise StackError(f"edit parameter {item!r} is not key=value")
+        try:
+            op[key] = json.loads(value)
+        except json.JSONDecodeError:
+            op[key] = value
+    return op
+
+
+def _edit(args: argparse.Namespace, progress: Callable[..., None]) -> int:
+    from . import review
+
+    command = args.edit_command
+    if command == "init":
+        stack, validation = review.start_review(args.source, args.project)
+        progress("REVIEW_STARTED", project=args.project.as_posix(), sheets=len(stack.sheets),
+                 base_validation=validation["status"])
+        return 0
+    if command == "inspect":
+        report = review.inspect_project(args.project)
+    elif command == "validate":
+        report = validate_stack(review.load_project(args.project))
+    elif command == "verify":
+        report = review.verify_project(args.project)
+    elif command == "apply":
+        stack, entry = review.apply_to_project(args.project, _edit_op(args))
+        report = {"edit": entry, "status": stack.review["current"]}
+    elif command in ("undo", "revert"):
+        keep = None if command == "undo" else args.to
+        stack, _ = review.undo(args.project, args.steps) if keep is None else review.revert(args.project, keep)
+        report = {"edits": len(stack.review["edits"]), "status": stack.review["current"]}
+    elif command == "preview":
+        report = review.preview_project(args.project, args.output, args.against)
+    elif command == "export":
+        report = review.export_project(args.project, args.output, progress)
+    else:
+        raise StackError(f"unknown stack-edit command {command}")
+    if getattr(args, "report", None):
+        _write(args.report, report)
+    if command == "validate":
+        print(json.dumps({k: report[k] for k in ("status", "failures", "sheet_count", "reconstruction")}, indent=2))
+        return 0 if report["status"] == "PASS" else 1
+    shown = {k: v for k, v in report.items() if k != "fingerprint"}
+    print(json.dumps(shown, indent=2, default=_json_default))
+    if command == "verify":
+        return 0 if report["replay_identical"] else 1
+    if command == "export":
+        return 0 if report["pass"] else 1
+    if command in ("apply", "undo", "revert"):
+        return 0 if report["status"]["printable"] else 1
+    if command == "preview":
+        return 0 if report["review_status"]["printable"] else 1
+    return 0 if report["status"]["printable"] else 1
 
 
 def _reference(args: argparse.Namespace, progress: Callable[..., None]) -> int:

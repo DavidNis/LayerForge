@@ -205,3 +205,14 @@ No complete UI/server, arbitrary photographic depth estimation, frame design, gl
 - [x] User approved L1 on 2026-10-25. L-G10 physical printing still PENDING; L2 not started.
 - [ ] Record a held-out illustration whose rights are cleared (project-owned or user-supplied) for a committable L1 regression.
 - [ ] Known limitation, accepted for L1: unflagged detail loss (bear bow-knot outline); a thin-line preservation check may be considered later.
+
+## L2 reviewed layer editor (2026-10-25)
+
+- [x] Edit operations on a loaded stack (`core/editing.py`); review project with base copy, edit log, undo/revert, verify, preview and gated export (`core/review.py`, `stack-edit`).
+- [x] Manifest 1.1.0 (`rim`, `review`); 1.0.0 still written for unedited stacks and still loadable.
+- [x] 15 L2 tests incl. invalid edits and the L1 -> edit -> save/load -> replay -> STEP/STL integration test; complete suite 112 PASS; L0 reference regression PASS.
+- [x] Manual PowerShell CLI run on the accepted bear proposal; quoting issue found and fixed.
+- [x] Refinement (D-V3-028): hybrid vector edits kept exact through STEP/STL, exact checks on the reopened STL, explicit optional rim, export names from order/color with stable ids; 7 new tests; suite 119 PASS; L0 reference PASS; bear vector run exported and verified.
+- [x] User approved L2 on 2026-10-25, including the D-V3-028 refinements. L-G10 still PENDING; L3 not started.
+- [ ] L3: validate FDM printability of exact sub-pixel geometry; define and check minimum printable openings and negative features (holes, slots, gaps).
+- [ ] Later (not L2): separate named export components for accepted islands; true arcs in STEP; rims around internal cutouts if wanted.

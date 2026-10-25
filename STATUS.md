@@ -447,3 +447,95 @@ follow the light-blue body). Not user approved; no CAD exported.
 - Freeze check: of the 13 frozen source files only `core/intake.py` and `core/propose.py`
   differ (the two disclosed post-evaluation fixes); `reveal_planner.py`, `planning.py`,
   `fullres_flatten.py`, CAD and validation code are byte-identical to the freeze.
+
+## 2026-10-25 L2 reviewed layer editor
+
+- State: **READY_FOR_USER_TEST**; L2 NOT APPROVED. L0 and L1 approved; L-G10 physical
+  printing still PENDING. Not committed. L3/L4 not started; no GUI.
+- New: `core/editing.py` (edit operations on a `SheetStack`), `core/review.py` (review
+  project: base copy, edit log, undo/revert by replay, verify, preview, gated export), CLI
+  `stack-edit {init, inspect, apply, undo, revert, preview, validate, verify, export}`,
+  `tests/test_l2_editor.py` (15 tests). Changed: `core/model.py` (optional `Sheet.rim`,
+  `SheetStack.review`, schema 1.1.0 read/write, 1.0.0 unchanged), `core/cad.py` (rim fused
+  on the perimeter band; volume/height rows), `core/commands.py` (`stack-edit`;
+  `stack-export` refuses edited stacks that fail validation), `core/__init__.py` (exports).
+  Planner, validators and thresholds unchanged.
+- Operations: reorder, move, recolor, thickness, rim (add/remove), add, subtract (shape
+  primitive, bar or mask PNG), fill_hole, remove_island, bridge, merge, split (by region at
+  a point, shape or mask), accept_artwork. Each edit is classified (`visible_artwork`,
+  `artwork_reference`, `hidden_geometry`, `physical_parameters`, `no_change`) and validated
+  with `validate_stack`. Manual vs automatic: every edit is an explicit user request; no
+  automatic correction.
+- Tests: complete suite `python -m pytest` = **112 PASS / 0 FAIL / 0 SKIP / 0 ERROR** in 245 s
+  (97 previous + 15 L2). 29 warnings, all pyparsing deprecations inside matplotlib/cadquery.
+- Focused L0 regression after the model/CAD changes: `stack-reference --name van_gogh_optB
+  --from-accepted` (output in a scratch folder, tracked report untouched) = PASS: baseline,
+  accepted masks and accepted CAD identical; 10/10 STEP valid single solids, STL watertight,
+  stack mismatch 0 px (393 s).
+- Integration test (L1 proposal of the project-owned bow JPEG -> 10 edits applied, 7 kept, incl. an
+  invalid ring island, its bridge, a visible fill that was reverted, recolor + accept_artwork
+  -> save -> reload -> replay -> validate -> export): reload and replay bit-identical; validate
+  PASS; all STEP valid single solids, STL watertight, each reopened STL equals the reviewed
+  mask, rim sheet 3.0 mm high in STL and STEP, other sheets 1.8 mm.
+- Manual CLI run in Windows PowerShell on the accepted bear proposal (private output,
+  git-ignored `artifacts/l2_review_v1/`): init; rim 8 mm x 3.2 mm on the back sheet; hidden
+  4 mm circle cut; hidden square ring (DRAFT_INVALID, 1 island) then 3 mm bridge (valid);
+  teal recolor (visible, 73,451 px, DRAFT_INVALID) then undo; verify replay identical;
+  preview vs base: 0 visible / 4,943 hidden px changed; export 40 s: validation PASS, CAD
+  revalidation PASS, 7/7 STEP single valid solids, 7/7 STL watertight, stack mismatch 0 px,
+  reconstruction from STL 0 of 1,048,576 px, rim height matches.
+- Found in the manual run and fixed: Windows PowerShell 5.1 strips quotes inside JSON
+  arguments; a shape given that way crashed with a traceback. Non-object shapes/regions
+  now fail with a clear error pointing to `--op-file`.
+- Limitations: edits are raster masks on the stack grid (0.39 mm/px at scale 1, 0.195 mm/px at
+  scale 2), not stored vectors; rim only on the outer perimeter band; floating islands must
+  be bridged or removed (separate named components are not exported); sheet ids stay stable
+  and may still carry an old color/index; recoloring to the frame color is refused; JSON
+  arguments need `--op-file` in PowerShell 5.1; no GUI (L4). Rim effect on physical alignment
+  is unverified (L-G10).
+
+### 2026-10-25 L2 refinement: hybrid vector edits, optional rim, export names (D-V3-028)
+
+- State: **L2 APPROVED** by the user on 2026-10-25 (including these refinements); L-G10
+  physical printing still PENDING; L3/L4 not started. All limitations below remain.
+- Note for L3: exact sub-pixel geometry is not necessarily FDM-printable. Minimum printable
+  openings and negative features (holes, slots, gaps) are not validated yet; only the 1.2 mm
+  positive material width is checked.
+- Changed: `core/model.py` (`Sheet.geometry`, `SheetStack.export_names`, schema 1.2.0 with
+  WKB geometry + hash, raster-of-geometry check on load), `core/cad.py` (vector sheets
+  extruded from exact geometry; files and assembly rows named by current order/color with
+  `sheet_id`; reopened-STL footprint compared with the geometry and checked with the vector
+  rules), `core/validation.py` (`vector_sheet_checks`, same 1.2 mm width), `core/editing.py`
+  (precision raster/vector; vector add/subtract/bridge/fill_hole/remove_island/merge/split;
+  exact changed and exact visible area per edit; rim `enabled` + partial update),
+  `core/review.py` (shape edits default to vector, precision logged; fingerprint includes
+  geometry hash and export names), `core/preview.py`, `core/commands.py`, tests (+7).
+  Planner, raster validators and thresholds unchanged.
+- Feasibility check before building: tracing each of the 17 accepted bear and van_gogh sheets
+  to vector and rasterizing back is pixel-exact, and the vector checks agree with the raster
+  validators on all of them (1 part, no orphan cores, perimeter complete). No rewrite needed.
+- Tests: complete suite **119 PASS / 0 FAIL / 0 SKIP / 0 ERROR** in 269 s (112 + 7 new). 29
+  warnings, all pyparsing deprecations inside matplotlib/cadquery. L0 reference regression
+  (`stack-reference --from-accepted`, scratch output) PASS again: baseline, masks and accepted
+  CAD identical (373 s).
+- Precision through CAD (test): a 0.08 mm-radius hole, invisible to the 0.39 mm grid (0 px
+  changed), is kept in the reopened STL (one more hole in the exact checks), mean STL boundary
+  deviation < 1e-4 mm; the same hole in the front sheet is reported as
+  `visible_subgrid_geometry` with its exact visible area, while the grid reconstruction stays 0 px.
+  A 0.9 mm vector bridge fails the exact width check (orphan core); 3 mm passes.
+- Backward compatibility: the bear project saved by the first L2 version (raster log without
+  `precision`) loads and replays bit-identically; the L1/L0 tests are unchanged and pass.
+- Manual PowerShell run on the accepted bear (private, `artifacts/l2_review_v1/bear_vector`):
+  rim enabled 8 x 3.2 mm; 4.05 mm vector hole (exact 51.5248 mm2); rounded square ring
+  (island, DRAFT_INVALID); 1.0 mm bridge (DRAFT_INVALID, < 1.2 mm) undone; 2.5 mm bridge (valid,
+  exact 5.0 mm2); a visible move undone; pink recolor + accept_artwork; verify replay
+  identical. Export 43 s: validation PASS, CAD revalidation PASS, 7/7 STEP single valid solids,
+  7/7 STL watertight, stack mismatch 0 px, reconstruction from STL 0 of 1,048,576 px, rim height
+  matches; vector sheets' STL vs geometry 1.4e-5 and 2.4e-5 mm2 (mean boundary deviation ~2e-8
+  mm); the recolored sheet exports as `layer_02_f48fb1` (stable id `layer_02_fb98b8`).
+- Remaining limitations: circles/ellipses are 256-segment polygons (chord error about 3e-4 mm at
+  r = 4 mm), not true arcs in STEP; target comparison is on the grid, sub-grid differences are
+  reported, not pass/fail; a sheet keeps its traced staircase outline where it was not
+  edited (no automatic vectorization of artwork); a vector sheet must pass both raster and exact
+  checks (conservative); islands must be bridged or removed (no separate components); rim only
+  on the outer perimeter band; JSON in PowerShell 5.1 needs `--op-file`; no GUI.

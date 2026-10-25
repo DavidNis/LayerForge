@@ -333,3 +333,80 @@ thin-decorative warnings).
   evaluation and is not re-planned.
 - USER_REQUIRED: L1 approved by the user on 2026-10-25 on the reported results and the accepted
   bear output. L-G10 physical printing remains PENDING.
+
+## D-V3-027 | 2026-10-25 | L2 editor: explicit mask edits, replayable log, same manifest
+
+**Status:** IMPLEMENTED; awaiting user review.
+
+- DESIGN_CHOICE: edits operate on a loaded `SheetStack` (L1 candidate or saved project) with
+  the existing Boolean mask model: `add` = union, `subtract` = difference with a region
+  (`geometry.shape_from_spec` primitive in sheet mm, a `bar` bridge, or a mask PNG),
+  rasterized with `cad.rasterize_geometry`. Other ops: reorder/move, recolor, thickness, rim,
+  fill_hole, remove_island, bridge, merge, split, accept_artwork. The planner is never re-run.
+  Code: `core/editing.py` (operations), `core/review.py` (project), CLI `stack-edit`.
+- DESIGN_CHOICE: no second format. `layerforge.sheet_stack` 1.1.0 adds an optional per-sheet
+  `rim` and a top-level `review` block (base reference with the source provenance and
+  manifest hash, ordered edit log with each change summary and validation result, current
+  status). Stacks without either are still written as 1.0.0; 1.0.0 stays loadable.
+- DESIGN_CHOICE: saved masks are authoritative; `review/base/` holds the unedited stack and
+  mask operands are copied into `review/operands/`, so the log replays deterministically.
+  Undo/revert replay a prefix of the log; `verify` checks that replay reproduces the saved
+  geometry bit for bit.
+- DESIGN_CHOICE: visible masks are re-derived after every edit with the rule the planner
+  output satisfies (frontmost material in the artwork, frame excluded); verified identical
+  on the bow-face, bear and van_gogh accepted stacks.
+- DESIGN_CHOICE: each edit is classified as `visible_artwork`, `artwork_reference`,
+  `hidden_geometry`, `physical_parameters` or `no_change` by comparing the front view before
+  and after. Validators and thresholds are unchanged. Invalid geometric edits are applied,
+  saved as `DRAFT_INVALID` and reported, never repaired. An intended visible change only
+  validates after an explicit `accept_artwork` edit, which records the new front view as
+  the reviewed target; the source artwork stays in the base and the deviation is reported.
+- DESIGN_CHOICE: rim = raised band on the shared outer perimeter (width within the band,
+  total height above the sheet), fused like `geometry.build_layer_solid`. The next sheet
+  rests on it, so assembly z uses the rim height. Rims around internal cutouts are not offered.
+- DESIGN_CHOICE: invalid drafts are refused by `stack-edit export` and by `stack-export`
+  (for stacks with a review block); plain L0 stacks export as before.
+- UNVERIFIED_INFERENCE: whether a perimeter rim aids alignment or spacing physically is
+  untested (L-G10 pending).
+
+## D-V3-028 | 2026-10-25 | L2 refinement: hybrid vector edits, explicit optional rim, export names
+
+**Status:** IMPLEMENTED; awaiting user review. Requested by the user before L3.
+
+- DESIGN_CHOICE: hybrid precision without a new geometry engine. The planner and raster
+  sheets are unchanged. A sheet gets an exact planar `geometry` (shapely, sheet mm) on its
+  first vector edit: its mask traced exactly as CAD already traces it (`mask_to_geometry`,
+  0.03 mm; verified raster-lossless on all 17 accepted bear and van_gogh sheets), then the
+  Boolean operation with the exact shape. Later geometric edits of that sheet (add, subtract,
+  bridge, fill_hole, remove_island, merge, split) work on the geometry; mask operands enter
+  as exact pixel-edge polygons. `retained` becomes the grid raster of the geometry and is
+  used only for the raster validators, front view and target comparison.
+- DESIGN_CHOICE: CAD extrudes the exact geometry of vector sheets (no re-rasterizing, no
+  simplification). `revalidate_cad` additionally compares each vector sheet's reopened STL
+  footprint with its geometry (mean boundary deviation <= 0.001 mm) and runs the vector
+  checks on that footprint.
+- DESIGN_CHOICE: `validation.vector_sheet_checks` evaluates the existing sheet rules on exact
+  geometry with the existing 1.2 mm width (0.8 nominal + 0.2 + 0.2 safety from
+  `DEFAULT_OPTIMIZATION_CONFIG`): one connected part, full perimeter band, nothing outside
+  the sheet, every 0.6 mm-eroded core connected to the perimeter. A vector sheet must pass
+  both these checks and the unchanged raster checks of its grid raster. No threshold changed.
+- DESIGN_CHOICE: edits record `"precision"`. New shape-based edits (add/subtract with a
+  shape, bridge, split by shape) default to `vector` in a review project and the value is
+  written to the log; logged edits without the key replay as raster, so L1 stacks and
+  earlier L2 projects load and replay unchanged (verified on the earlier bear project).
+- DESIGN_CHOICE: front-view comparison stays on the grid (the target's resolution);
+  changes below the grid are reported explicitly per edit as exact changed area and exact
+  visible area (`visible_subgrid_geometry` when only sub-grid visible area changed).
+- DESIGN_CHOICE: rim stays optional and is never added automatically; `rim` edits take
+  `enabled` and either dimension per sheet (`remove: true` still replays).
+- DESIGN_CHOICE: exported STEP/STL/preview names and assembly rows use
+  `layer_<order>_<color>` from the current order and color (`SheetStack.export_names`);
+  `Sheet.id` stays the stable identity used by the log, undo and replay, and is recorded
+  next to the name. For unedited planner stacks names equal ids, so L0/L1 outputs keep
+  their file names.
+- USER_REQUIRED: L2 approved by the user on 2026-10-25 including these refinements; L-G10
+  physical printing remains PENDING.
+- OPEN_QUESTION (for L3): exact sub-pixel geometry is not necessarily FDM-printable. Minimum
+  printable openings and negative features are not validated; only the 1.2 mm positive width is.
+- Schema `layerforge.sheet_stack` 1.2.0 adds per-sheet `geometry` (WKB file + hash; the
+  mask is checked to be its raster on load) and `export_name`; 1.0.0/1.1.0 still load.

@@ -134,6 +134,9 @@ and thickness must be supplied, as they were command-line values). The vector
 
 L1 (automatic proposals) produces an exact-palette target and calls
 `plan_stack` (implemented 2026-10-25: `core/intake.py` -> `core/propose.py`, CLI
-`stack-propose`; see DECISIONS D-V3-025); L2 (editor) should edit a loaded `SheetStack`'s masks and call
-`validate_stack` before `export_stack`; L3 should consume `cad_manifest.json`,
-`cad_revalidation.json` and previews. L1 is approved (2026-10-25); L2 and L3 are not started.
+`stack-propose`; see DECISIONS D-V3-025); L2 (editor) edits a loaded `SheetStack`'s masks and
+calls `validate_stack` before `export_stack` (implemented 2026-10-25: `core/editing.py`
+operations, `core/review.py` project with base copy and replayable edit log, CLI
+`stack-edit`, manifest 1.1.0 `rim` + `review`; see DECISIONS D-V3-027; hybrid vector edits:
+edited sheets may carry exact mm geometry that CAD extrudes directly, manifest 1.2.0, D-V3-028); L3 should consume
+`cad_manifest.json`, `cad_revalidation.json` and previews. L1 and L2 are approved (2026-10-25); L3 is not started.

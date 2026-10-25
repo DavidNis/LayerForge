@@ -30,3 +30,6 @@ artifacts/l0_core_v1/legacy_import_*/
 # L1 held-out evaluation output: derived from images whose provenance is not
 # recorded (private evaluation only). freeze.json (hashes) stays trackable.
 artifacts/l1_eval_v1/*/
+
+# L2 manual review runs on the held-out bear proposal (private evaluation output).
+artifacts/l2_review_v1/

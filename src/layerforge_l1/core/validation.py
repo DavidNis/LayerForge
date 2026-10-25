@@ -9,6 +9,9 @@ Per sheet (same checks as the accepted L-1 run):
 * complete shared perimeter band;
 * visible region lies inside the retained material.
 
+Sheets that carry exact vector geometry (L2) must also pass
+``vector_sheet_checks`` on that geometry, with the same 1.2 mm width.
+
 Per stack: identical outer grid, front-view reconstruction of the target
 (frame pixels excluded, as in the planner run), and agreement between each
 sheet's visible mask and what the assembled stack actually shows.  Narrow
@@ -74,6 +77,62 @@ def validate_sheet_mask(stack: SheetStack, retained: np.ndarray, visible: np.nda
     }
 
 
+VECTOR_AREA_TOLERANCE_MM2 = 1e-6
+
+
+def minimum_width_mm() -> float:
+    """The approved 1.2 mm connection width (nominal + vectorization + CAD safety)."""
+
+    c = DEFAULT_OPTIMIZATION_CONFIG
+    return c.nominal_connection_width_mm + c.vectorization_safety_mm + c.cad_conversion_safety_mm
+
+
+def vector_sheet_checks(stack: SheetStack, geometry: Any) -> dict[str, Any]:
+    """The sheet rules evaluated on exact planar geometry in sheet mm.
+
+    Continuous counterpart of the raster audits, with the same width: one connected
+    part; the shared perimeter band fully present; nothing outside the sheet; every
+    structural core (erosion by half the minimum width) connected to the perimeter.
+    Material that vanishes under the erosion is reported as thin, as in the raster audit.
+    """
+
+    from shapely.geometry import box
+
+    from .cad import perimeter_band, polygons
+
+    size = stack.grid.outer_sheet_mm
+    band = perimeter_band(stack)
+    width = minimum_width_mm()
+    parts = polygons(geometry)
+    core = geometry.buffer(-width / 2)
+    cores = polygons(core)
+    orphans = [c for c in cores if not c.intersects(band)]
+    thin = geometry.difference(core.buffer(width / 2))
+    missing = band.difference(geometry).area
+    outside = geometry.difference(box(0.0, 0.0, size, size)).area
+    result = {
+        "valid_geometry": bool(geometry.is_valid),
+        "connected_parts": len(parts),
+        "perimeter_missing_mm2": round(float(missing), 9),
+        "outside_sheet_mm2": round(float(outside), 9),
+        "minimum_width_mm": width,
+        "structural_cores": len(cores),
+        "orphan_structural_cores": len(orphans),
+        "orphan_core_points_mm": [[round(c, 3) for c in o.representative_point().coords[0]] for o in orphans],
+        "thin_material_mm2": round(float(thin.area), 6),
+        "holes": sum(len(p.interiors) for p in parts),
+        "area_mm2": round(float(geometry.area), 6),
+    }
+    result["pass"] = (
+        result["valid_geometry"]
+        and len(parts) == 1
+        and missing <= VECTOR_AREA_TOLERANCE_MM2
+        and outside <= VECTOR_AREA_TOLERANCE_MM2
+        and not orphans
+    )
+    return result
+
+
 def reconstruction(stack: SheetStack, retained_masks: list[np.ndarray] | None = None) -> dict[str, Any]:
     """Compare the front view of the retained masks with the target."""
 
@@ -110,6 +169,11 @@ def validate_stack(stack: SheetStack) -> dict[str, Any]:
     for order, sheet in enumerate(stack.sheets):
         row = {"id": sheet.id, "order_back_to_front": order, "color": sheet.color}
         row.update(validate_sheet_mask(stack, sheet.retained, sheet.visible))
+        if sheet.geometry is not None:
+            # Vector sheet: the raster checks above run on its grid raster; the exact
+            # geometry that CAD will extrude must pass as well.
+            row["vector_checks"] = vector_sheet_checks(stack, sheet.geometry)
+            row["pass"] = row["pass"] and row["vector_checks"]["pass"]
         sheets.append(row)
     recon = reconstruction(stack)
     frame = stack.frame_mask()

@@ -113,6 +113,18 @@ $env:PYTHONPATH='src'
 .\.venv\Scripts\python.exe -m layerforge_l1 stack-reference --name van_gogh_optB --output artifacts\l0_core_v1\reference_van_gogh_optB
 # L1: automatic proposal for a new flat-color PNG/JPEG (no manifest); exit 0 = proposal ready, 1 = needs user decision
 .\.venv\Scripts\python.exe -m layerforge_l1 stack-propose --image <image> --output <dir>
+# L2: review/edit a saved stack in a project directory (exit 0 = current draft valid, 1 = invalid draft, 2 = bad request)
+.\.venv\Scripts\python.exe -m layerforge_l1 stack-edit init --from <dir>\candidates\<name>\stack --project <project>
+.\.venv\Scripts\python.exe -m layerforge_l1 stack-edit inspect --project <project>
+.\.venv\Scripts\python.exe -m layerforge_l1 stack-edit apply --project <project> rim sheet=<id> enabled=true width_mm=8 total_height_mm=3.2
+.\.venv\Scripts\python.exe -m layerforge_l1 stack-edit apply --project <project> rim sheet=<id> enabled=false   # rims are optional
+# Shape edits (cuts, holes, bridges, mm coordinates) are exact vector geometry by default and are
+# extruded without rasterizing; add "precision": "raster" to an edit to snap it to the planner grid.
+.\.venv\Scripts\python.exe -m layerforge_l1 stack-edit apply --project <project> --op-file <edit.json>  # JSON shapes: use a file in PowerShell 5.1
+.\.venv\Scripts\python.exe -m layerforge_l1 stack-edit preview --project <project> --output <dir> --against previous
+.\.venv\Scripts\python.exe -m layerforge_l1 stack-edit undo --project <project>     # or: revert --to <n>
+.\.venv\Scripts\python.exe -m layerforge_l1 stack-edit verify --project <project>   # replay the log from the base
+.\.venv\Scripts\python.exe -m layerforge_l1 stack-edit export --project <project> --output <cad_dir>  # refused for invalid drafts
 # Complete suite (no test depends on deleted artifact trees; see tests\REMOVED_TESTS.md)
 .\.venv\Scripts\python.exe -m pytest
 ```

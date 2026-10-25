@@ -93,8 +93,8 @@ def generate_previews(
     if len(masks) != len(stack.sheets):
         raise ValueError(f"{len(masks)} masks for {len(stack.sheets)} sheets")
     files = []
-    for sheet, mask in zip(stack.sheets, masks):
-        path = output / "sheets" / f"{sheet.id}.png"
+    for sheet, name, mask in zip(stack.sheets, stack.export_names(), masks):
+        path = output / "sheets" / f"{name}.png"
         Image.fromarray(sheet_image(mask, sheet.color)).resize(
             (SHEET_PREVIEW_PIXELS, SHEET_PREVIEW_PIXELS), Image.NEAREST
         ).save(path)

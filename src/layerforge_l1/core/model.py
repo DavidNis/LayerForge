@@ -12,6 +12,13 @@ On disk a stack is a directory::
     target.png                                   (optional approved artwork)
     layers/<sheet id>/retained_material_mask.png (255 = material)
     layers/<sheet id>/source_visible_region_mask.png
+    layers/<sheet id>/geometry_mm.wkb            (optional exact vector geometry)
+
+A sheet may carry an exact planar ``geometry`` in sheet millimetres (L2 vector
+edits).  It is then authoritative for CAD, and ``retained`` is its raster on
+the stack grid (``cad.rasterize_geometry``), used by the raster validators and
+the front view.  Unedited sheets have no geometry and are traced from the mask
+at export, exactly as before.
 
 The ``layers/`` layout is the one already written by
 ``scripts/run_turtle_reveal_planner_poc.py``; ``import_planner_output``
@@ -36,7 +43,13 @@ from ..subtractive_poc import DEFAULT_CONFIG, PocConfig
 
 SCHEMA = "layerforge.sheet_stack"
 SCHEMA_VERSION = "1.0.0"
-SUPPORTED_SCHEMA_VERSIONS = ("1.0.0",)
+# 1.1.0 adds the optional per-sheet ``rim`` and the top-level ``review`` block (L2
+# editor); a stack that uses neither is still written as 1.0.0.
+REVIEW_SCHEMA_VERSION = "1.1.0"
+# 1.2.0 adds the optional per-sheet exact vector ``geometry`` (L2 hybrid vector edits).
+VECTOR_SCHEMA_VERSION = "1.2.0"
+SUPPORTED_SCHEMA_VERSIONS = ("1.0.0", "1.1.0", "1.2.0")
+GEOMETRY_NAME = "geometry_mm.wkb"
 MANIFEST_NAME = "sheet_stack.json"
 RETAINED_MASK_NAME = "retained_material_mask.png"
 VISIBLE_MASK_NAME = "source_visible_region_mask.png"
@@ -149,6 +162,15 @@ class Sheet:
     visible: np.ndarray
     thickness_mm: float
     print_placement: dict[str, Any] = field(default_factory=lambda: json.loads(json.dumps(_IDENTITY_PLACEMENT)))
+    # Optional raised band on the shared outer perimeter: {"width_mm", "total_height_mm"}.
+    # The next sheet rests on the rim, so it also sets the assembled spacing.
+    rim: dict[str, float] | None = None
+    # Optional exact shapely (Multi)Polygon in sheet mm; ``retained`` is then its grid raster.
+    geometry: Any = None
+
+    @property
+    def stack_height_mm(self) -> float:
+        return float(self.rim["total_height_mm"]) if self.rim else self.thickness_mm
 
 
 @dataclass
@@ -161,6 +183,8 @@ class SheetStack:
     target_rgb: np.ndarray | None = None
     frame_color: str | None = None
     provenance: dict[str, Any] = field(default_factory=dict)
+    # L2 review record (base reference, edit log, validation); None for unedited stacks.
+    review: dict[str, Any] | None = None
 
     def __post_init__(self) -> None:
         self.check()
@@ -182,6 +206,8 @@ class SheetStack:
                     raise StackError(f"{sheet.id}: {kind} mask must be bool {shape}, got {mask.dtype} {mask.shape}")
             if not sheet.thickness_mm > 0:
                 raise StackError(f"{sheet.id}: thickness must be positive")
+            if sheet.rim is not None:
+                self.check_rim(sheet.rim, sheet.thickness_mm, sheet.id)
         if self.frame_color is not None and not _HEX.match(self.frame_color):
             raise StackError(f"frame color must be '#RRGGBB' upper case, got {self.frame_color!r}")
         if self.target_rgb is not None:
@@ -193,10 +219,30 @@ class SheetStack:
                     f"got {self.target_rgb.shape}"
                 )
 
+    def check_rim(self, rim: dict[str, Any], thickness_mm: float, sheet_id: str) -> None:
+        """A rim must lie on the solid shared perimeter and stand above the sheet."""
+
+        if set(rim) != {"width_mm", "total_height_mm"}:
+            raise StackError(f"{sheet_id}: rim needs exactly width_mm and total_height_mm, got {sorted(rim)}")
+        band_mm = self.grid.perimeter_pixels * self.grid.mm_per_pixel
+        if not 0 < float(rim["width_mm"]) <= band_mm:
+            raise StackError(f"{sheet_id}: rim width must be in (0, {band_mm:g}] mm (the shared perimeter band)")
+        if not float(rim["total_height_mm"]) > thickness_mm:
+            raise StackError(f"{sheet_id}: rim total height must exceed the sheet thickness {thickness_mm:g} mm")
+
     # -- derived views ------------------------------------------------------
     @property
     def front_to_back(self) -> list[Sheet]:
         return list(reversed(self.sheets))
+
+    def export_names(self) -> list[str]:
+        """File/assembly names from the current order and color (back to front).
+
+        For planner output these equal the sheet ids; after reordering or recoloring
+        they follow the edit while ``Sheet.id`` stays the stable internal identity.
+        """
+
+        return [f"layer_{order:02d}_{sheet.color[1:].lower()}" for order, sheet in enumerate(self.sheets)]
 
     def assembly_z_mm(self) -> list[float]:
         """Back face z of each sheet (back sheet at 0, front positive)."""
@@ -204,7 +250,7 @@ class SheetStack:
         z, out = 0.0, []
         for sheet in self.sheets:
             out.append(z)
-            z += sheet.thickness_mm
+            z += sheet.stack_height_mm
         return out
 
     def target_labels(self) -> tuple[np.ndarray, list[str]] | None:
@@ -250,6 +296,21 @@ def _read_mask(path: Path) -> np.ndarray:
     return data > 0
 
 
+def _read_geometry(root: Path, entry: dict[str, Any], manifest: Path) -> Any:
+    import shapely
+
+    file = root / entry["file"]
+    if not file.is_file():
+        raise ManifestError(f"missing geometry file: {file}")
+    data = file.read_bytes()
+    if hashlib.sha256(data).hexdigest() != entry.get("sha256"):
+        raise ManifestError(f"{manifest}: {file.name} does not match its recorded hash")
+    geometry = shapely.from_wkb(data)
+    if geometry.geom_type not in ("Polygon", "MultiPolygon") or not geometry.is_valid:
+        raise ManifestError(f"{manifest}: {file} is not a valid polygonal geometry")
+    return geometry
+
+
 def save_stack(stack: SheetStack, directory: Path) -> Path:
     """Write the manifest, masks and target; return the manifest path."""
 
@@ -284,9 +345,27 @@ def save_stack(stack: SheetStack, directory: Path) -> Path:
                 "print_placement": sheet.print_placement,
             }
         )
+        if sheet.rim is not None:
+            rows[-1]["rim"] = dict(sheet.rim)
+        if sheet.geometry is not None:
+            import shapely
+
+            relative = f"layers/{sheet.id}/{GEOMETRY_NAME}"
+            data = shapely.to_wkb(sheet.geometry)
+            (directory / relative).write_bytes(data)
+            rows[-1]["geometry"] = {
+                "file": relative,
+                "sha256": hashlib.sha256(data).hexdigest(),
+                "units": "mm",
+                "area_mm2": float(sheet.geometry.area),
+                "retained_mask": "grid raster of this geometry (4x supersampled majority)",
+            }
+        rows[-1]["export_name"] = stack.export_names()[order]
+    vector = any(sheet.geometry is not None for sheet in stack.sheets)
+    reviewed = stack.review is not None or any(sheet.rim is not None for sheet in stack.sheets)
     manifest = {
         "schema": SCHEMA,
-        "schema_version": SCHEMA_VERSION,
+        "schema_version": VECTOR_SCHEMA_VERSION if vector else REVIEW_SCHEMA_VERSION if reviewed else SCHEMA_VERSION,
         "name": stack.name,
         "units": "mm",
         "grid": stack.grid.to_json(),
@@ -301,6 +380,8 @@ def save_stack(stack: SheetStack, directory: Path) -> Path:
         "sheets": rows,
         "provenance": stack.provenance,
     }
+    if stack.review is not None:
+        manifest["review"] = stack.review
     path = directory / MANIFEST_NAME
     path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     return path
@@ -343,6 +424,8 @@ def load_stack(path: Path) -> SheetStack:
                 visible=_read_mask(root / row["visible_mask"]),
                 thickness_mm=float(row["thickness_mm"]),
                 print_placement=row.get("print_placement", dict(_IDENTITY_PLACEMENT)),
+                rim={k: float(v) for k, v in row["rim"].items()} if row.get("rim") else None,
+                geometry=_read_geometry(root, row["geometry"], path) if row.get("geometry") else None,
             )
         except KeyError as error:
             raise ManifestError(f"{path}: sheet entry missing {error}") from error
@@ -369,9 +452,16 @@ def load_stack(path: Path) -> SheetStack:
             target_rgb=target,
             frame_color=artwork.get("frame_color"),
             provenance=manifest.get("provenance", {}),
+            review=manifest.get("review"),
         )
     except StackError as error:
         raise ManifestError(f"{path}: {error}") from error
+    for sheet in stack.sheets:
+        if sheet.geometry is not None:
+            from .cad import rasterize_geometry
+
+            if not np.array_equal(rasterize_geometry(sheet.geometry, grid), sheet.retained):
+                raise ManifestError(f"{path}: {sheet.id} retained mask is not the raster of its vector geometry")
     for row, z in zip(rows, stack.assembly_z_mm()):
         if "assembly_z_mm" in row and abs(float(row["assembly_z_mm"]) - z) > 1e-9:
             raise ManifestError(f"{path}: {row['id']} assembly_z_mm {row['assembly_z_mm']} != cumulative {z}")
