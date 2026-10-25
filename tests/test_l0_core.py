@@ -19,6 +19,7 @@ from PIL import Image
 
 from layerforge_l1 import core
 from layerforge_l1.connectivity_repair import audit_edge_connectivity
+from layerforge_l1.hidden_width_repair import WidthRepairConfig, audit_mask_at_physical_scale
 from layerforge_l1.core import reference
 from layerforge_l1.core.model import MANIFEST_NAME, import_planner_output
 from layerforge_l1.core.validation import cutout_hole_count
@@ -146,6 +147,24 @@ def test_diagonal_only_contact_is_a_floating_island() -> None:
     row = validation["sheets"][0]
     assert row["four_neighbor"] == "FAIL" and row["retained_components_4"] == 2
     assert validation["status"] == "FAIL"
+
+
+def test_planned_sheets_pass_the_physical_scale_audit(stack) -> None:
+    # Replaces the turtle stored-artifact tests: the same 4x physical-scale audit at
+    # 225 mm, run on freshly planned sheets of the project-owned fixture.
+    width = WidthRepairConfig(physical_size_mm=225.0, validation_scale=4)
+    p = stack.grid.perimeter_pixels
+    for sheet in stack.sheets:
+        audit, _ = audit_mask_at_physical_scale(sheet.retained, sheet.visible[p:-p, p:-p], repair=width)
+        assert audit["edge"]["four_neighbor_status"] == "PASS"
+        assert audit["width"]["status"] == "PASS"
+        assert audit["width"]["orphan_structural_core_components"] == 0
+        assert audit["width"]["thin_decorative_visible_components"] == 0
+    neck = stack.grid.perimeter_mask()
+    neck[250:330, 250:330] = True
+    neck[288, 32:250] = True
+    audit, _ = audit_mask_at_physical_scale(neck, np.zeros_like(neck[p:-p, p:-p]), repair=width)
+    assert audit["width"]["status"] != "PASS"
 
 
 def test_broken_perimeter_and_reconstruction_errors_are_detected(stack) -> None:

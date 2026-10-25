@@ -116,8 +116,23 @@ checks of superseded pre-L1 simplification experiments, so they were removed:
 
 The algorithmic tests in those files run directly on committed inputs and are kept.
 
-## Remaining artifact-reading tests
+## Repository cleanup (2026-10-25, before L1)
 
-`test_turtle_post_layer_width_repair.py` (1 test) and `test_turtle_uniform_contour_stack.py`
-read artifact trees that are **tracked in git** and present, so a clean checkout still
-reproduces them. No other test reads `artifacts/`.
+The last two tests that read historical artifacts were removed together with the superseded
+turtle experiment folders:
+
+- `test_turtle_post_layer_width_repair.py::test_repaired_preview_matches_actual_repaired_masks`
+- `test_turtle_uniform_contour_stack.py` (2 tests): stored turtle masks pass
+  `audit_mask_at_physical_scale`, and the stored preview equals the composite of the stored masks.
+
+The behavior they checked is now covered by project-owned, freshly generated data:
+
+- `test_l0_core.py::test_planned_sheets_pass_the_physical_scale_audit` runs the same 4x
+  physical-scale audit at 225 mm, on the same 576 px / 32 px-perimeter grid, against every
+  sheet the planner produces for the bow-face fixture. It includes a thin-neck negative control.
+- Preview derivation from the actual geometry →
+  `test_previews_from_reopened_stl_match_planned_geometry` and
+  `test_preview_detects_geometry_that_differs_from_plan`.
+
+No test reads `artifacts/` any more. The accepted van_gogh option-B reference is read only by
+`stack-reference` and `stack-import` (not by pytest).

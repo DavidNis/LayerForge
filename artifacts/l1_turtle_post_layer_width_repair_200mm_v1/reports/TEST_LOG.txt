@@ -1,6 +1,0 @@
-PASS: python -m pytest tests/test_hidden_width_repair.py tests/test_turtle_post_layer_width_repair.py -q
-Result: 5 passed in 8.57s
-
-PARTIAL/HISTORICAL FIXTURE FAILURE: python -m pytest tests/test_hidden_width_repair.py tests/test_connectivity_repair.py -q
-Result: 5 passed, 7 failed in 0.46s.
-Cause: the seven historical connectivity tests require deleted artifacts/l1_connectivity_repair fixtures. The failures were FileNotFoundError and do not contradict the current turtle-mask validation.

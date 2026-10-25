@@ -389,3 +389,19 @@ follow the light-blue body). Not user approved; no CAD exported.
   A full-size planner re-run was explicitly not required.
 - L0 state: **APPROVED**. L-G10 physical print-and-stack test: **PENDING / NOT VERIFIED**.
 - L1 not started; it awaits a separate user instruction.
+
+## 2026-10-25 repository cleanup before L1 (user-approved, committed)
+
+- Removed through `git rm` (reversible from `097327e`): 15,421 tracked files, 481.1 MB.
+  This covers the docs PDF build intermediates, all superseded turtle experiment folders
+  and packages, non-reference van_gogh runs and review screenshots, 15 turtle/fox
+  experiment driver scripts, and 2 turtle stored-artifact test files. The latter were
+  replaced by a project-owned physical-scale audit test.
+- Dated entries above that cite `artifacts/l1_turtle_*`, `planner_optA/` or removed
+  turtle scripts are history; those files remain retrievable at commit `097327e`.
+- Accepted van_gogh option-B reference, L0 baseline, all `src/` modules and all fixtures kept.
+- L0 unchanged and operational; planner untouched. L-G10 physical test still PENDING; L1 not started.
+- USER_REQUIRED decisions: the untracked L0 run outputs were deleted after their masks and
+  previews were shown byte-identical to a fresh regeneration. The accepted van_gogh CAD
+  (including STEP), all user-supplied images/3MF files and the experimental algorithms and
+  scripts are kept until reviewed. No history rewrite.

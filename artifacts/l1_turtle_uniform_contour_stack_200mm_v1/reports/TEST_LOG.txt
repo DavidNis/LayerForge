@@ -1,9 +1,0 @@
-PASS: python -m pytest tests/test_contour_consistency.py tests/test_turtle_uniform_contour_stack.py -q
-Result: 4 passed in 21.80s
-
-Verified:
-- complete centerline restroking repairs thin sections without detached blobs;
-- saved retained/cutout masks reopen with exact inverse polarity;
-- all 12 sheets pass 4-neighbor and calibrated 1.2 mm retained-width checks;
-- no thin visible retained components remain;
-- assembled preview is reproduced exactly from the saved physical masks.

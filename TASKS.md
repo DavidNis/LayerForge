@@ -186,3 +186,11 @@ No complete UI/server, arbitrary photographic depth estimation, frame design, gl
 - [x] Focused full-size regression `stack-reference --from-accepted`: PASS (validation, baseline, STEP/STL read-back, previews).
 - [x] User approved L0 on 2026-10-25 (full-size re-planning not required). L1 not started.
 - [ ] L-G10 physical print-and-stack test: still PENDING.
+
+## Repository cleanup before L1 (2026-10-25)
+
+- [x] Audit, classify and remove obsolete tracked files (reversible via git); targeted `.gitignore`.
+- [x] User decisions: delete untracked L0 run output (done); keep van_gogh STEP/CAD, user-supplied images/3MF, experimental scripts/modules.
+- [ ] Evaluate experimental modules/scripts for L1 relevance; decide on old `docs/technical/` HTML + PDF.
+- [ ] Update 5 stale line references in `docs/technical_optB/chapters` (caused by the L0 move of `mask_to_geometry`) and rebuild the PDF.
+- [ ] Replace third-party / unrecorded-provenance fixtures with project-owned ones (van_gogh reference, fox/bear/l1_auto PNGs).
