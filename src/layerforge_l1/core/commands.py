@@ -67,6 +67,18 @@ def add_parsers(commands: Any) -> None:
         help="load the committed accepted masks instead of re-planning (reveal planner itself is not exercised)",
     )
 
+    pro = commands.add_parser("stack-propose", help="L1: propose a sheet stack for a new flat-color PNG/JPEG (no manifest)")
+    pro.add_argument("--image", type=Path, required=True)
+    pro.add_argument("--output", type=Path, required=True)
+    pro.add_argument("--outer-mm", type=float, default=225.0)
+    pro.add_argument("--scale", type=int, default=2)
+    pro.add_argument("--tile-mm", type=float, default=PlanningConfig.cell_tile_mm)
+    pro.add_argument("--beam", type=int, default=PlanningConfig.beam_width)
+    pro.add_argument("--thickness-mm", type=float, default=PlanningConfig.thickness_mm)
+    pro.add_argument("--max-colors", type=int, default=12)
+    pro.add_argument("--min-color-mm2", type=float, default=2.0)
+    pro.add_argument("--no-cad", action="store_true", help="skip STEP/STL export of the selected candidate")
+
 
 def _write(path: Path, value: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -159,6 +171,19 @@ def _run(args: argparse.Namespace, progress: Callable[..., None]) -> int:
 
     if args.command == "stack-reference":
         return _reference(args, progress)
+
+    if args.command == "stack-propose":
+        from .intake import IntakeConfig
+        from .propose import READY, ProposalConfig, propose
+
+        planning = PlanningConfig(outer_sheet_mm=args.outer_mm, scale=args.scale, cell_tile_mm=args.tile_mm,
+                                  beam_width=args.beam, thickness_mm=args.thickness_mm)
+        intake = IntakeConfig(max_colors=args.max_colors, min_color_area_mm2=args.min_color_mm2)
+        result = propose(args.image, args.output, intake, ProposalConfig(planning=planning, export_cad=not args.no_cad),
+                         progress)
+        print(json.dumps({"status": result["status"], "selected": result["selected"], "palette": result["palette"],
+                          "flags": [f"{f['severity']}: {f['code']}" for f in result["flags"]]}, indent=2))
+        return 0 if result["status"] == READY else 1
     raise StackError(f"unknown stack command {args.command}")
 
 

@@ -294,3 +294,42 @@ thin-decorative warnings).
   byte-identical to `789b02a`, and planner equivalence and determinism through the core
   are tested on the synthetic fixture. UNVERIFIED: a full-size re-planning run through
   the core has still not completed on this host.
+
+## D-V3-025 | 2026-10-25 | L1 automatic proposal wraps the approved planner; no art edits
+
+**Status:** IMPLEMENTED; criterion 3 resolved by the user decision in D-V3-026.
+
+- DESIGN_CHOICE: L1 automates the manual van_gogh preprocessing with the same functions
+  (`fullres_flatten.extract_palette`, `snap_to_palette`, aspect-preserving fit, frame padding)
+  and calls the unchanged `plan_stack` once per existing beam score (`area`, `colors`). No new
+  layering algorithm. Code: `core/intake.py`, `core/propose.py`, CLI `stack-propose`.
+- DESIGN_CHOICE: palette minimum is a physical area (2 mm2), not `extract_palette`'s 0.1 %
+  share. On a 200 mm artwork that share is 40 mm2, and it dropped the eye highlights of the
+  development image. The k-means seed is fixed (0) for reproducibility.
+- DESIGN_CHOICE: pixels count as unmatched only if they are far from every two-color blend.
+  Anti-aliased edges are not new materials (IMAGE_INPUT_CONTRACT). Unmatched regions of at
+  least 2 mm2 are flagged, which catches a dropped color.
+- DESIGN_CHOICE: when no candidate is valid, the result is `NEEDS_USER_DECISION` with the
+  planner's obstruction map. `PlanningError` now carries that map (report-only change in
+  `core/planning.py`). No bridges, depth or color edits are invented.
+- OBSERVED_IN_FILE: evaluation code was frozen (`artifacts/l1_eval_v1/freeze.json`) before the
+  two held-out images were run. Two post-evaluation fixes followed, both disclosed: unused
+  blend clusters are dropped from the reported palette, and other beam scores are skipped
+  after an infeasible closure (closure does not read the beam score). A bear re-run after the
+  fixes gave a bit-identical target and masks.
+- UNVERIFIED_INFERENCE: the held-out images are of unrecorded external origin (likely
+  AI-generated cartoons). Their outputs are kept private (git-ignored).
+
+## D-V3-026 | 2026-10-25 | L1 scope: stop with evidence on unresolved art; no automatic simplification
+
+**Status:** USER_REQUIRED (decided by the user, 2026-10-25).
+
+- USER_REQUIRED: the bear proposal is accepted as the successful automatic-conversion example;
+  no further visual corrections are required (the unflagged bow-knot outline loss stays a
+  recorded limitation).
+- USER_REQUIRED: for art the approved planner cannot support (e.g. the octopus held-out case),
+  `NEEDS_USER_DECISION` with the obstruction map is correct L1 behaviour. Automatic image
+  simplification is not required in L1. The octopus run is kept as a documented negative
+  evaluation and is not re-planned.
+- USER_REQUIRED: L1 approved by the user on 2026-10-25 on the reported results and the accepted
+  bear output. L-G10 physical printing remains PENDING.

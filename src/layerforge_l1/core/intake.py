@@ -1,0 +1,265 @@
+"""Automatic image intake: a new flat-color PNG/JPEG -> exact-palette planner target.
+
+This automates the preprocessing that was done by hand for the accepted van_gogh
+reference (technical PDF ch. 3), using the same functions unchanged:
+
+    fullres_flatten.extract_palette   (k-means in CIELAB on non-edge pixels)
+    resize into the square artwork grid, aspect preserved   (cv2.INTER_AREA)
+    fullres_flatten.snap_to_palette   (bilateral, nearest Lab, majority, fragment merge)
+    pad with a frame color that is solid on every sheet and never visible
+
+Nothing here edits the artwork to make planning succeed.  The diagnostics only
+measure: palette spacing, small colors, flatness of the source, pixels changed
+by snapping, and features narrower than the 1.2 mm structural width.  Their
+findings become flags for the user; see ``propose.py``.
+"""
+
+from __future__ import annotations
+
+import hashlib
+from dataclasses import asdict, dataclass, replace
+from pathlib import Path
+from typing import Any
+
+import cv2
+import numpy as np
+from PIL import Image
+from scipy import ndimage
+
+from ..connectivity_repair import _width_parameters
+from ..fullres_flatten import FlattenConfig, extract_palette, snap_to_palette
+from ..layer_optimization import DEFAULT_OPTIMIZATION_CONFIG
+from .model import StackError, StackGrid, hex_color
+
+# Frame candidates: saturated colors that flat illustrations rarely use.  The one
+# farthest (CIELAB) from every palette color is chosen.
+FRAME_CANDIDATES = ((255, 0, 255), (0, 255, 0), (0, 255, 255), (255, 255, 0), (255, 0, 0), (0, 0, 255))
+# fullres_flatten's 40 px speckle threshold was set on the 2048 px / 200 mm grid.
+REFERENCE_MM_PER_PIXEL = 200.0 / 2048
+
+
+@dataclass(frozen=True)
+class IntakeConfig:
+    """Intake settings.  ``max_colors`` and ``merge_delta`` are ``extract_palette``'s own.
+
+    ``extract_palette``'s ``min_share`` default (0.1 %) is 40 mm2 on a 200 mm artwork and
+    dropped printable details such as eye highlights, so the minimum is given as an area.
+    """
+
+    max_colors: int = 12
+    merge_delta: float = 14.0
+    min_color_area_mm2: float = 2.0
+    min_fragment_mm2: float = 40 * REFERENCE_MM_PER_PIXEL**2  # fullres_flatten default, in mm2
+    alpha_threshold: int = 128
+    seed: int = 0  # cv2.kmeans is otherwise unseeded (technical PDF ch. 4, LIMITATION)
+    # Diagnostic thresholds (flags only; they never change the target).
+    near_duplicate_delta: float = 20.0  # OpenCV 8-bit Lab units
+    small_color_area_mm2: float = 25.0
+    flat_residual_delta: float = 20.0
+    unmatched_min_area_mm2: float = 2.0
+    max_non_flat_fraction: float = 0.05
+    max_snap_changed_fraction: float = 0.02
+
+
+def load_image(path: Path) -> tuple[np.ndarray, np.ndarray | None, dict[str, Any]]:
+    """Return RGB uint8, an optional boolean opacity mask, and source metadata."""
+
+    path = Path(path)
+    data = path.read_bytes()
+    image = Image.open(path)
+    info = {
+        "file": path.name,
+        "sha256": hashlib.sha256(data).hexdigest(),
+        "format": image.format,
+        "mode": image.mode,
+        "size_px": list(image.size),
+    }
+    opaque = None
+    if image.mode in ("RGBA", "LA", "PA") or (image.mode == "P" and "transparency" in image.info):
+        alpha = np.asarray(image.convert("RGBA"))[:, :, 3]
+        opaque = alpha >= IntakeConfig.alpha_threshold
+        if opaque.all():
+            opaque = None
+    return np.ascontiguousarray(np.asarray(image.convert("RGB"))), opaque, info
+
+
+def _lab(rgb: np.ndarray) -> np.ndarray:
+    return cv2.cvtColor(rgb.reshape(-1, 1, 3).astype(np.uint8), cv2.COLOR_RGB2LAB).reshape(-1, 3).astype(np.float32)
+
+
+def choose_frame_color(palette: np.ndarray) -> tuple[int, int, int]:
+    palette_lab = _lab(palette)
+    best = max(FRAME_CANDIDATES, key=lambda c: float(np.min(np.linalg.norm(palette_lab - _lab(np.array([c])), axis=1))))
+    return tuple(int(v) for v in best)
+
+
+def fit_into_grid(rgb: np.ndarray, opaque: np.ndarray | None, side: int) -> tuple[np.ndarray, np.ndarray, dict[str, Any]]:
+    """Resize so the longer side equals ``side`` (aspect kept) and centre it."""
+
+    height, width = rgb.shape[:2]
+    factor = side / max(height, width)
+    new_w, new_h = max(1, round(width * factor)), max(1, round(height * factor))
+    interpolation = cv2.INTER_AREA if factor < 1 else cv2.INTER_CUBIC
+    resized = cv2.resize(rgb, (new_w, new_h), interpolation=interpolation)
+    x0, y0 = (side - new_w) // 2, (side - new_h) // 2
+    canvas = np.zeros((side, side, 3), np.uint8)
+    canvas[y0 : y0 + new_h, x0 : x0 + new_w] = resized
+    inside = np.zeros((side, side), bool)
+    if opaque is None:
+        inside[y0 : y0 + new_h, x0 : x0 + new_w] = True
+    else:
+        small = cv2.resize(opaque.astype(np.uint8), (new_w, new_h), interpolation=cv2.INTER_NEAREST).astype(bool)
+        inside[y0 : y0 + new_h, x0 : x0 + new_w] = small
+    return canvas, inside, {"scale_factor": factor, "placed_px": [new_w, new_h], "offset_px": [x0, y0]}
+
+
+def _fill_transparent(rgb: np.ndarray, opaque: np.ndarray) -> np.ndarray:
+    """Give transparent pixels the color of the nearest opaque pixel (palette input only)."""
+
+    _, (rows, cols) = ndimage.distance_transform_edt(~opaque, return_indices=True)
+    return np.ascontiguousarray(rgb[rows, cols])
+
+
+def _nearest_palette(lab: np.ndarray, palette_lab: np.ndarray, chunk: int = 1 << 18) -> tuple[np.ndarray, np.ndarray]:
+    """Index of and distance to the nearest palette color, in bounded memory."""
+
+    index = np.empty(len(lab), np.int32)
+    distance = np.empty(len(lab), np.float32)
+    for start in range(0, len(lab), chunk):
+        block = np.linalg.norm(lab[start : start + chunk, None, :] - palette_lab[None], axis=2)
+        index[start : start + chunk] = block.argmin(1)
+        distance[start : start + chunk] = block.min(1)
+    return index, distance
+
+
+def _blend_distance(lab: np.ndarray, palette_lab: np.ndarray, chunk: int = 1 << 16) -> np.ndarray:
+    """Distance to the nearest two-color blend (Lab segment between two palette colors).
+
+    Anti-aliased edge pixels are mixtures of the colors they separate; they are
+    not new materials (IMAGE_INPUT_CONTRACT) and must not count as unmatched.
+    """
+
+    count = len(palette_lab)
+    pairs = [(i, j) for i in range(count) for j in range(i + 1, count)] or [(0, 0)]
+    a = palette_lab[[i for i, _ in pairs]]
+    d = palette_lab[[j for _, j in pairs]] - a
+    length = np.maximum((d * d).sum(1), 1e-6)
+    out = np.empty(len(lab), np.float32)
+    for start in range(0, len(lab), chunk):
+        x = lab[start : start + chunk, None, :] - a[None]
+        t = np.clip((x * d[None]).sum(2) / length[None], 0.0, 1.0)
+        out[start : start + chunk] = np.linalg.norm(x - t[:, :, None] * d[None], axis=2).min(1)
+    return out
+
+
+def _thin_feature_pixels(mask: np.ndarray, width_px: int) -> int:
+    """Pixels of ``mask`` removed by an opening with the structural-width disc."""
+
+    if width_px <= 1 or not mask.any():
+        return 0
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (width_px, width_px))
+    opened = cv2.morphologyEx(mask.astype(np.uint8), cv2.MORPH_OPEN, kernel).astype(bool)
+    return int((mask & ~opened).sum())
+
+
+def prepare_target(
+    rgb: np.ndarray, opaque: np.ndarray | None, grid: StackGrid, config: IntakeConfig = IntakeConfig()
+) -> dict[str, Any]:
+    """Build the exact-palette square target and measure what the snapping did."""
+
+    side = grid.poc_config().analysis_pixels
+    mm_per_pixel = grid.artwork_mm / side
+    if opaque is not None:
+        if not opaque.any():
+            raise StackError("the image is fully transparent")
+        rgb = _fill_transparent(rgb, opaque)
+    canvas, inside, placement = fit_into_grid(rgb, opaque, side)
+    artwork_mm2 = placement["placed_px"][0] * placement["placed_px"][1] * mm_per_pixel**2
+    min_share = config.min_color_area_mm2 / artwork_mm2
+    cv2.setRNGSeed(config.seed)
+    palette = extract_palette(rgb, config.max_colors, config.merge_delta, min_share)
+    if len(palette) == 0:
+        raise StackError("no palette colors found in the image")
+    frame_rgb = choose_frame_color(palette)
+    fragment_px = max(1, round(config.min_fragment_mm2 / mm_per_pixel**2))
+    flatten = replace(FlattenConfig(), min_fragment_pixels=fragment_px)
+    labels = snap_to_palette(canvas, palette, flatten)
+
+    # Measurements on the artwork area only (never on the frame padding).
+    canvas_lab = _lab(canvas[inside])
+    palette_lab = _lab(palette)
+    snapped_lab = palette_lab[labels[inside]]
+    nearest, residual = _nearest_palette(canvas_lab, palette_lab)
+    gray = cv2.cvtColor(canvas, cv2.COLOR_RGB2GRAY).astype(np.float32)
+    gradient = np.hypot(cv2.Sobel(gray, cv2.CV_32F, 1, 0), cv2.Sobel(gray, cv2.CV_32F, 0, 1))
+    interior = cv2.erode((gradient < 40).astype(np.uint8), np.ones((5, 5), np.uint8)).astype(bool)[inside]
+
+    unmatched = np.zeros((side, side), bool)
+    unmatched[inside] = _blend_distance(canvas_lab, palette_lab) > config.flat_residual_delta
+    count, components = cv2.connectedComponents(unmatched.astype(np.uint8), connectivity=8)
+    unmatched_sizes = np.bincount(components.ravel())[1:] * mm_per_pixel**2
+    large_unmatched = unmatched_sizes[unmatched_sizes >= config.unmatched_min_area_mm2]
+
+    target = np.empty((side, side, 3), np.uint8)
+    target[:] = frame_rgb
+    target[inside] = palette[labels[inside]]
+
+    width = _width_parameters(grid.poc_config(), DEFAULT_OPTIMIZATION_CONFIG)
+    width_px = max(1, round(width["enforced_connection_width_mm"] / mm_per_pixel))
+    # k-means can return clusters of edge blends that receive no pixel after snapping;
+    # they are not materials and are reported separately instead of as palette colors.
+    used = np.unique(labels[inside])
+    unused = [hex_color(palette[i]) for i in range(len(palette)) if i not in used]
+    colors = []
+    total = int(inside.sum())
+    for index in used:
+        color = palette[index]
+        mask = inside & (labels == index)
+        count, components = cv2.connectedComponents(mask.astype(np.uint8), connectivity=4)
+        sizes = np.bincount(components.ravel())[1:] if count > 1 else np.array([], int)
+        colors.append({
+            "hex": hex_color(color),
+            "share": round(float(mask.sum()) / max(total, 1), 6),
+            "area_mm2": round(float(mask.sum()) * mm_per_pixel**2, 2),
+            "source_regions_4": int(count - 1),
+            "smallest_region_mm2": round(float(sizes.min()) * mm_per_pixel**2, 3) if sizes.size else 0.0,
+            "sub_width_feature_mm2": round(_thin_feature_pixels(mask, width_px) * mm_per_pixel**2, 2),
+        })
+    used_lab = palette_lab[used]
+    distances = np.linalg.norm(used_lab[:, None] - used_lab[None], axis=2)
+    np.fill_diagonal(distances, np.inf)
+
+    return {
+        "target_rgb": target,
+        "artwork_mask": inside,
+        "unmatched_mask": np.isin(components, 1 + np.nonzero(unmatched_sizes >= config.unmatched_min_area_mm2)[0]),
+        "has_frame": bool((~inside).any()),
+        "palette": palette[used],
+        "frame_color": hex_color(frame_rgb),
+        "measurements": {
+            "intake_config": asdict(config),
+            "flatten_config": asdict(flatten),
+            "artwork_grid_px": side,
+            "artwork_mm_per_pixel": mm_per_pixel,
+            "placement": placement,
+            "artwork_size_mm": [round(v * mm_per_pixel, 2) for v in placement["placed_px"]],
+            "palette_size": len(used),
+            "unused_palette_clusters": unused,
+            "colors": colors,
+            "min_palette_delta": round(float(distances.min()), 2) if len(used) > 1 else None,
+            "nearest_palette_pairs": [
+                [hex_color(palette[used[i]]), hex_color(palette[used[j]]), round(float(distances[i, j]), 2)]
+                for i, j in zip(*np.nonzero(np.triu(distances < config.near_duplicate_delta)))
+            ],
+            "mean_snap_delta": round(float(np.linalg.norm(canvas_lab - snapped_lab, axis=1).mean()), 3),
+            "non_flat_interior_fraction": round(float((residual[interior] > config.flat_residual_delta).mean()), 5)
+            if interior.any() else 0.0,
+            "unmatched_regions_at_least_min_area": int(large_unmatched.size),
+            "unmatched_area_mm2": round(float(large_unmatched.sum()), 2),
+            "palette_min_share": min_share,
+            "snap_changed_fraction": round(float((labels[inside] != nearest).mean()), 5),
+            "structural_width_mm": width["enforced_connection_width_mm"],
+            "structural_width_px": width_px,
+            "transparency": "alpha below threshold becomes frame" if opaque is not None else "none",
+        },
+    }

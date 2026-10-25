@@ -194,3 +194,14 @@ No complete UI/server, arbitrary photographic depth estimation, frame design, gl
 - [ ] Evaluate experimental modules/scripts for L1 relevance; decide on old `docs/technical/` HTML + PDF.
 - [ ] Update 5 stale line references in `docs/technical_optB/chapters` (caused by the L0 move of `mask_to_geometry`) and rebuild the PDF.
 - [ ] Replace third-party / unrecorded-provenance fixtures with project-owned ones (van_gogh reference, fox/bear/l1_auto PNGs).
+
+## L1 automatic proposals (2026-10-25)
+
+- [x] Intake: palette, aspect-preserving fit, frame, snapping, measurements (`core/intake.py`).
+- [x] Proposal: two planner candidates, validation, CAD + STL-derived previews, flags (`core/propose.py`, `stack-propose`).
+- [x] 8 L1 tests on project-owned inputs; freeze, then 2 held-out evaluations with 0 manual corrections.
+- [x] User decision (D-V3-026): NEEDS_USER_DECISION with an obstruction map is acceptable; no automatic simplification in L1. Bear accepted.
+- [x] Final verification: complete suite 97 PASS; bear stack and CAD re-verified read-only; octopus kept as a negative evaluation.
+- [x] User approved L1 on 2026-10-25. L-G10 physical printing still PENDING; L2 not started.
+- [ ] Record a held-out illustration whose rights are cleared (project-owned or user-supplied) for a committable L1 regression.
+- [ ] Known limitation, accepted for L1: unflagged detail loss (bear bow-knot outline); a thin-line preservation check may be considered later.

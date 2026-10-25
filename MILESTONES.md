@@ -37,12 +37,18 @@ PENDING**; this approval is not physical evidence.
 
 ## L1: automatic layer-candidate proposals (critical product milestone)
 
-Status: `BLOCKED_BY_L-1`.
+Status: **APPROVED** by the user on 2026-10-25, based on the reported results and the
+accepted bear output (L-G10 physical printing still PENDING). The documented bow-knot
+outline loss remains a known limitation; no further correction is required for L1. The user accepted the bear result and decided
+that `NEEDS_USER_DECISION` with an obstruction map is correct L1 behaviour for unresolved
+art, with no automatic simplification in L1 (D-V3-026). Final verification: complete suite
+97 PASS / 0 FAIL / 0 SKIP; bear stack and CAD re-verified read-only (see STATUS.md).
 
-- [ ] Accept a **new**, previously unseen flat-color PNG/JPEG with no hand-authored layer manifest.
-- [ ] Segment palette/contours and propose color masks plus candidate layer ordering and cutouts; flag ambiguous interpretation instead of inventing depth.
-- [ ] Evaluate on at least two independent illustrations, record manual corrections, and establish practical usability and reproducibility.
-- [ ] Do not conflate color islands with physical sheet topology or claim automatic reconstruction merely because manual fixture works.
+- [x] Accept a **new**, previously unseen flat-color PNG/JPEG with no hand-authored layer manifest (`stack-propose`).
+- [x] Segment palette/contours and propose color masks plus candidate layer ordering and cutouts; flag ambiguous interpretation instead of inventing depth (`proposal.json` flags; no automatic art edits).
+- [x] Evaluate on at least two independent illustrations, record manual corrections, and establish practical usability and reproducibility: 2 held-out cases run with frozen code and 0 manual corrections; reproducibility tested (bit-identical re-run). `bear_face`: user-accepted automatic conversion. `heldout_octopus_submarine`: correct `NEEDS_USER_DECISION` stop with obstruction map (closure infeasible, 1.14 % of the artwork), kept as a documented negative evaluation per D-V3-026.
+- [x] Do not conflate color islands with physical sheet topology or claim automatic reconstruction merely because manual fixture works (`color_topology`, seam report, provenance `auto-proposed`).
+- [x] Explicit user review and approval of L1 (2026-10-25).
 
 ## L2: reviewed layer editor
 

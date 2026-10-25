@@ -31,9 +31,11 @@ PLANNER_ID = "layerforge_l1.reveal_planner.RevealPlanner/per_cell"
 class PlanningError(StackError):
     """The approved planner could not produce a complete stack."""
 
-    def __init__(self, message: str, report: dict[str, Any]):
+    def __init__(self, message: str, report: dict[str, Any], obstruction: np.ndarray | None = None):
         super().__init__(message)
         self.report = report
+        # Artwork-grid map of cells that can never be supported (closure failures only).
+        self.obstruction = obstruction
 
 
 @dataclass(frozen=True)
@@ -112,7 +114,9 @@ def plan_stack(
         stuck = np.zeros(planner.cell_count, dtype=bool)
         stuck[closure["obstruction_cells"]] = True
         report["obstruction_pixels_native"] = int(stuck[planner.native_cells].sum())
-        raise PlanningError("reveal closure is infeasible: some cells can never be supported", report)
+        raise PlanningError(
+            "reveal closure is infeasible: some cells can never be supported", report, stuck[planner.native_cells]
+        )
 
     plan = planner.beam_search()
     report["search_status"] = plan["status"]

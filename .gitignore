@@ -26,3 +26,7 @@ artifacts/l0_core_v1/reference_*/previews/
 artifacts/l0_core_v1/reference_*/stack/
 artifacts/l0_core_v1/reference_*/validation.json
 artifacts/l0_core_v1/legacy_import_*/
+
+# L1 held-out evaluation output: derived from images whose provenance is not
+# recorded (private evaluation only). freeze.json (hashes) stays trackable.
+artifacts/l1_eval_v1/*/

@@ -1,0 +1,28 @@
+{
+  "frozen_at_utc": "2026-10-25T13:04:47.306665+00:00",
+  "git_head": "6bf01637bcbebbbdc29d1db0cbbeca3c568466c5",
+  "note": "Code and default configuration frozen before running held-out cases; no change after this point.",
+  "command": "python -m layerforge_l1 stack-propose --image <case> --output artifacts/l1_eval_v1/<case> (all defaults)",
+  "development_inputs": [
+    "bow-face fixture rendered as 900 px JPEG q85 (tests/test_l1_propose.py)"
+  ],
+  "held_out_inputs": {
+    "fixtures/l1_subtractive_poc/bear_face.png": "345c7fae7e1c19e1595743ef026044cc505815a6988bf8d9f87fed235c1f2975",
+    "fixtures/l1_auto/heldout_octopus_submarine.png": "6dbb25250462cd421a395fec025d27bfa7aaba640a10d1d384f4d70f16eb9f9d"
+  },
+  "source_sha256": {
+    "src/layerforge_l1/core/__init__.py": "7dbfd7003746c36c1dcf77a9c143d9f3cc6112f60de2a0ffca4b1a33bc199251",
+    "src/layerforge_l1/core/cad.py": "ba7f6ff89eb9e653ccf6586069e870997545841b67fe155460c29a9f527a5a78",
+    "src/layerforge_l1/core/commands.py": "3834a10b66bf5c05888651c392feb6ed42e7bf34c2a140046267782816e477e9",
+    "src/layerforge_l1/core/intake.py": "9399e5ec6ad17678827b8e74656f542cecc004a16c8e313a4b7df0a2fff56ece",
+    "src/layerforge_l1/core/model.py": "c256735553668c813d7faff899b6788e7e71f4cda290f92de776c2f7ccb7c2b4",
+    "src/layerforge_l1/core/planning.py": "3051f696ae15648d59f95e805087f7d1b09247b8109055e7b9b5a56dfc0b4a0b",
+    "src/layerforge_l1/core/preview.py": "d8421fe17eafd8662f36b7e614935a1f44f7e19b28c1b3e2ffeea0cff8115681",
+    "src/layerforge_l1/core/propose.py": "44c9d3e24b4fe4bb26917c451989990c7e083c3bfae409adab2b6d5dfd03d9f6",
+    "src/layerforge_l1/core/reference.py": "4ac50698bd24e1a0c220ff7a86455c3b5fe7e7e35e64b7710c259a4fc6a0e297",
+    "src/layerforge_l1/core/validation.py": "6edeca9085a1388646de878ba361312e6341ca127bf300637f8fda84ad5155a8",
+    "src/layerforge_l1/fullres_flatten.py": "7ef5fde00e34c90c41e906480596f7e5a71bca3058bfa8adde63fee8322b945a",
+    "src/layerforge_l1/reveal_planner.py": "c3452efebd58a5e1c4e9a9629b293b4af4a5bb0d420c59591e4f34b7b5b54de9",
+    "src/layerforge_l1/cli.py": "3d3eadcf886f4b763f49c982cf8ecf524cf0ed5b91d3c8832f4818d00c148c39"
+  }
+}

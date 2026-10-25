@@ -111,6 +111,8 @@ $env:PYTHONPATH='src'
 .\.venv\Scripts\python.exe -m layerforge_l1 stack-reference --name van_gogh_optB --from-accepted --output artifacts\l0_core_v1\reference_van_gogh_optB_from_accepted
 # Full re-planning + comparison (memory-heavy; stopped by host low-memory protection on 2026-10-24)
 .\.venv\Scripts\python.exe -m layerforge_l1 stack-reference --name van_gogh_optB --output artifacts\l0_core_v1\reference_van_gogh_optB
+# L1: automatic proposal for a new flat-color PNG/JPEG (no manifest); exit 0 = proposal ready, 1 = needs user decision
+.\.venv\Scripts\python.exe -m layerforge_l1 stack-propose --image <image> --output <dir>
 # Complete suite (no test depends on deleted artifact trees; see tests\REMOVED_TESTS.md)
 .\.venv\Scripts\python.exe -m pytest
 ```

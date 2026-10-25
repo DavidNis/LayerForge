@@ -405,3 +405,45 @@ follow the light-blue body). Not user approved; no CAD exported.
   previews were shown byte-identical to a fresh regeneration. The accepted van_gogh CAD
   (including STEP), all user-supplied images/3MF files and the experimental algorithms and
   scripts are kept until reviewed. No history rewrite.
+
+## 2026-10-25 L1 automatic layer-candidate proposals
+
+- State: **L1 APPROVED** by the user (2026-10-25) on the reported results and the accepted
+  bear output. L-G10 physical printing still PENDING. Bow-knot outline loss stays a
+  documented limitation (no L1 correction required). L2 not started.
+- New: `core/intake.py`, `core/propose.py`, CLI `stack-propose --image <png|jpg> --output <dir>`.
+  It reuses `extract_palette`/`snap_to_palette`, `plan_stack` (unchanged), `validate_stack`,
+  `export_stack`/`revalidate_cad` and `generate_previews`. Manual work per image: none
+  (no manifest, no corrections).
+- Development input: the bow-face fixture rendered as an anti-aliased 900 px JPEG q85. Code
+  and defaults were frozen before the held-out runs (`artifacts/l1_eval_v1/freeze.json`).
+- Held-out 1 `bear_face.png`: **PROPOSAL_READY_FOR_REVIEW**, 66 s. 7 sheets, 7 colors, both
+  candidates valid with the same order. Reconstruction 0 px mismatched; 7 STEP valid single
+  solids; 7 STL watertight; reopened CAD 0 px. Lost unflagged: the faint darker outline of
+  the bow knot merged into teal.
+- Held-out 2 `heldout_octopus_submarine.png`: **NEEDS_USER_DECISION**. 12-color cap reached;
+  28 unmatched regions (495 mm2) flagged; snapping changed 4.8 % of pixels (flagged). Reveal
+  closure is infeasible: 12,004 px (1.14 % of the artwork) at fish fins, bubbles, tentacle
+  tips, levers and crab legs; map at `candidates/beam_area/obstruction.png`. No edits made.
+  The second candidate took 80 min because of host memory paging (under 1 GB free), then
+  closure was fixed to run once.
+- Tests: after the final code, `tests/test_l1_propose.py` + `tests/test_l0_core.py` = 35 PASS / 0 FAIL.
+  An earlier complete-suite attempt was stopped by host low-memory protection.
+
+### Final verification (2026-10-25, no code changes)
+
+- User decision D-V3-026: bear accepted as the automatic-conversion example; the octopus
+  `NEEDS_USER_DECISION` stop is correct L1 behaviour; no automatic simplification in L1.
+- Complete suite: `python -m pytest` = **97 PASS / 0 FAIL / 0 SKIP / 0 ERROR** in 192 s
+  (89 pre-L1 + 8 L1; no L0 regression). 29 warnings, all pyparsing deprecations raised inside
+  matplotlib/cadquery.
+- Bear re-verified read-only from the saved outputs (no planning, no export): frozen and
+  post-fix runs have bit-identical target and sheet masks; `validate_stack` PASS; 7/7 STEP
+  reopen as one valid solid each, 225 x 225 x 1.6 mm; 7/7 STL watertight, 1 component;
+  `revalidate_cad` PASS: 0 px STL and geometry diff per sheet, stack mismatch 0 px,
+  reconstruction from STL 0 of 1,048,576 px mismatched, all sheets 4-neighbor and 1.2 mm width PASS.
+- Octopus kept as a negative evaluation (not re-planned): status NEEDS_USER_DECISION, both
+  candidates PLANNING_FAILED, obstruction maps present.
+- Freeze check: of the 13 frozen source files only `core/intake.py` and `core/propose.py`
+  differ (the two disclosed post-evaluation fixes); `reveal_planner.py`, `planning.py`,
+  `fullres_flatten.py`, CAD and validation code are byte-identical to the freeze.

@@ -132,7 +132,8 @@ and thickness must be supplied, as they were command-line values). The vector
 
 ### How later milestones call the core
 
-L1 (automatic proposals) should produce an exact-palette target and call
-`plan_stack`; L2 (editor) should edit a loaded `SheetStack`'s masks and call
+L1 (automatic proposals) produces an exact-palette target and calls
+`plan_stack` (implemented 2026-10-25: `core/intake.py` -> `core/propose.py`, CLI
+`stack-propose`; see DECISIONS D-V3-025); L2 (editor) should edit a loaded `SheetStack`'s masks and call
 `validate_stack` before `export_stack`; L3 should consume `cad_manifest.json`,
-`cad_revalidation.json` and previews. None of these milestones is started.
+`cad_revalidation.json` and previews. L1 is approved (2026-10-25); L2 and L3 are not started.
