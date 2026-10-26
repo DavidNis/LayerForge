@@ -539,3 +539,53 @@ follow the light-blue body). Not user approved; no CAD exported.
   edited (no automatic vectorization of artwork); a vector sheet must pass both raster and exact
   checks (conservative); islands must be bridged or removed (no separate components); rim only
   on the outer perimeter band; JSON in PowerShell 5.1 needs `--op-file`; no GUI.
+
+## 2026-10-26 L3 hardened print kit
+
+- State: **APPROVED** by the user on 2026-10-26 based on the reported results (L0, L1, L2
+  also approved). **L-G10 physical print PENDING**: no kit claims physical verification.
+  L4 not started. Open items carried forward: the L0 full-size reference regression was
+  NOT re-verified (see below), the FDM-estimate limitations below, and the van_gogh_optB
+  RISK findings (0.77 mm opening, 0.46 mm narrow section on sheets 06-09) are unresolved.
+- New: `core/printkit.py` (`PrintProcess`, `assess_printability`, `build_print_kit`, checksums,
+  side section, labelled exploded view, printability maps), CLI `stack-kit`,
+  `fixtures/print_processes/generic_fdm_0.4mm.json` (labelled ASSUMPTION),
+  `fixtures/l3_print_kit/sailboat_512.png` + `PROVENANCE.md` (original, project-owned),
+  `scripts/run_l3_print_kit_evaluation.py`, `tests/test_l3_print_kit.py` (8 tests). Changed:
+  `core/cad.py` (export rows add `expected_volume_mm3`, `step_volume_vs_expected_pct`; report only),
+  `core/commands.py`, `core/__init__.py`, `.gitignore` (`artifacts/l3_print_kit_v1/`). Planner,
+  editor, validators and thresholds unchanged; geometry is never altered by the kit.
+- Status levels per kit: `cad` (proven by reopening), `fdm_estimate` (process-based estimate),
+  `physical` (always NOT_VERIFIED). Invalid stacks are refused; UNSUPPORTED findings are reported
+  and the CLI exits 1.
+- Evaluation (`scripts/run_l3_print_kit_evaluation.py`, default generic process; outputs private
+  and git-ignored in `artifacts/l3_print_kit_v1/`):
+
+  | Case | Sheets | Edits / vector / rims | CAD | FDM estimate | Time |
+  |---|---|---|---|---|---|
+  | bow_face_s1 (project-owned) | 6 | 0 / 0 / 0 | VALID | NO_RISKS_FOUND | 17 s |
+  | sailboat_s1 (project-owned) | 7 | 0 / 0 / 0 | VALID | UNSUPPORTED: 0.388 mm slit; RISK: 0.775 mm slit | 15 s |
+  | sailboat_s2 (scale 2) | 7 | 0 / 0 / 0 | VALID | same two slits + RISK 0.54 mm sharp sail tip | 37 s |
+  | sailboat_s1_edited | 7 | 4 / 1 / 1 | VALID | NO_RISKS_FOUND (thin slit filled, slit widened to 1.0 mm by the user's edits) | 28 s |
+  | bear_vector (private, L2 project) | 7 | 6 / 2 / 1 | VALID | NO_RISKS_FOUND | 60 s |
+  | van_gogh_optB (private, scale 4) | 10 | 0 / 0 / 0 | VALID | RISK x8: a 0.77 mm opening and a 0.46 mm narrow section, each on the 4 front sheets that share the cutout | 736 s |
+
+  Every case: front view of reviewed stack and of reopened STL vs artwork 0 px; stack mismatch
+  0 px; STEP and STL volumes within 0.0 % of expected; each STEP one valid solid, each STL one
+  watertight component; vector sheets' STL vs exact geometry <= 2.7e-5 mm2; checksums verify.
+- Reproducibility (test): rebuilding a kit gives an identical `print_kit.json`, byte-identical
+  STL, and STEP files identical apart from the header timestamp and OpenCASCADE's per-process
+  product counter; the kit's own `stack/` copy rebuilds the same solids.
+- Tests: complete suite `python -m pytest` = **127 PASS / 0 FAIL / 0 SKIP / 0 ERROR** in 472 s
+  (119 + 8 L3). 29 warnings, all pyparsing deprecations inside matplotlib/cadquery. Re-run
+  at approval before the commit: 127 PASS / 0 FAIL / 0 SKIP in 696 s.
+- L0 reference regression: a re-run after the report-field addition was stopped by host
+  low-memory protection (NOT re-verified this round). Last PASS: 2026-10-25 after the L2
+  refinement; since then `cad.py` only gained two report fields. The van_gogh kit above
+  exported the same accepted masks with CAD_VALID and 0 px mismatch.
+- Limitations: the FDM estimate is geometric, not a slicer simulation, and its thresholds are
+  generic assumptions until a print calibrates them; the narrow-feature residue filter
+  (area >= w^2/2) is a heuristic and may miss very short slits or flag sharp tips; a shared
+  cutout is reported once per sheet; scale-4 printability takes several minutes; no 3MF; no
+  print-plate packing (each sheet is its own job); filament mass assumes 1.24 g/cm3; all L2
+  limitations remain.

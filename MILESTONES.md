@@ -64,15 +64,17 @@ from current order/color); evidence: STATUS.md. Complete suite 119 PASS; L0 refe
 
 ## L3: hardened print kit
 
-Status: `BLOCKED_BY_L-1`.
+Status: **APPROVED** by the user on 2026-10-26 based on the reported results (started under
+user instruction after L2 approval). **L-G10 physical print still PENDING**: every kit reports
+`physical: NOT_VERIFIED`. The L0 full-size reference regression re-run during L3 was stopped by
+host low-memory protection and is NOT re-verified (last PASS 2026-10-25). The FDM-estimate
+limitations and the van Gogh RISK findings remain open (STATUS.md). Design: DECISIONS D-V3-029;
+evidence: STATUS.md. Complete suite 127 PASS.
 
-- [ ] Finalize layer exports, print placements, exact source/preview comparisons, and error reports across several distinct artworks.
-- [ ] Optional 3MF packaging only when proven. No mandatory box/glue structure.
-- [ ] Validate FDM printability of edited geometry. L2 keeps exact sub-pixel vector geometry
-  through STEP/STL, but exact is not printable: openings, slots, holes and other negative
-  features below the nozzle/extrusion width may close up or vanish when sliced. Minimum
-  printable openings and negative features are not yet checked (only the 1.2 mm positive
-  material width is) and need a measured rule, ideally confirmed by the L-G10 print.
+- [x] Finalize layer exports, print placements, exact source/preview comparisons, and error reports across several distinct artworks (`stack-kit`: checksummed kit with STEP/STL, assembly metadata, print placement, color per file, comparisons artwork -> reviewed stack -> exported geometry -> reopened CAD, side section and labelled exploded views, guide; 6 cases from 4 distinct artworks incl. 2 edited stacks with rims and vector geometry: all CAD_VALID, 0 px front-view mismatch, 0 % volume error).
+- [x] Optional 3MF packaging only when proven. No mandatory box/glue structure. (Not produced: it could not be proven in a slicer here; recorded in every kit. No frame, housing, glue or hardware is required.)
+- [x] Validate FDM printability of edited geometry (estimate, not physical): openings, slots, gaps and thin material measured on the exported (exact for vector sheets) geometry against a configurable `PrintProcess`; INFO / RISK / UNSUPPORTED reported, geometry never altered; known 0.39 mm and 0.78 mm test slits classified UNSUPPORTED and RISK. The thresholds are generic assumptions until a print confirms them (L-G10).
+- [x] Explicit user review and approval of L3 (2026-10-26).
 
 ## L4: application user experience
 

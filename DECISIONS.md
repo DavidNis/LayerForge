@@ -410,3 +410,37 @@ thin-decorative warnings).
   printable openings and negative features are not validated; only the 1.2 mm positive width is.
 - Schema `layerforge.sheet_stack` 1.2.0 adds per-sheet `geometry` (WKB file + hash; the
   mask is checked to be its raster on load) and `export_name`; 1.0.0/1.1.0 still load.
+
+## D-V3-029 | 2026-10-26 | L3 print kit: three separate status levels, process-based FDM estimate
+
+**Status:** IMPLEMENTED; APPROVED by the user on 2026-10-26 (L-G10 physical print PENDING;
+FDM thresholds remain generic assumptions until a print calibrates them).
+
+- DESIGN_CHOICE: `core/printkit.py` + CLI `stack-kit` reuse validate -> export -> revalidate ->
+  previews unchanged and write one self-contained kit: `cad/` STEP+STL (+ manifests), `stack/`
+  (exact stack the kit was built from), `previews/` (from reopened STL, plus true-scale side
+  section from STL plane sections, labelled exploded view, per-sheet printability maps),
+  `print_kit.json`, `PRINT_AND_STACK_GUIDE.md`, `checksums.sha256`. Geometry is never altered.
+- DESIGN_CHOICE: three status levels, never merged: `cad` (CAD_VALID only if validators PASS,
+  every STEP is one valid solid, every STL one watertight component, STEP and STL volumes
+  within 0.01 % of area x height, reopened geometry equals the reviewed masks / exact
+  geometry, rim heights match, front view from STL equals the artwork); `fdm_estimate`
+  (NO_RISKS_FOUND / RISKS_REPORTED / UNSUPPORTED_FEATURES); `physical` (always NOT_VERIFIED;
+  L-G10 needs a real print). An invalid stack is refused; an UNSUPPORTED finding still writes
+  the kit but the CLI exits 1.
+- DESIGN_CHOICE: FDM estimate is driven by a `PrintProcess` (nozzle, line width, layer and
+  first-layer height, min opening, min positive feature, build volume, filament density) read
+  from JSON; defaults are labelled ASSUMPTION (generic 0.4 mm nozzle: opening < 0.4 mm
+  UNSUPPORTED, < 0.8 mm RISK; material < 0.42 mm UNSUPPORTED, < 0.84 mm RISK; 256 mm bed).
+  Measured on the exported planar geometry (exact for vector sheets): every cutout's
+  inscribed diameter; narrow slots/necks by morphological opening (residues under w^2/2 are
+  treated as corner/staircase artefacts: a heuristic, stated in the code); thin material the
+  same way; build volume; layer quantization of sheet and rim heights. A finding hidden
+  behind the sheets in front is downgraded to INFO with that reason. Prismatic sheets
+  printed flat have no overhangs.
+- DESIGN_CHOICE: print placement is "as exported": back face on the bed, no rotation; colors
+  are carried by file name and manifest (STL has no color); filament mass is an estimate.
+- DESIGN_CHOICE: 3MF is not produced. The milestone allows it "only when proven"; plate,
+  color and object semantics could not be verified in a slicer here.
+- OBSERVED_IN_FILE: STEP files differ between runs only in the header timestamp and
+  OpenCASCADE's per-process product counter; STL bytes and `print_kit.json` are identical.

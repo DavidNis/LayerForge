@@ -1,0 +1,14 @@
+{
+  "name": "generic_fdm_0.4mm_nozzle",
+  "source": "ASSUMPTION: generic 0.4 mm nozzle defaults, not a measured printer profile; copy this file and enter your printer's values",
+  "nozzle_diameter_mm": 0.4,
+  "line_width_mm": 0.42,
+  "layer_height_mm": 0.2,
+  "first_layer_height_mm": 0.2,
+  "min_opening_mm": 0.8,
+  "min_positive_feature_mm": 0.84,
+  "bed_x_mm": 256.0,
+  "bed_y_mm": 256.0,
+  "max_z_mm": 256.0,
+  "filament_density_g_cm3": 1.24
+}

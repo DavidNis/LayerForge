@@ -125,6 +125,11 @@ $env:PYTHONPATH='src'
 .\.venv\Scripts\python.exe -m layerforge_l1 stack-edit undo --project <project>     # or: revert --to <n>
 .\.venv\Scripts\python.exe -m layerforge_l1 stack-edit verify --project <project>   # replay the log from the base
 .\.venv\Scripts\python.exe -m layerforge_l1 stack-edit export --project <project> --output <cad_dir>  # refused for invalid drafts
+# L3: print kit (exports, reopened-CAD checks, comparisons, FDM estimate, guide, checksums) from a stack or review project
+# exit 0 = CAD valid and no UNSUPPORTED finding; 1 = CAD invalid or UNSUPPORTED findings; 2 = refused/invalid input
+.\.venv\Scripts\python.exe -m layerforge_l1 stack-kit --stack <stack_or_project> --output <new_kit_dir> --process fixtures\print_processes\generic_fdm_0.4mm.json
+# L3 evaluation across artworks (private cases are skipped when absent)
+.\.venv\Scripts\python.exe scripts\run_l3_print_kit_evaluation.py --output artifacts\l3_print_kit_v1
 # Complete suite (no test depends on deleted artifact trees; see tests\REMOVED_TESTS.md)
 .\.venv\Scripts\python.exe -m pytest
 ```

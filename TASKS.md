@@ -216,3 +216,13 @@ No complete UI/server, arbitrary photographic depth estimation, frame design, gl
 - [x] User approved L2 on 2026-10-25, including the D-V3-028 refinements. L-G10 still PENDING; L3 not started.
 - [ ] L3: validate FDM printability of exact sub-pixel geometry; define and check minimum printable openings and negative features (holes, slots, gaps).
 - [ ] Later (not L2): separate named export components for accepted islands; true arcs in STEP; rims around internal cutouts if wanted.
+
+## L3 hardened print kit (2026-10-26)
+
+- [x] `stack-kit`: checksummed kit (STEP/STL, assembly metadata, print placement, colors, comparisons, side section, labelled exploded view, printability maps, guide).
+- [x] Process-based FDM estimate for openings, slots, gaps and thin material (exact geometry for vector sheets); INFO / RISK / UNSUPPORTED; geometry unchanged.
+- [x] 8 L3 tests (project-owned bow face and sailboat); evaluation on 6 cases / 4 artworks incl. edited stacks with rims; complete suite 127 PASS.
+- [ ] Re-run the L0 reference regression when memory allows (stopped by host low-memory protection on 2026-10-26).
+- [x] User approved L3 on 2026-10-26. L-G10 still PENDING; L0 reference re-run still open (above); L4 not started.
+- [ ] L-G10: print a representative kit, record the result; calibrate `min_opening_mm` / `min_positive_feature_mm` for the user's printer.
+- [ ] Later (not L3): 3MF only if a slicer round-trip is verified; print-plate packing.

@@ -219,6 +219,8 @@ def export_stack(
             "stl_bounds_mm": np.round(mesh.bounds, 3).tolist(),
             "traced_area_vs_mask_pct": round(100 * (geometry.area - mask_area) / mask_area, 4),
             "volume_vs_area_x_thickness_pct": round(100 * (mesh.volume - expected_volume) / expected_volume, 4),
+            "expected_volume_mm3": round(float(expected_volume), 4),
+            "step_volume_vs_expected_pct": round(100 * (step_shape.Volume() - expected_volume) / expected_volume, 4),
             "seconds_trace": round(t_trace - t0, 2),
             "seconds_cad_export": round(t_export - t_trace, 2),
             "seconds_readback": round(time.perf_counter() - t_export, 2),

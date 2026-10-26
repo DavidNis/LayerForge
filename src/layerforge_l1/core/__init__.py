@@ -17,10 +17,13 @@ Typical use::
     core.review.start_review(stack_dir, project_dir)
     core.review.apply_to_project(project_dir, {"op": "subtract", "sheet": "<id>", "shape": {...}})
 
+    # L3 print kit: export, reopen, compare, estimate FDM printability (geometry unchanged)
+    kit = core.printkit.build_print_kit(project_dir, kit_dir, core.printkit.PrintProcess.from_json(process_json))
+
 The layer-generation algorithm itself is ``layerforge_l1.reveal_planner``.
 """
 
-from . import review
+from . import printkit, review
 from .cad import export_stack, mask_to_geometry, rasterize_geometry, rasterize_stl, revalidate_cad, stl_footprint
 from .model import (
     SCHEMA,
@@ -58,6 +61,7 @@ __all__ = [
     "load_stack",
     "mask_to_geometry",
     "plan_stack",
+    "printkit",
     "rasterize_geometry",
     "rasterize_stl",
     "revalidate_cad",

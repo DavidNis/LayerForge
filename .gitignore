@@ -33,3 +33,6 @@ artifacts/l1_eval_v1/*/
 
 # L2 manual review runs on the held-out bear proposal (private evaluation output).
 artifacts/l2_review_v1/
+
+# L3 print-kit evaluation output (kits include private held-out/reference artwork).
+artifacts/l3_print_kit_v1/

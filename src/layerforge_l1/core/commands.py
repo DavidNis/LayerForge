@@ -18,7 +18,7 @@ from .validation import validate_stack
 
 DEFAULT_REGISTRY = PROJECT_ROOT / "fixtures" / "reference_stacks.json"
 STACK_COMMANDS = ("stack-plan", "stack-import", "stack-validate", "stack-export", "stack-preview", "stack-reference",
-                  "stack-propose", "stack-edit")
+                  "stack-propose", "stack-edit", "stack-kit")
 
 
 def add_parsers(commands: Any) -> None:
@@ -109,6 +109,11 @@ def add_parsers(commands: Any) -> None:
     out = steps.add_parser("export", help="export STEP/STL with the L0 pipeline; refused for invalid drafts")
     out.add_argument("--project", type=Path, required=True)
     out.add_argument("--output", type=Path, required=True)
+
+    kit = commands.add_parser("stack-kit", help="L3: checksummed print kit with CAD read-back and an FDM estimate")
+    kit.add_argument("--stack", type=Path, required=True, help="saved stack or L2 review project")
+    kit.add_argument("--output", type=Path, required=True, help="new, empty kit directory")
+    kit.add_argument("--process", type=Path, default=None, help="printer/process JSON (default: generic assumption)")
 
 
 def _write(path: Path, value: Any) -> None:
@@ -224,6 +229,17 @@ def _run(args: argparse.Namespace, progress: Callable[..., None]) -> int:
 
     if args.command == "stack-edit":
         return _edit(args, progress)
+
+    if args.command == "stack-kit":
+        from .printkit import PrintProcess, build_print_kit
+
+        process = PrintProcess.from_json(args.process) if args.process else PrintProcess()
+        kit = build_print_kit(args.stack, args.output, process, progress)
+        print(json.dumps({"status": kit["status"], "cad_problems": kit["cad_problems"],
+                          "printability_counts": kit["printability"]["counts"],
+                          "findings": [f"{f['severity']}: {f['file']} {f['kind']} {f.get('width_mm', '')}"
+                                       for f in kit["printability"]["features"] if f["severity"] != "INFO"]}, indent=2))
+        return 0 if kit["status"]["cad"] == "CAD_VALID" and kit["status"]["fdm_estimate"] != "UNSUPPORTED_FEATURES" else 1
     raise StackError(f"unknown stack command {args.command}")
 
 

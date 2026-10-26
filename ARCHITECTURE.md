@@ -139,4 +139,5 @@ calls `validate_stack` before `export_stack` (implemented 2026-10-25: `core/edit
 operations, `core/review.py` project with base copy and replayable edit log, CLI
 `stack-edit`, manifest 1.1.0 `rim` + `review`; see DECISIONS D-V3-027; hybrid vector edits:
 edited sheets may carry exact mm geometry that CAD extrudes directly, manifest 1.2.0, D-V3-028); L3 should consume
-`cad_manifest.json`, `cad_revalidation.json` and previews. L1 and L2 are approved (2026-10-25); L3 is not started.
+`cad_manifest.json`, `cad_revalidation.json` and previews (implemented 2026-10-26: `core/printkit.py`,
+CLI `stack-kit`, D-V3-029). L1 and L2 are approved (2026-10-25); L3 is approved (2026-10-26).
