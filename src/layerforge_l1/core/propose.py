@@ -41,6 +41,10 @@ class ProposalConfig:
     # Each existing beam score yields one candidate; the planner itself is unchanged.
     beam_scores: tuple[str, ...] = ("area", "colors")
     export_cad: bool = True
+    # When planning needed local cell refinement, also plan these wider refinements (extra
+    # neighbor rings, -1 = whole artwork) with the first beam score, as extra candidates, so
+    # sheet count and seams can be compared; images that plan without refinement skip this.
+    refinement_alternatives: tuple[int, ...] = (4, -1)
 
 
 def _flag(code: str, severity: str, message: str, **evidence: Any) -> dict[str, Any]:
@@ -118,32 +122,60 @@ def propose(
     intake: IntakeConfig = IntakeConfig(),
     config: ProposalConfig = ProposalConfig(),
     progress: Callable[..., None] | None = None,
+    detail_decisions: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Propose a validated sheet stack for ``image_path`` and write the review package."""
+    """Propose a validated sheet stack for ``image_path`` and write the review package.
+
+    ``detail_decisions`` (detail id -> {"action": "preserve" | "remove" | "adjust", "color"})
+    resolve the details intake would otherwise recolor or erase; see ``intake.apply_detail_decisions``.
+    """
 
     progress = progress or (lambda *a, **k: None)
     output = Path(output)
     started = time.perf_counter()
     rgb, opaque, source = load_image(image_path)
     grid = StackGrid.for_planner(config.planning.outer_sheet_mm, config.planning.scale)
-    prepared = prepare_target(rgb, opaque, grid, intake)
+    prepared = prepare_target(rgb, opaque, grid, intake, detail_decisions)
     m = prepared["measurements"]
-    progress("L1_INTAKE_DONE", palette=m["palette_size"], seconds=round(time.perf_counter() - started, 1))
+    progress("L1_INTAKE_DONE", palette=m["palette_size"], details=len(prepared["details"]),
+             seconds=round(time.perf_counter() - started, 1))
 
     _save_image(prepared["target_rgb"], output / "intake" / "target.png")
     _save_image((prepared["unmatched_mask"] * 255).astype(np.uint8), output / "intake" / "unmatched_regions.png")
+    details = prepared["details"]
+    if details:
+        _save_image(prepared["detail_overview"], output / "intake" / "details_overview.png")
+        for detail in details:
+            detail["image"] = f"intake/details/{detail['id']}.png"
+            _save_image(prepared["detail_crops"][detail["id"]], output / detail["image"])
     flags = intake_flags(m, intake)
+    if details:
+        undecided = [d["id"] for d in details if d["action"]["default"]]
+        flags.append(_flag(
+            "INTAKE_DETAILS_CHANGED", "WARN",
+            "Intake would recolor or erase these recognizable details (eye whites, lips, accessories...). Each is "
+            "shown original | default intake | as planned. Removed pieces are kept by default; colors missing from "
+            "the palette keep the nearest palette color until you choose preserve, remove or adjust.",
+            details=len(details), using_default_action=len(undecided),
+            recolored=sum(d["kind"] == "color_not_in_palette" for d in details),
+            removed_by_cleanup=sum(d["kind"] == "removed_by_cleanup" for d in details)))
     frame = prepared["frame_color"] if prepared["has_frame"] else None
     planning = replace(config.planning, frame_color=frame)
 
     candidates = []
     stacks = {}
-    for score in config.beam_scores:
-        name = f"beam_{score}"
+    runs = [(f"beam_{score}", score, 0) for score in config.beam_scores]
+    index = 0
+    while index < len(runs):
+        name, score, extra = runs[index]
+        index += 1
         row: dict[str, Any] = {"name": name, "beam_score": score}
+        if extra:
+            row["refinement_extra_rings"] = extra
         t0 = time.perf_counter()
         try:
-            stack, report = plan_stack(prepared["target_rgb"], replace(planning, beam_score=score), name=name)
+            stack, report = plan_stack(prepared["target_rgb"],
+                                       replace(planning, beam_score=score, refinement_extra_rings=extra), name=name)
         except PlanningError as error:
             row.update(status="PLANNING_FAILED", reason=str(error),
                        planner_report={k: v for k, v in error.report.items() if k != "reveal_config"})
@@ -152,10 +184,10 @@ def propose(
                     (error.obstruction * 255).astype(np.uint8), output / "candidates" / name / "obstruction.png")
             candidates.append(row)
             progress("L1_CANDIDATE_FAILED", name=name, reason=str(error))
-            if error.report.get("closure_feasible") is False:
+            if error.report.get("closure_feasible") is False and not extra:
                 # Closure does not depend on the beam score: every other candidate fails identically.
-                for other in config.beam_scores[len(candidates):]:
-                    candidates.append({"name": f"beam_{other}", "beam_score": other, "status": "PLANNING_FAILED",
+                for other_name, other, _ in runs[index:]:
+                    candidates.append({"name": other_name, "beam_score": other, "status": "PLANNING_FAILED",
                                        "reason": f"skipped: closure infeasible (independent of beam score), see {name}"})
                 break
             continue
@@ -170,15 +202,22 @@ def propose(
             front_to_back_colors=report["front_to_back_colors"],
             repeated_colors=validation["repeated_colors"],
             source_regions_split_across_sheets=report["seams"]["source_regions_split_across_sheets"],
+            seam_length_mm=round(report["seams"]["seam_edge_length_mm"], 1),
+            cell_refinement=report.get("cell_refinement"),
             reconstruction_mismatched_pixels=validation["reconstruction"].get("mismatched_pixels"),
             planning_seconds=round(time.perf_counter() - t0, 1),
         )
         candidates.append(row)
         stacks[name] = stack
         progress("L1_CANDIDATE_DONE", name=name, status=row["status"], sheets=row["sheet_count"])
+        if row["cell_refinement"] and not extra and index == 1:
+            # The first closure needed refinement: compare wider refinements (first beam score only).
+            runs[1:1] = [(f"beam_{score}_refine_{'all' if e < 0 else f'{e}rings'}", score, e)
+                         for e in config.refinement_alternatives]
 
     valid = [c for c in candidates if c["status"] == "VALID"]
-    selected = min(valid, key=lambda c: (c["sheet_count"], c["source_regions_split_across_sheets"])) if valid else None
+    selected = min(valid, key=lambda c: (c["sheet_count"], c["source_regions_split_across_sheets"],
+                                         c.get("seam_length_mm", 0.0))) if valid else None
     orders = {tuple(c["front_to_back_colors"]) for c in valid}
     if len(orders) > 1:
         flags.append(_flag(
@@ -190,6 +229,12 @@ def propose(
         flags.append(_flag(
             "DEPTH_ORDER_IS_STRUCTURAL", "INFO",
             "Sheet order is chosen for printability and exact reproduction, not inferred from scene depth."))
+    if selected and selected.get("cell_refinement"):
+        flags.append(_flag(
+            "LOCAL_CELL_REFINEMENT", "INFO",
+            "The first reveal closure was infeasible; only the blocked cells (and, if needed, their neighbors) were "
+            "cut finer so a color region can step depth around sub-width details. Physical rules are unchanged.",
+            rounds=selected["cell_refinement"]))
     if selected and selected["source_regions_split_across_sheets"]:
         flags.append(_flag(
             "COLOR_REGIONS_SPLIT_ACROSS_SHEETS", "INFO",
@@ -212,6 +257,8 @@ def propose(
         "planning_config": asdict(planning),
         "beam_scores": list(config.beam_scores),
         "intake": m,
+        "intake_details": details,
+        "detail_decisions": detail_decisions or {},
         "palette": [c["hex"] for c in m["colors"]],
         "frame_color": frame,
         "candidates": candidates,

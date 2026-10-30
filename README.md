@@ -135,5 +135,36 @@ $env:PYTHONPATH='src'
 ```
 
 Exit codes: 0 PASS, 1 a validation/regression check failed, 2 invalid input.
+
+## L4 application (local web UI, tested 2026-10-26)
+
+```powershell
+$env:PYTHONPATH='src'
+.\.venv\Scripts\python.exe -m layerforge_l1 app            # opens http://127.0.0.1:8765/ in the default browser
+.\.venv\Scripts\python.exe -m layerforge_l1 app --no-browser --port 8765 --workspace <folder>
+```
+
+No extra dependencies: the server is Python's standard library and the page is plain
+HTML/CSS/JavaScript served from `src/layerforge_l1/app/static/` (no build step). It listens on
+127.0.0.1 only. Projects are saved in `./workspace/` (git-ignored; uploaded artwork stays local)
+after every step and reopen after a restart. Workflow: **1** import a flat-color PNG/JPEG
+(L1 proposal) → **2** review and edit (L2 operations, optional rim, undo/revert, verify
+save/reload) → **3** FDM printability estimate → **4** print kit (L3) with zip download. The
+status strip keeps geometry/CAD, the FDM estimate and the physical print (always NOT VERIFIED)
+separate. Stop the server with Ctrl+C. Browser test of the UI: `tests/test_l4_app.py`
+(needs Node >= 22 and Edge or Chrome; otherwise that one test is skipped with the reason).
+### Portable Windows app (no Python needed; built 2026-10-26, test status in STATUS.md)
+
+Build (developer machine, project venv): `.\.venv\Scripts\python.exe -m pip install -e ".[build]"`, then
+`scripts\build_windows.ps1` (or the PyInstaller command inside it). Output: `dist\LayerForge\`
+(`LayerForge.exe` + `_internal\`, about 660 MB) and `dist\LayerForge-0.1.0-win64.zip` (about 215 MB).
+
+Use: unzip anywhere, double-click `LayerForge.exe`. A small LayerForge window opens and the app
+opens in the default browser; closing the window stops it. Projects go to `Documents\LayerForge`
+(`--workspace <folder>` to change), the log to `%LOCALAPPDATA%\LayerForge\logs\layerforge.log`;
+nothing is written into the application folder. An occupied port moves to the next free one; a
+second launch reopens the browser on the running app. `packaging/README_FIRST.txt` (copied next to
+the exe) is the user-facing version. Tests: `tests/test_l4_launcher.py` (no build needed) and
+`tests/test_windows_build.py` (runs the built exe; skipped with the reason when it is missing).
 API and module map: `ARCHITECTURE.md`, section "L0 reusable geometry core".
 The van_gogh reference is third-party character art: private use only.

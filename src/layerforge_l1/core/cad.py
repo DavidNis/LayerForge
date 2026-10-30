@@ -62,7 +62,39 @@ def mask_to_geometry(mask: np.ndarray, mm_per_pixel: float, simplify_mm: float):
         shells.append(Polygon(to_mm(contour), holes))
     half = 0.5 * mm_per_pixel
     geometry = unary_union([s.buffer(0) for s in shells]).buffer(half, join_style=2, mitre_limit=2.0)
-    return geometry.simplify(simplify_mm, preserve_topology=True).buffer(0)
+    return _match_mask(geometry.simplify(simplify_mm, preserve_topology=True).buffer(0), mask, mm_per_pixel)
+
+
+def _match_mask(geometry: BaseGeometry, mask: np.ndarray, mm_per_pixel: float) -> BaseGeometry:
+    """Pixel-exact correction of the traced geometry.
+
+    Contours run through pixel centres, so a one-pixel-wide tail is a zero-width spike that
+    ``buffer(0)`` drops.  The geometry is rasterized exactly as ``revalidate_cad`` does; only
+    when that raster differs from the mask are the differing pixels added or cut as squares.
+    Geometry that already matches is returned unchanged.
+    """
+
+    if mask.ndim != 2 or mask.shape[0] != mask.shape[1]:
+        return geometry
+    from types import SimpleNamespace
+
+    from shapely.geometry import box
+
+    grid = SimpleNamespace(outer_pixels=mask.shape[0], mm_per_pixel=mm_per_pixel)
+    height = mask.shape[0]
+    square = lambda y, x: box(x * mm_per_pixel, (height - y - 1) * mm_per_pixel,
+                              (x + 1) * mm_per_pixel, (height - y) * mm_per_pixel)
+    for _ in range(4):  # a correction can move a neighbouring diagonal edge; repeat until exact
+        raster = rasterize_geometry(geometry, grid)
+        missing, extra = mask & ~raster, raster & ~mask
+        if not missing.any() and not extra.any():
+            break
+        if missing.any():
+            geometry = unary_union([geometry, *(square(y, x) for y, x in zip(*np.nonzero(missing)))])
+        if extra.any():
+            geometry = geometry.difference(unary_union([square(y, x) for y, x in zip(*np.nonzero(extra))]))
+        geometry = geometry.buffer(0)
+    return geometry
 
 
 def polygons(geometry: BaseGeometry) -> list:

@@ -141,3 +141,25 @@ operations, `core/review.py` project with base copy and replayable edit log, CLI
 edited sheets may carry exact mm geometry that CAD extrudes directly, manifest 1.2.0, D-V3-028); L3 should consume
 `cad_manifest.json`, `cad_revalidation.json` and previews (implemented 2026-10-26: `core/printkit.py`,
 CLI `stack-kit`, D-V3-029). L1 and L2 are approved (2026-10-25); L3 is approved (2026-10-26).
+
+## L4 application (implemented 2026-10-26, awaiting user review)
+
+`src/layerforge_l1/app/` (D-V3-030), started with `python -m layerforge_l1 app`:
+
+| Module | Responsibility |
+| --- | --- |
+| `app/server.py` | `ThreadingHTTPServer` on 127.0.0.1: static page + JSON API (routes in the module docstring) |
+| `app/jobs.py` | single background worker, per-project job lock, progress events, user-facing errors |
+| `app/workspace.py` | project folders; calls `propose`, `review.*`, `validate_stack`, `assess_printability`, `build_print_kit`; builds the UI state |
+| `app/static/` | `index.html`, `app.css`, `app.js` (no build step): import, proposal, layer editor with canvas tools, validation, change maps, printability, kits |
+
+```text
+browser --HTTP--> server --submit--> worker thread --> core (L1 propose / L2 review / L3 printkit)
+   ^  poll /api/jobs/<id>                 |
+   +---- GET /api/projects/<p> <---- workspace/<p>/{project.json, proposal/, review/, draft/, printability/, kits/}
+```
+
+Portable Windows build (D-V3-031): `packaging/LayerForge.spec` bundles `packaging/layerforge_launcher.py`
+-> `app/launcher.py` (window, port choice, single-instance lock, log) -> `make_server`, the same server as
+`python -m layerforge_l1 app`. When frozen, `layerforge_l1.PROJECT_ROOT` is the bundle folder (read-only
+`fixtures/print_processes`, `app/static`); user data lives in `Documents\LayerForge` and `%LOCALAPPDATA%\LayerForge`.

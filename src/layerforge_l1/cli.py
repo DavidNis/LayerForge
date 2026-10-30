@@ -129,6 +129,12 @@ def parser() -> argparse.ArgumentParser:
     from .core.commands import add_parsers as add_stack_parsers
 
     add_stack_parsers(commands)
+    app_command = commands.add_parser("app", help="L4: local web application (import, review, edit, export)")
+    app_command.add_argument("--workspace", type=Path, default=PROJECT_ROOT / "workspace",
+                             help="folder for app projects (default: ./workspace, git-ignored)")
+    app_command.add_argument("--host", default="127.0.0.1")
+    app_command.add_argument("--port", type=int, default=8765)
+    app_command.add_argument("--no-browser", action="store_true", help="do not open a browser window")
     return result
 
 
@@ -139,6 +145,10 @@ def main() -> int:
         from .core.commands import run as run_stack_command
 
         return run_stack_command(args, _progress)
+    if args.command == "app":
+        from .app import serve
+
+        return serve(args.workspace, args.host, args.port, not args.no_browser)
     if args.command == "build":
         from .pipeline import build
 

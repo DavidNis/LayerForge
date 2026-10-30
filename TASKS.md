@@ -225,4 +225,64 @@ No complete UI/server, arbitrary photographic depth estimation, frame design, gl
 - [ ] Re-run the L0 reference regression when memory allows (stopped by host low-memory protection on 2026-10-26).
 - [x] User approved L3 on 2026-10-26. L-G10 still PENDING; L0 reference re-run still open (above); L4 not started.
 - [ ] L-G10: print a representative kit, record the result; calibrate `min_opening_mm` / `min_positive_feature_mm` for the user's printer.
-- [ ] Later (not L3): 3MF only if a slicer round-trip is verified; print-plate packing.
+- [x] 3MF: done as the optional Bambu Studio project (2026-10-28, below), verified by a Bambu Studio round trip. Print-plate packing of several sheets per plate: still later.
+
+## L4 application user experience (2026-10-26)
+
+- [x] Local web app `python -m layerforge_l1 app` (`src/layerforge_l1/app/`): import, L1 proposal, layer editor (all L2 operations except mask-file operands; canvas tools for points, circles, rectangles, slots and bridges; optional rim; undo/revert; verify save/reload), validation and change maps, FDM estimate, L3 print kit with zip download and checksum check.
+- [x] Background jobs with progress and actionable errors; separate geometry/CAD, FDM-estimate and physical (always NOT VERIFIED) status.
+- [x] 3 L4 tests: request errors; API end-to-end workflow incl. server restart; real-browser UI workflow (headless Edge via DevTools, Node >= 22).
+- [x] Complete suite on the final code: 130 PASS / 0 FAIL / 0 SKIP (first attempt stopped by host low-memory protection; re-run after memory was freed).
+- [ ] Re-run the L0 reference regression when memory allows (still open from L3).
+- [ ] Explicit user review and approval of L4. L-G10 still PENDING.
+- [ ] Later (not L4): job cancellation; faster edits at scale 2/4 (each edit re-renders all previews); process isolation for planning.
+
+## L4 portable Windows build (2026-10-26)
+
+- [x] `LayerForge.exe` launcher (window, browser, port fallback, single instance, error dialogs, log, clean stop) and one-folder PyInstaller build + zip.
+- [x] Fixed: exclusive port bind on Windows; headless stdin freeze; second-launch log crash; finalization crash on stop during a job.
+- [ ] Re-run `tests/test_windows_build.py` on the final build when memory allows (browser, startup/ports, stop-while-job not yet run on it).
+- [ ] Test on a clean Windows machine/VM without Python (not available here).
+- [ ] User launches the exe by double-click and reviews; explicit L4 approval.
+- [ ] Later: installer, icon, code signing, remembered projects folder.
+
+## L4 Review screen UX (2026-10-26)
+
+- [x] Review tab redesign (stage-first layout, grouped tools, contextual inspector, collapsible diagnostics, review bar with next steps); 9 L4 tests PASS incl. the browser workflow.
+- [ ] User design review of the new Review screen.
+- [x] Rebuilt the portable exe with the new UI (smoke-tested).
+
+## Bambu Studio multi-plate project (2026-10-28)
+
+- [x] `core/bambu3mf.py`: one plate per sheet, keep-out-aware placement, color slots, settings from the installed Bambu Studio presets, self-check and Bambu Studio CLI load+slice check.
+- [x] Kit option (`bambu_printer`), `stack-kit --bambu-printer`, Print kit tab checkbox + printer list, guide section, checksums.
+- [x] 12 tests (`tests/test_bambu3mf.py`); L3/L4/windows-build tests PASS; exe rebuilt.
+- [ ] User opens a generated project in Bambu Studio, prints a sheet or the kit, and reports (L-G10).
+- [ ] Later: several sheets per plate; dual-nozzle printers; filament type other than Generic PLA.
+
+## L4 Print Kit section UX (2026-10-28)
+
+- [x] Ready state with one primary download, guide/.3mf/Open Kit Folder secondary, visible warnings, four collapsible sections, earlier kits collapsed.
+- [x] Delete kit with confirmation (folder + record; links not followed; partial-failure retry); Open Kit Folder in desktop sessions.
+- [x] Tests: browser workflow (states, actions, 390 px, delete via UI) and API delete test (confinement, job conflict, locked file, junction, restart persistence, open folder).
+- [ ] User design review of the Print Kit section.
+- [ ] The Hebrew GUI guide PDF still shows the old Print Kit layout (update on request).
+
+## Recovery: physical resize and pixel upscaling (2026-10-28)
+
+- [x] `core/resize.py`: findings -> required factor, printer usable area (incl. Bambu keep-out zones), size table, smallest useful size, preview with proportional checks, trial planning for search-limit failures.
+- [x] App: Physical size panel (analysis, preview, approvals, Resize & retry), attempts archive, re-measured FDM estimate after the retry; Printability tab links to it.
+- [x] `core/upscale.py` kept as a separate, secondary option after a failed proposal; retry only when the preview shows a visible change; memory model from a measured run.
+- [x] Tests: `tests/test_physical_resize.py` (7), `tests/test_upscale_retry.py` (6), 4 app tests (upscale retry, memory refusal, resize workflow, trial planning).
+- [ ] User test on the couple (scratch copy evaluated; the user's project untouched).
+- [ ] Measure scale-4 memory/time to replace the extrapolated upscale model; review the 2x change filter (52 changes on the couple).
+- [ ] Predicted vs measured findings differ after re-planning (couple 0 vs 7): consider iterating prediction with the re-planned stack.
+- [x] Predicted vs measured clearly separated; retry refuses an unapproved target; remaining UNSUPPORTED with locations, maps and Locate (2026-10-29).
+- [x] Hebrew GUI guide: new chapter 11 (physical size, manual correction, trial planning, upscale, attempts) with screenshots of project-owned fixtures; PDF re-printed.
+- [ ] The guide's older Print Kit screenshots predate the Print Kit UX change.
+
+## Delete Project (2026-10-29)
+
+- [x] API + workspace deletion (confined, links not followed, project.json last, partial-failure retry), project list and project screen actions with confirmation, notice, return to the list.
+- [x] Tests: API (complete/failed/partially generated projects, held-open file, junction to outside data, traversal and non-project folders, linked project folder, restart, re-create same name) and browser (screen + list).
+- [ ] The Hebrew guide does not mention Delete Project yet.

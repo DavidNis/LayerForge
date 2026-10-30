@@ -444,3 +444,214 @@ FDM thresholds remain generic assumptions until a print calibrates them).
   color and object semantics could not be verified in a slicer here.
 - OBSERVED_IN_FILE: STEP files differ between runs only in the header timestamp and
   OpenCASCADE's per-process product counter; STL bytes and `print_kit.json` are identical.
+
+## D-V3-030 | 2026-10-26 | L4 application: local web UI on the standard library, core as the only engine
+
+**Status:** IMPLEMENTED; awaiting user review (L4 READY_FOR_USER_TEST).
+
+- DESIGN_CHOICE: `python -m layerforge_l1 app` serves a single-page UI (`src/layerforge_l1/app/static/`:
+  plain HTML/CSS/JavaScript, no build step) and a small JSON API from `http.server.ThreadingHTTPServer`
+  on 127.0.0.1. FastAPI/React/Three.js (considered in MILESTONES) were not adopted: the workflow needs
+  file upload, job progress, images and forms, which the standard library covers without new pinned
+  dependencies or a Node toolchain; every view is a real pipeline image (no 3D mock-up).
+- DESIGN_CHOICE: `app/workspace.py` only calls the approved core: `propose` (L1), `review.start_review /
+  apply_to_project / undo / revert / verify_project / inspect_project / preview_project` (L2),
+  `validate_stack`, `assess_printability` + `printability_maps` and `build_print_kit` (L3). No planning,
+  editing, validation or CAD logic is duplicated. The L2 review project is the save format; the app adds
+  `project.json` (settings, chosen candidate, kit list) and cached views (`draft/state.json`).
+- DESIGN_CHOICE: long operations run on one background worker thread (`app/jobs.py`), one at a time
+  (memory), one per project (409 otherwise); progress events are the core's own `progress(...)` stages;
+  the page polls the job. Core errors (`StackError` and subclasses) are shown with their message;
+  anything else is reported as an unexpected error with the traceback on the server console.
+- DESIGN_CHOICE: after a passing edit the app reuses the validation `apply_to_project` already ran
+  instead of validating twice; per-check details are recomputed only for invalid drafts (marked
+  `details_recomputed: false` otherwise). Undo/revert/start reuse the validation the core returns.
+- DESIGN_CHOICE: three status levels in the UI, never merged: geometry/CAD (validators; CAD only from a
+  kit that matches the current draft), FDM estimate (labelled estimate; from the current kit or draft
+  estimate; out-of-date results are marked), physical (always NOT VERIFIED; no control can change it).
+- DESIGN_CHOICE: mask-file edit operands stay CLI-only (the UI never sends file paths); every other
+  L2 operation is available, plus a raw JSON edit field for the documented edit format.
+
+## D-V3-031 | 2026-10-26 | L4 portable Windows build: PyInstaller one-folder app with a launcher window
+
+**Status:** IMPLEMENTED; awaiting user review (L4 READY_FOR_USER_TEST).
+
+- USER_REQUIRED: double-click EXE, no terminal, no Python installation, project files outside
+  application folders, portable build first (no installer).
+- DESIGN_CHOICE: PyInstaller one-folder bundle, not one-file: the CAD stack (OCP, VTK) is about
+  650 MB and a one-file exe would unpack it into a temporary folder on every start. The folder
+  build is serving about 0.6 s after start.
+- DESIGN_CHOICE: windowed exe with a small tkinter control window (status, address, projects
+  folder, Open / Projects folder / Quit). The window is the visible "app is running" signal and
+  the clean way to stop; closing a browser tab does not stop the server. tkinter is in the
+  standard library (no new runtime dependency); `MPLBACKEND=Agg` keeps matplotlib off it.
+- DESIGN_CHOICE: projects default to `Documents\LayerForge` (known-folder lookup, follows
+  redirection); log, cache and instance records in `%LOCALAPPDATA%\LayerForge`. A projects
+  folder inside the application folder is refused. The exe writes nothing into its folder
+  (snapshot check in `tests/test_windows_build.py`).
+- DESIGN_CHOICE: one instance per projects folder (file lock in `%LOCALAPPDATA%`); a second
+  launch opens the browser on the running instance. Port: preferred 8765, then the next 19,
+  then any free port; Windows binds are exclusive (`SO_EXCLUSIVEADDRUSE`), fixing silent port
+  sharing in the existing server.
+- DESIGN_CHOICE: `--headless` (no window; stops when stdin is closed, detected by polling, never
+  a blocking read) exists so the packaged exe can be driven by the existing L4 tests.
+- DESIGN_CHOICE: `ortools` excluded from the bundle (CLI-only CP-SAT experiment, never reached
+  from the app); VTK/casadi/nlopt stay because cadquery imports them.
+- OPEN_QUESTION: behaviour on a clean Windows install (system DLLs, SmartScreen for the
+  unsigned exe) is unverified.
+
+## D-V3-032 | 2026-10-26 | L4 Review screen: artwork-first layout with contextual editing
+
+**Status:** IMPLEMENTED; awaiting user design review.
+
+- USER_REQUIRED: assembled artwork as the main focus, compact selectable layer list, contextual
+  editing controls, collapsible technical details, easy next actions, all features and warnings kept.
+- DESIGN_CHOICE: the canvas defaults to the assembled front view; edits still target the selected
+  layer, and picking an edit tool switches the canvas to that layer so the user sees what changes.
+- DESIGN_CHOICE: "Save" is shown as "saved automatically" (every edit is already persisted); the
+  explicit check is Verify save/reload. "Build print kit ->" opens the kit tab, where the build runs.
+- DESIGN_CHOICE: problems are never hidden: an invalid draft or islands force the Validation section
+  open, a visible-change edit opens its change panel, and the draft banner stays above the stage.
+
+## D-V3-033 | 2026-10-28 | Optional Bambu Studio multi-plate project (.3mf) in the print kit
+
+**Status:** IMPLEMENTED; checked with Bambu Studio 02.08.02.61; awaiting user test (READY_FOR_USER_TEST).
+
+- USER_REQUIRED: one Bambu Studio project, one plate per sheet in assembly order, flat with the
+  correct face down, exact geometry, colors/filaments, printable-area check, no AMS assumption,
+  STEP/STL unchanged, option in the existing kit UI, real Bambu Studio validation.
+- OBSERVED_IN_FILE (projects saved by Bambu Studio 02.05-02.08): `3D/3dmodel.model` with
+  production-extension components -> `3D/Objects/object_<n>.model`; `Metadata/model_settings.config`
+  holds objects (name, extruder), `<plate>` entries (plater_id, plater_name, model_instance) and
+  `<assemble>`; `Metadata/project_settings.config` holds the full flattened presets (563-581 keys).
+- OBSERVED (Bambu Studio 02.08.02.61 CLI): a project with partial settings, or none, crashes the
+  loader (0xC0000005), also with `--uptodate`; `--load-settings` with system profile files does not
+  resolve `inherits` (it produced a 200 x 200 mm bed and generic start G-code); without an
+  `Application` value starting `BambuStudio-` the plates are ignored ("plate empty").
+- DESIGN_CHOICE: settings are flattened at export time from the *installed* Bambu Studio system
+  presets (`BBL.json` index, `inherits` + `include`; the newer of the user-profile copy and the install
+  folder), printer + matching-layer-height system process + one "Generic PLA" slot per distinct sheet
+  color, unmodified. No Bambu profile data is stored in the repository; without Bambu Studio no project
+  is written (reported). The `Application` marker is a format requirement; the file description and
+  the kit report state that LayerForge wrote it.
+- DESIGN_CHOICE: plate layout reproduces Bambu Studio's grid (columns = rounded square root, plates
+  one bed + 20 % apart, rows towards -y; confirmed by the CLI slice report). Each sheet is translated
+  only (no rotation/scale; back face z = 0 on the bed, rim on top) to the free spot nearest Bambu's
+  preferred position, outside bed-exclude / wrap-detection zones with 1 mm clearance. If any sheet does
+  not fit, no project is written and every sheet is listed.
+- DESIGN_CHOICE: no AMS: only `filament_map` = extruder 1 is written, no AMS slot mapping; each plate
+  uses exactly one filament (0 filament changes, verified by slicing).
+- Verification: every export reopens the package (same triangles/volume as the STL, plate count,
+  placement, filament colors); when `bambu-studio` is installed it loads and slices all plates and the
+  report is compared with the plan (objects, filament ids, sizes and positions to 0.01 mm, triangle
+  count, 0 filament changes) -> `BAMBU_STUDIO_CLI_VERIFIED`; otherwise
+  `EXPERIMENTAL_NOT_OPENED_IN_BAMBU_STUDIO`. The GUI was opened once by hand-run test on the sailboat
+  P1S project: 7 named plates, 6 colored Generic PLA slots, presets shown as unmodified system presets.
+- USER_REQUIRED (2026-10-28): exact reviewed sheet colors as project-level virtual filaments, shared by
+  identical colors, independent of the AMS; AMS mapping only at print time. Written as `filament_colour`
+  = `filament_multi_colour` (OBSERVED_IN_FILE: Bambu 02.08 stores both) and verified per plate from the
+  `Metadata/plate_<n>.json` Bambu Studio writes after slicing and re-saving.
+- UNVERIFIED_INFERENCE (Bambu): GUI behavior on other printers and Bambu Studio versions; sending to a printer;
+  physical prints (L-G10 still PENDING). Dual-nozzle printers (H2D, X2D, H2C) are not offered.
+
+## D-V3-034 | 2026-10-28 | L4 Print Kit section: ready state, collapsible details, kit deletion
+
+**Status:** IMPLEMENTED; awaiting user review (READY_FOR_USER_TEST).
+
+- USER_REQUIRED: compact collapsible layout (Files & Exports, Assembly & Layers, Validation &
+  Printability, Technical details), a prominent ready state with one primary download, guide as
+  secondary, print_kit.json and checksums under Technical, deletion of a kit with confirmation that
+  removes its files and record entry and never anything else.
+- DESIGN_CHOICE: warnings (out of date, CAD problems, missing files, RISK/UNSUPPORTED counts, Bambu
+  project problems) and the CAD / FDM / Physical cards stay visible; details are collapsed by default
+  and the open state is remembered per kit and section.
+- DESIGN_CHOICE: deletion is a direct request (not a job), refused while any job of the project runs,
+  limited to `kits/<id>` with `id` matching `kit_YYYYMMDD_HHMMSS[x...]`; links (symlinks, junctions) are
+  removed as links; `print_kit.json` is removed last and only when everything else went, so an
+  interrupted delete leaves a listed, retryable kit marked incomplete. `build_kit` re-reads the record
+  before appending, so a delete during a build cannot be undone by it.
+- DESIGN_CHOICE: "Open Kit Folder" exists only in interactive desktop sessions (launcher window or
+  `app` with a browser on localhost), opens only a verified kit directory, and is a POST behind the
+  existing same-origin check; headless runs and tests report it as unavailable.
+
+## D-V3-035 | 2026-10-28 | Local cell refinement, intake detail decisions, exact one-pixel tails
+
+**Status:** IMPLEMENTED; evaluation incomplete (stopped by low memory).
+
+- OBSERVED: the couple's infeasible closure was a cell-granularity deadlock (every blocked cell is
+  supportable with all others in front; 1.2 mm / 0.3 mm2 cells plan and validate). Refinement only
+  re-cuts blocked cells (then neighbors); physical rules unchanged; feasible images untouched.
+- OBSERVED: minimal local refinement gave 16 sheets / 239 mm seams; +4 rings 12 / 142 mm; whole artwork
+  13 / 96 mm. DESIGN_CHOICE: no single best: the wider refinements are offered as candidates; selection
+  key (sheets, split regions, seam length); the user may review any candidate.
+- USER_REQUIRED: no silent discarding: intake reports details it recolors or erases, with comparisons
+  and preserve/remove/adjust; small removed pieces are preserved by default; size notes are info only.
+- OBSERVED: `mask_to_geometry` dropped one-pixel tails (zero-width spikes removed by buffer(0)).
+  DESIGN_CHOICE: correct only the pixels where the traced raster differs from the mask (iterated, at
+  most 4 passes); geometry that already matched is returned unchanged; validators unchanged.
+
+## D-V3-036 | 2026-10-28 | Pixel upscaling of a failed proposal: separate, secondary, evidence-gated
+
+**Status:** IMPLEMENTED (paused by the user, then kept as a secondary option).
+
+- DESIGN_CHOICE: "Upscale & Retry" raises only the planner `scale` (pixels per mm); sheet size, aperture,
+  perimeter, artwork placement and every mm threshold are unchanged (9 boundary checks). Resampling is the
+  existing intake (area / bicubic); no AI upscaling. Offered only after a failed proposal.
+- USER_REQUIRED: a preview first; listed visible changes need approval; the failed proposal is archived
+  under `attempts/`. DESIGN_CHOICE: when the finer grid changes nothing visible, the preview is
+  `NO_DEMONSTRATED_BENEFIT` and no retry is offered (higher resolution only when it demonstrably helps).
+- OBSERVED: full couple proposal at scale 2 peaked at 1.03 GB (CAD re-validation), 706 s under load
+  (364 s unloaded). Linear extrapolation: scale 4 ~3.8 GB, scale 8 ~15 GB (refused on this 16 GB
+  machine). UNVERIFIED_INFERENCE: the extrapolation; scale 4 was not measured to completion.
+- LIMITATION: the couple 2x preview lists 52 changes with the 1-previous-pixel jitter filter (8 with a
+  2-pixel filter); the filter may be too sensitive for review.
+
+## D-V3-037 | 2026-10-28 | Physical resizing to clear printability findings (user approval, same project)
+
+**Status:** IMPLEMENTED; READY_FOR_USER_TEST.
+
+- OBSERVED: every printability threshold is in mm (planner 1.2 mm structural width; process nozzle, line
+  width, min opening, min material). DESIGN_CHOICE: required factor per finding = threshold / (measured
+  width - half a pixel); necks without a width, build-volume and other findings are "not size-related".
+- DESIGN_CHOICE: usable sheet = process bed, and for a chosen Bambu printer the largest square clear of the
+  keep-out zones (`place_on_bed`, 1 mm clearance). Smallest useful size = smallest whole mm that clears the
+  most UNSUPPORTED findings any fitting size can clear; "fewest risks" offered separately.
+- DESIGN_CHOICE: resizing keeps the pixel grid (scale) and changes mm per pixel: no memory-heavy upscaling.
+  Preview re-runs intake at the new size (intake filters are in mm, so details can change) with 9
+  proportional checks (larger, fits printer, aperture/perimeter scaled, same pixels, placement, aspect,
+  inside aperture, outline) and lists visible changes for approval. Size approval is always required.
+- DESIGN_CHOICE: retry plans into a staging folder, then archives proposal, review, draft, printability and
+  the size analysis under `attempts/`; kits stay listed (out of date). The planner (with its local cell
+  refinement) is unchanged; the FDM estimate is re-run on the new selected candidate (`resize_check.json`).
+- DESIGN_CHOICE: failures that widths cannot predict (beam search at its sheet limit) get trial planning:
+  largest fitting size first, then bisection to 10 mm (one beam score, no CAD).
+- OBSERVED (couple, 150 -> 198 mm, P1S 236 mm usable): predicted 0 UNSUPPORTED, measured 7 (new slits
+  around the newly kept red lips and two others); 11 sheets instead of 12; RISK 98 -> 64; CAD PASS. The
+  remaining 7 would need >= 307 mm. Prediction is an estimate; only the re-measurement counts.
+- OBSERVED (sailboat 60 -> 72 mm): RISK 4 -> 2 (predicted 0); 6 sheets. Octopus (held-out, 12 colors):
+  fails at 100/150/200 mm and at 236 mm (trial): resizing alone does not resolve it.
+- No result is a physical verification; geometric validation does not guarantee a successful print.
+- 2026-10-29 additions (user review): predictions are labelled "estimate, not a result" everywhere and the
+  measured result after re-planning is shown beside them with a warning when more UNSUPPORTED were measured
+  than predicted. DESIGN_CHOICE: the retry refuses to swap in a plan whose intake target differs from the
+  approved preview target (pixel-exact), so no unapproved visible change can reach the project. Remaining
+  UNSUPPORTED findings are saved with sheet, location and maps (`proposal/resize_maps/`); after "Review this
+  candidate" each has Locate into the existing editor (Cut slot / Cut rectangle / Fill cutout).
+- RISK (OBSERVED in scratch only): archiving adds ~30 characters to paths; a very long workspace path can
+  exceed the Windows 260-character limit (the default Documents\LayerForge stays at ~160).
+
+## D-V3-038 | 2026-10-29 | Delete Project (L4)
+
+**Status:** IMPLEMENTED; READY_FOR_USER_TEST.
+
+- OBSERVED: a project is only its folder `<workspace>/<name>` (the list scans for `project.json`; no other
+  record exists), so deleting the folder removes it from the UI and after restarts.
+- DESIGN_CHOICE: `POST /api/projects/<name>/delete` (same-origin; 409 while a job is queued/running) ->
+  `Workspace.delete_project`: plain project name only, folder directly in the workspace with an app
+  `project.json`, a project folder that is itself a link is refused; contents deleted bottom-up with links
+  removed as links (never followed); `project.json` last, so a partial failure (file open elsewhere) keeps
+  the project listed and deleting again retries; failures reported per file. The imported image was copied
+  into `source/` at import; the original file elsewhere is never touched.
+- UI: "Delete…" per row in the project list and "Delete project…" on the project screen (any stage,
+  including failed proposals); inline confirmation naming the project and folder, stating it is permanent;
+  afterwards the project list/import screen with a result notice.

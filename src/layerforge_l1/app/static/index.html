@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LayerForge</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="#/">LayerForge <span class="muted">layer sheets</span></a>
+    <nav class="project-nav">
+      <label class="sr-only" for="project-select">Project</label>
+      <select id="project-select" data-action="open-project"></select>
+      <a class="button ghost" href="#/" data-testid="new-project">New project</a>
+    </nav>
+  </header>
+  <main id="app" aria-live="polite">
+    <p class="muted pad">Loading…</p>
+  </main>
+  <footer class="footer muted" id="footer"></footer>
+  <script type="module" src="/static/app.js"></script>
+</body>
+</html>

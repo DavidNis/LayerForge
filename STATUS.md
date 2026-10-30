@@ -589,3 +589,264 @@ follow the light-blue body). Not user approved; no CAD exported.
   cutout is reported once per sheet; scale-4 printability takes several minutes; no 3MF; no
   print-plate packing (each sheet is its own job); filament mass assumes 1.24 g/cm3; all L2
   limitations remain.
+
+## 2026-10-26 L4 application user experience
+
+- State: **READY_FOR_USER_TEST**; L4 NOT APPROVED. L0-L3 approved. **L-G10 physical print
+  PENDING**. Not committed. No later milestone started.
+- Launch: `$env:PYTHONPATH='src'; .\.venv\Scripts\python.exe -m layerforge_l1 app` (opens
+  http://127.0.0.1:8765/; `--no-browser`, `--port`, `--workspace`). Checked: the CLI started the
+  server and answered `/` and `/api/info`.
+- New: `src/layerforge_l1/app/` (`server.py`, `jobs.py`, `workspace.py`, `static/index.html`,
+  `app.css`, `app.js`), `tests/test_l4_app.py`, `tests/e2e/drive_app.mjs`. Changed: `cli.py` (`app`
+  subcommand), `pyproject.toml` (static files as package data), `.gitignore` (`workspace/`,
+  `artifacts/l4_app_v1/`). No new dependency. Planner, editor, validators, CAD and printkit unchanged.
+- Workflow in the UI: import PNG/JPEG → L1 proposal (candidates, flags, palette, previews,
+  obstruction maps) → pick a candidate → editor (front-to-back layer list, sheet / front view /
+  change maps, click and drag tools in mm, recolor, thickness, optional rim, move, merge, split,
+  accept artwork, raw JSON edits, history with revert, undo, verify replay) → validation panel
+  with failures and hints, islands with locate/remove, last-change classification → FDM estimate
+  with editable process (presets; defaults labelled ASSUMPTION), findings with locate, maps →
+  print kit (three status cards, comparisons, assembly table, filament, side section, labelled
+  exploded view, guide, manifest, zip, checksum check). Out-of-date estimates and kits are marked.
+- Tests (2026-10-26), each starting the real server on a temporary workspace:
+  - `test_info_static_and_request_errors`, `test_api_workflow_import_review_edit_reload_export`:
+    **2 PASS** in 203 s (sailboat fixture, scale 1; includes 409 while a job runs, path traversal
+    refused, invalid edit reported, kit refused for an invalid draft, server restart reopens the
+    project unchanged, replay identical, 0.6 mm slot reported as RISK 0.594 mm, custom process
+    changes the verdict, kit CAD_VALID / RISKS_REPORTED / NOT_VERIFIED, zip contents, stale marks).
+  - `test_browser_workflow`: **1 PASS** in 169 s; headless Edge driven through the DevTools
+    protocol with real clicks, file upload and canvas drags; no browser console errors.
+    Screenshots: `artifacts/l4_app_v1/screens/` (git-ignored); reviewed by eye.
+  - After these runs, small edits were made (deviation wording, click-to-enlarge images, side
+    section full width, atomic JSON writes in the app, screenshot scroll).
+  - Complete suite with the L4 tests: a first run was stopped by host low-memory protection
+    (no counts). Re-run after the user freed memory, on the final code: `python -m pytest` =
+    **130 PASS / 0 FAIL / 0 SKIP** in 728 s (127 + 3 L4; the browser test ran, not skipped).
+    Sampled peak working set of the pytest process 0.57 GB; lowest free system memory 6.5 GB.
+  - L0 full-size reference regression: still NOT re-verified (last PASS 2026-10-25).
+- Timings (sailboat, through the API): scale 1: proposal 48 s, start review 13 s, edit about
+  7-13 s, estimate 1 s, kit 21 s. Scale 2 (default): proposal 139 s, start review 30 s, edit
+  38 s, estimate 3 s, kit 56 s. During planning, the slowest state request took 4.9 s at scale 2
+  (shared Python interpreter); the page shows progress and stays usable.
+- Limitations: local single-user tool (127.0.0.1, no accounts); one job at a time, no
+  cancellation; jobs are forgotten on restart (projects are not); each edit re-renders all
+  previews, so edits are slow at scale 2/4; mask-file edit operands are CLI-only; no 3D viewer
+  (all views are pipeline images); requests can wait seconds while planning runs; the browser
+  test needs Node >= 22 and Edge/Chrome; FDM estimate and all L1-L3 limitations remain; physical
+  status cannot be changed in the app.
+
+## 2026-10-26 L4 portable Windows build (launcher + distributable)
+
+- State: **READY_FOR_USER_TEST**; L4 NOT APPROVED. L-G10 physical print PENDING. Not committed.
+- Artifact: `dist\LayerForge\LayerForge.exe` (one-folder PyInstaller 6.16.0 build, windowed,
+  1770 files, 656 MB) and `dist\LayerForge-0.1.0-win64.zip` (214 MB, SHA-256
+  `5af4c7c9de9f8c750b4759f82cba13478aa2e16019caa121b3b4005824861968`, rebuilt after the .jfif fix). Both git-ignored.
+- Upload fix (user report): `.jfif`/`.jpe` (JPEG) were refused by extension. The app now accepts them and
+  checks the decoded format is PNG or JPEG. `test_jpeg_extensions_accepted_by_content` + request-error test:
+  2 PASS; the rebuilt exe accepted `turtle_on_leaf.jfif` (201) and stopped mid-proposal with exit 0.
+- New: `src/layerforge_l1/app/launcher.py` (control window, browser open, port fallback, one
+  instance per projects folder, startup error dialogs, log, clean stop), `packaging/LayerForge.spec`,
+  `packaging/layerforge_launcher.py`, `packaging/README_FIRST.txt`, `scripts/build_windows.ps1`,
+  `tests/test_l4_launcher.py`, `tests/test_windows_build.py`. Changed: `app/server.py` (exclusive
+  port bind on Windows), `app/jobs.py` (`running()`), `__init__.py` (frozen paths: bundled
+  resources from the bundle, cache in `%LOCALAPPDATA%\LayerForge\cache`), `pyproject.toml`
+  (`build` extra: pyinstaller==6.16.0), `.gitignore` (`build/`, `dist/`), README. L0-L3 core
+  and the UI are unchanged.
+- Build: the PyInstaller command from `scripts/build_windows.ps1` was run directly (running the
+  .ps1 with an execution-policy bypass was refused in this session); the zip was made with the
+  same Python zip step the script now uses.
+- Bugs found and fixed during packaging:
+  - Existing L4 server: on Windows `SO_REUSEADDR` let a second server bind an occupied port
+    silently (verified: two `ThreadingHTTPServer`s bound 8799). Now `SO_EXCLUSIVEADDRUSE`.
+  - Launcher headless mode froze the server mid-proposal: a pending blocking read on the stdin
+    pipe stalled SciPy's Fortran DLL load in the job thread (thread dump), then all threads.
+    Reproduced unfrozen; fixed with a non-blocking `PeekNamedPipe` poll; the proposal then
+    finished in 21 s with the slowest status request 0.3 s. The windowed exe has no stdin.
+  - A second launch crashed (unhandled-exception dialog) renaming the log file the first
+    instance holds open. Fixed; regression test added.
+  - Stopping with a job still in native code crashed interpreter finalization (0xC0000409);
+    the launcher now ends with `os._exit(0)` after closing the server, lock and log.
+- Tests (development machine, NOT a clean Windows install; for the exe Python was removed from
+  PATH, PYTHONPATH/PYTHONHOME unset, LOCALAPPDATA and the projects folder temporary):
+  - `tests/test_l4_launcher.py`: **5 PASS** on the final code.
+  - `tests/test_l4_app.py -k request_errors` (unfrozen server after the port change): 1 PASS.
+  - `tests/test_windows_build.py` on the final build: **2 PASS**:
+    `test_packaged_info_static_and_request_errors` and
+    `test_packaged_api_workflow_import_review_edit_reload_export` (the unchanged L4 workflow
+    against the exe: import, proposal, review, edits, exe restart reopens the project, estimate,
+    print kit CAD_VALID, checksums, zip with STEP+STL per sheet; app folder unchanged).
+    **NOT RUN on the final build:** `test_packaged_browser_workflow`,
+    `test_packaged_startup_errors_ports_and_single_instance`, `test_packaged_stop_while_a_job_runs`:
+    the run was stopped by host low-memory protection (3.4 of 15.8 GB free afterwards).
+    On the first build, `startup_errors_ports_and_single_instance` and the static test PASSED;
+    the API and browser tests FAILED there (the headless freeze above).
+  - Manual checks of the windowed exe (first build): ready in about 0.6 s, serves, closes on
+    WM_CLOSE with exit 0 and removes its instance record. The second-launch crash seen there is
+    the bug fixed above; it was not re-checked on the final build.
+- Limitations: no clean-machine test (no VM available; missing system DLLs such as the VC++
+  runtime are untested); unsigned exe, so SmartScreen may warn; no installer, Start-menu entry
+  or icon; the projects folder is not remembered between launches unless given as
+  `--workspace` (e.g. in a shortcut); the quit-while-running confirmation dialog was not
+  exercised; only the default browser is opened (non-Chromium browsers untested); the bundle
+  contains VTK, casadi and nlopt because cadquery imports them.
+
+## 2026-10-26 L4 Review screen UX redesign
+
+- State: **READY_FOR_USER_TEST** (design review). L4 NOT APPROVED. Not committed. Only
+  `app/static/app.js` (review-tab rendering, default view, collapsible-section state) and
+  `app/static/app.css` changed; server, API, L0-L3 core and the other tabs are unchanged.
+- Layout: top review bar (draft status, Undo, Verify save/reload, Accept front view, Printability ->,
+  Build print kit ->); assembled front view as the default, large stage with a view switcher; edit
+  tools grouped Add / Cut / Fix under the stage (choosing an edit tool shows the selected layer);
+  compact numbered layer list (warnings only on failure); right inspector for the selected layer
+  (thumbnail, facts, color/thickness, order; rim, merge and details collapsible); Validation, last
+  change, more previews, advanced and history collapsible. Invalid drafts and islands force
+  Validation open; a visible-change edit opens its change panel; open/closed choices persist across
+  re-renders. All previous controls, warnings and data-testids remain.
+- Evidence (reference: a copy of the user's `turtle_on_leaf` project in a scratch workspace, served
+  by the source app; the user's Documents copy was not touched): before/after screenshots in
+  `artifacts/l4_app_v1/review_ux/` (git-ignored; private artwork). Review page at 1440x900:
+  2542 px tall before, 1480 px after; the artwork is in the first screen after the change.
+- Tests on the final code: `tests/test_l4_app.py` + `tests/test_l4_launcher.py` **9 PASS / 0 FAIL /
+  0 SKIP** (154 s), incl. the real-browser workflow (import, proposal, review, invalid edit, slot,
+  accept, rim, undo, verify, reload, printability, kit, checksums; no console errors).
+- Portable exe rebuilt with the new UI after the user closed the app; smoke test (Python off PATH): serves
+  the new review code, API 200, clean stop exit 0. Zip SHA-256
+  `80c339ffbb9e966a9af8d8706e780fad25aa1f19d049abe31befc4090bb2642d` (214 MB).
+- Not done:
+  packaged tests still pending from before; dark mode and widths below 760 px not visually checked.
+
+## 2026-10-27 Hebrew GUI user guide
+
+- `docs/user_guide/LayerForge_GUI_guide_he.pdf` (24 pages, A4, RTL Hebrew with isolated English UI
+  terms) from `docs/user_guide/LayerForge_GUI_guide_he.html`, printed with headless Edge. Screenshots in
+  `docs/user_guide/img/` are crops of the project-owned sailboat e2e run (new Review UI); no user artwork.
+  Covers launch/close/files, status cards, all four tabs, every edit tool and inspector action,
+  accept_artwork, validation checks, history/undo/verify, printer preset fields, Printability vs Print kit,
+  statuses, troubleshooting, glossary. Facts checked against the code (preset values, severities,
+  build-volume UNSUPPORTED, quantization INFO). Pages were rendered and reviewed for RTL/bidi.
+- 2026-10-27 rim for all layers (user request): the inspector's rim section has an "Apply to all N layers"
+  checkbox, checked by default; it sends the existing core edit `{"op": "rim", "sheet": "*"}` (one edit, one
+  undo step). Unchecked = this layer only, as before. UI only (`app.js`); core unchanged. Browser workflow
+  test extended (single layer -> undo -> all layers -> reload): `test_browser_workflow` + request-errors
+  2 PASS (114 s). Portable exe rebuilt with it (smoke test: ready in 0.5 s, serves the new app.js, API
+  200, clean stop exit 0); zip SHA-256 `141d9c9bf1cca199c878f35549e2c0930377478d7a34e17923ef9e8d3e22278a`.
+- Noted limitation found while writing: manually entered printer values are not kept after a page
+  reload; adding a persistent preset means placing a JSON file in `_internal\fixtures\print_processes`.
+- 2026-10-28 optional Bambu Studio multi-plate project (user request; D-V3-033). State: READY_FOR_USER_TEST.
+  New `core/bambu3mf.py`; `build_print_kit(..., bambu_printer=...)`, `stack-kit --bambu-printer PRESET`,
+  and a checkbox + printer list in the existing Print kit tab. One plate per sheet (plate 1 = back),
+  sheets translated only (back face on the bed, rim on top), placed clear of keep-out zones; one Generic
+  PLA slot per distinct color; no AMS mapping; settings flattened from the installed Bambu Studio system
+  presets (no Bambu data in the repo; no Bambu Studio -> no project, reported). STEP/STL unchanged
+  (checked by hash/STEP body). Each export is reopened and, when Bambu Studio is installed, loaded and
+  sliced by its CLI and compared plate by plate.
+  Evidence: sailboat kit (7 sheets, 6 colors, rim) sliced by Bambu Studio 02.08.02.61 for P1S, X1 Carbon,
+  P2S, H2S: 7 plates, positions/sizes within 0.01 mm, triangle counts equal, filament per plate = its color
+  slot, 0 filament changes. GUI opened by hand on the P1S project: 7 named plates, 6 colored slots, P1S /
+  0.20mm Standard / Generic PLA shown unmodified. A1 / A1 mini: a 225 mm sheet does not fit (reported).
+  Tests: `tests/test_bambu3mf.py` 12 PASS; L3 8 PASS; L4 4 PASS (browser ticks the option, kit card shows
+  "loaded and sliced by Bambu Studio"). Full suite before the exe rebuild: 152 PASS / 1 FAIL (packaged
+  browser test on the old exe, no new checkbox); after rebuilding, `tests/test_windows_build.py` 5 PASS.
+  Zip SHA-256 `5fd6720ed4c9b487ec08d1c8521de6d27635fe7c0e35930fd82bf0918a536887`. Physical: NOT VERIFIED.
+- 2026-10-28 exact sheet colors in the Bambu project (user request). Project filaments are virtual
+  slots carrying the reviewed HEX (`filament_colour` and, as Bambu 02.08 writes it, `filament_multi_colour`
+  + `filament_colour_type`); identical colors share a slot; no AMS slot is read, synced or mapped. The
+  Bambu Studio check now also re-saves the project and compares Bambu's own per-plate record
+  (`Metadata/plate_<n>.json`: objects + filament color) with the sheet: sailboat P1S/X1C/P2S/H2S, each of
+  7 plates = one sheet in its exact HEX. GUI (02.08.02.61): swatch pixels read from a screenshot equal
+  #3C281E #AAD7F5 #FAC832 #784628 #F5F5EB #1E468C; plates rendered in those colors. CAD unchanged.
+  Tests: bambu3mf 12 PASS, L3 + L4 12 PASS, windows build 5 PASS (exe rebuilt; zip SHA-256
+  `7454e8a634da5942a6c27d8fe6a9b7be42fa2376a1c36cc6ae7494cffb16154c`).
+- 2026-10-28 Print Kit UX (user request; D-V3-034). State: READY_FOR_USER_TEST. Kit tab only (`app.js`,
+  `app.css`, `workspace.py`, `server.py`, `launcher.py`); L0-L3 untouched. Latest kit: headline state
+  ("Print Kit Ready" / out of date / CAD problems / incomplete), one filled primary "Download Print Kit
+  (.zip)", Assembly Guide (+ Bambu .3mf, Open Kit Folder in the desktop app) as secondary; warnings and the
+  three status cards always visible; Files & Exports, Assembly & Layers, Validation & Printability,
+  Technical details (print_kit.json, Verify checksums, process values, folder) collapsed by default and
+  remembered per kit. Build form folds away while a kit matches the draft. Earlier kits listed
+  collapsed, each with its own actions. Delete kit: inline confirmation; `POST .../kits/<id>/delete`
+  deletes only `kits/<id>` (id pattern checked, links removed as links, never followed), refused while a
+  job runs; `print_kit.json` last, so a partial failure keeps the kit listed and retryable; record entry
+  dropped when the folder is gone. Open Kit Folder: `POST .../kits/<id>/open`, desktop sessions only.
+  Screenshots `artifacts/l4_app_v1/screens/08*.png` (collapsed, expanded, 390 px phone, delete confirm,
+  after delete, desktop with Open Kit Folder, dark mode). Full suite on the rebuilt exe: 154 PASS / 0 FAIL
+  (699 s). Zip SHA-256 `93e09ab18e539a6312193e2a7aab0f95237fa3c77453e001a6f1ed79d7d39de7`.
+- 2026-10-28 "+ New Print Kit" (user request): the kit creation form moved from the bottom section to a
+  "+ New Print Kit" button at the top right of the Print Kit tab; it opens the same form (same fields and
+  build action), stays folded when a kit exists and folds again after a build; shown open before the
+  first kit. Bottom section removed. Only `app.js`/`app.css` changed. L4 tests 5 PASS (browser: button
+  top right above the kit card, opens the form, second kit built); windows build 5 PASS; exe rebuilt,
+  zip SHA-256 `e606b3976b48e57ada27aab199fce444c1e5b248358b5f2fd63e1e073edf271f`.
+- 2026-10-28 couple illustration follow-up (user decisions 1-5; D-V3-035). State: IN PROGRESS, not yet
+  READY_FOR_USER_TEST. Implemented: bounded local cell refinement after an infeasible closure
+  (`reveal_planner.refine_cells`, `RevealPlanner.closure_with_refinement`, rounds 1.2 mm/0.3 mm2 then
+  0.8 mm/0.1 mm2, neighbor rings only if needed; feasible images take the original path); wider
+  refinements (+4 rings, whole artwork) as extra proposal candidates only when refinement was needed;
+  intake detail report (removed by cleanup / color not in palette) with original | default | planned
+  crops, overview map and preserve/remove/adjust decisions (removed pieces preserved by default, missing
+  colors keep the nearest color until decided); app proposal panel + `detail_decisions` API; pixel-exact
+  correction in `cad.mask_to_geometry` for one-pixel tails (only when the traced raster differs).
+  Couple (scratch copy, 150 mm, scale 2, default choices): blocked 28 cells -> refined 30, feasible;
+  candidates beam_area 16 sheets / 239 mm seams, +4 rings 12 / 142 mm, whole 13 / 96 mm, beam_colors
+  15 / 238 mm, all validation PASS 0 px mismatch. First CAD export of the 12-sheet candidate failed
+  (4 px, one-pixel tails) -> tracing correction -> re-export PASS (0 px, single solids, watertight).
+  Tests: new 8 PASS; L0/L1/L2 62 PASS; L3 + L-1 22 PASS; L4 not re-run after the last changes.
+  The final re-evaluation of both variants (defaults / all details preserved) was stopped by host
+  low-memory protection before finishing; print kits and FDM findings of the final code are not yet
+  measured. Next: re-run the evaluation one variant at a time when memory allows.
+- 2026-10-28 couple illustration follow-up, completed (supersedes "IN PROGRESS" above). State:
+  READY_FOR_USER_TEST. Re-run one variant at a time (scratch copy; the user's project untouched):
+  * default choices (eye whites preserved; lips/gold nearest color): READY_FOR_REVIEW; selected +4 rings,
+    12 sheets, 142 mm seams (13 split regions), validation PASS 0 px, CAD PASS (0 px, single solids,
+    watertight); alternatives 16/239 mm, 15/238 mm, whole artwork 13/96 mm. Kit CAD_VALID; FDM estimate
+    (generic 0.4 mm) 11 UNSUPPORTED in 5 places (2 eye whites, necklace chain, a hair-curl gap, finger
+    gap) + 98 RISK in ~46 places; physical NOT_VERIFIED.
+  * all details preserved (+#A62A27 lips, #DD7559 man's lips, #FAC855 gold): READY_FOR_REVIEW; selected
+    whole-artwork refinement, 16 sheets, 94 mm seams; alternatives 21/238, 18/142, 20/237; CAD PASS;
+    kit CAD_VALID; 29 UNSUPPORTED in 11 places (adds the man's mouth: 0.1-0.2 mm openings) + 119 RISK.
+  Tests: new 8; L0/L1/L2 62; L3 + L-1 22; L4 + refinement + Bambu 25; windows build 5: all PASS.
+  Exe rebuilt, zip SHA-256 `dc790ff52d04dd995be751278018277feb5ab80051062b897a58c01d24169042`.
+- 2026-10-28 recovery workflow: physical resize first, pixel upscaling secondary (D-V3-036, D-V3-037).
+  State: implemented and evaluated; final verification incomplete (see below). Not committed.
+  Physical size panel (proposal tab): analyse findings against larger sheets within the printer's usable
+  area -> smallest useful size -> preview (same pixels, 9 proportional checks, visible changes) ->
+  approve size (+ changes) -> retry in the same project (previous attempt archived) -> FDM re-measured.
+  Trial planning for search-limit failures. Upscale & Retry kept separate, only after a failed proposal,
+  retry only when the preview shows a visible change; memory model from a measured run.
+  Evaluation (scratch copies; the user's project untouched; generic 0.4 mm process):
+  * couple, P1S (236 mm usable): 150 -> 198 mm suggested; sheets 12 -> 11; UNSUPPORTED 11 -> 7 (predicted
+    0); RISK 98 -> 64; CAD PASS 0 px; proposal 364 s -> 172 s; peak 0.94 GB; 7 visible changes approved
+    (lips kept red as a new color, intake details 12 -> 5). Remaining 7 slits need >= 307 mm.
+  * sailboat 60 -> 72 mm: 6 sheets; RISK 4 -> 2 (predicted 0); no visible change; 38 s; 0.81 GB.
+  * octopus (held-out): fails at 100/150/200 mm and in the trial at 236 mm (24-sheet search limit):
+    resizing alone does not resolve it.
+  Tests run individually during the work: test_physical_resize 7 PASS, test_upscale_retry 6 PASS, 4 new
+  app tests PASS; before the resize work: L0-L2 + refinement 70, L3/L-1/planner 24, L4/launcher/Bambu 24
+  PASS. The final full-suite run and the exe rebuild were stopped by the host's low-memory protection:
+  dist\LayerForge was rebuilt (PyInstaller completed) but the zip was not re-created and the windows-build
+  tests were not run. Not restarted (needs the user's go-ahead).
+- 2026-10-29 recovery workflow, final verification (supersedes "verification incomplete" above).
+  State: READY_FOR_USER_TEST. Not committed.
+  Added: predicted vs measured clearly separated (labels "estimate, not a result" / "measured result",
+  warning when more UNSUPPORTED are measured than predicted); retry refuses any plan whose artwork differs
+  from the approved preview (nothing changes); remaining UNSUPPORTED listed with sheet, location and maps,
+  with "Review this candidate" then Locate into the editor; Hebrew guide chapter 11 (+ statuses,
+  troubleshooting, 3MF glossary fix), 9 screenshots of project-owned fixtures, PDF re-printed (30 pages).
+  Memory model recalibrated to the measured 1.03 GB at scale 2 (755 B/px; scale 4 ~3.8 GB, 8 ~15 GB).
+  Tests, run in sequential chunks with >= 6.8 GB free: new/refinement 21, L0/L1 40, L2 22,
+  L3/L-1/planner/Bambu 36, other modules 41, L4 app (incl. browser) + launcher 15, windows build 5 on the
+  rebuilt exe: 180 PASS / 0 FAIL / 0 SKIP. Rebuilt dist\LayerForge-0.1.0-win64.zip (2026-10-29 18:27,
+  SHA-256 c85830c0b089c3d212f9a556a46d97a5d362d9dde46fd1971aed2d23d1a73746; static files byte-identical
+  to src; resize/upscale modules bundled). Exe smoke: sailboat 60 -> 72 mm resize via the frozen app:
+  RISK 4 -> 2 (predicted 0), artwork matches approved preview, attempt archived, clean exit.
+- 2026-10-29 Delete Project (D-V3-038). State: READY_FOR_USER_TEST. Not committed.
+  "Delete…" in the project list and "Delete project…" on the project screen (all stages), confirmation
+  naming project + folder, permanent; deletes the whole project folder (source copy, proposal, attempts,
+  review, draft, printability, resize/upscale, kits); links never followed; project.json last (partial
+  failure stays listed, retry works); back to the import/list screen with a notice.
+  Tests (sequential chunks, >= 5.4 GB free): 61 + 44 + 55 + L4/launcher 16 + windows build 5 (packaged
+  exe incl. browser deletion from screen and list) = 181 PASS / 0 FAIL / 0 SKIP. Rebuilt
+  dist\LayerForge-0.1.0-win64.zip 2026-10-29 19:09, SHA-256
+  77975efd8c8d4c7ef1f3c19040e7822042318b6322ccd8c4db149dd296f8256d (static files byte-identical to src).

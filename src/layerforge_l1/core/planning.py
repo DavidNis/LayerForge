@@ -1,11 +1,16 @@
 """Stable entry point to the approved per-cell reveal planner.
 
-The algorithm lives unchanged in ``layerforge_l1.reveal_planner``.  This module
-only reproduces the call sequence of the accepted L-1 run
+The algorithm lives in ``layerforge_l1.reveal_planner``.  This module
+reproduces the call sequence of the accepted L-1 run
 (``scripts/run_turtle_reveal_planner_poc.py``, variant ``per_cell``):
 
     exact_index -> RevealPlanner -> closure -> beam_search
     -> eliminate_sheets -> materialize
+
+with one addition: when the closure is infeasible, the blocked cells (then
+their neighbors) are re-cut finer and the closure repeated
+(``RevealPlanner.closure_with_refinement``, bounded).  Physical rules are
+unchanged; a feasible first closure takes exactly the original path.
 
 and packages the result as a ``SheetStack``.  Other planners in the package
 (CP-SAT ``experimental_global_planner``, ``width_aware_planner``,
@@ -50,6 +55,9 @@ class PlanningConfig:
     planning_margin_pixels: int = 0
     frame_color: str | None = None
     thickness_mm: float = 1.6
+    # Only when the first closure is infeasible: widen the local refinement by this many
+    # neighbor rings (-1: whole artwork) to compare sheets and seams; 0 = minimal refinement.
+    refinement_extra_rings: int = 0
 
     def reveal_config(self, frame_label: int | None) -> RevealConfig:
         return RevealConfig(
@@ -106,7 +114,11 @@ def plan_stack(
         "palette": hexes,
         "cells": planner.cell_count,
     }
-    closure = planner.closure()
+    # Unchanged closure for images that plan; on failure, bounded local cell refinement.
+    planner, closure, refinement = planner.closure_with_refinement(config.refinement_extra_rings)
+    if refinement:
+        report["cell_refinement"] = refinement
+        report["cells_after_refinement"] = planner.cell_count
     report["closure_feasible"] = closure["feasible"]
     report["closure_round_robin_sheets"] = closure["round_robin_sheet_count"]
     report["closure_seconds"] = round(time.perf_counter() - started, 1)

@@ -36,3 +36,11 @@ artifacts/l2_review_v1/
 
 # L3 print-kit evaluation output (kits include private held-out/reference artwork).
 artifacts/l3_print_kit_v1/
+
+# L4 app workspace (user projects and uploaded artwork; private) and UI test screenshots.
+workspace/
+artifacts/l4_app_v1/
+
+# Portable Windows build output (scripts/build_windows.ps1).
+build/
+dist/

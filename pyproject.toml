@@ -21,6 +21,7 @@ dependencies = [
 [project.optional-dependencies]
 test = ["pytest==8.3.5"]
 global-planner = ["ortools==9.14.6206"]
+build = ["pyinstaller==6.16.0"]
 
 [project.scripts]
 layerforge-l1 = "layerforge_l1.cli:main"
@@ -30,6 +31,9 @@ package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+layerforge_l1 = ["app/static/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

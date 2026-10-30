@@ -114,6 +114,8 @@ def add_parsers(commands: Any) -> None:
     kit.add_argument("--stack", type=Path, required=True, help="saved stack or L2 review project")
     kit.add_argument("--output", type=Path, required=True, help="new, empty kit directory")
     kit.add_argument("--process", type=Path, default=None, help="printer/process JSON (default: generic assumption)")
+    kit.add_argument("--bambu-printer", default=None, metavar="PRESET",
+                     help='also write a Bambu Studio multi-plate project, e.g. "Bambu Lab P1S 0.4 nozzle"')
 
 
 def _write(path: Path, value: Any) -> None:
@@ -234,12 +236,18 @@ def _run(args: argparse.Namespace, progress: Callable[..., None]) -> int:
         from .printkit import PrintProcess, build_print_kit
 
         process = PrintProcess.from_json(args.process) if args.process else PrintProcess()
-        kit = build_print_kit(args.stack, args.output, process, progress)
+        kit = build_print_kit(args.stack, args.output, process, progress, bambu_printer=args.bambu_printer)
+        bambu = kit.get("bambu_3mf")
         print(json.dumps({"status": kit["status"], "cad_problems": kit["cad_problems"],
+                          **({"bambu_3mf": {"status": bambu["status"], "file": bambu.get("file"),
+                                            "validation": bambu.get("validation", {}).get("level"),
+                                            "problems": bambu.get("problems", [])}} if bambu else {}),
                           "printability_counts": kit["printability"]["counts"],
                           "findings": [f"{f['severity']}: {f['file']} {f['kind']} {f.get('width_mm', '')}"
                                        for f in kit["printability"]["features"] if f["severity"] != "INFO"]}, indent=2))
-        return 0 if kit["status"]["cad"] == "CAD_VALID" and kit["status"]["fdm_estimate"] != "UNSUPPORTED_FEATURES" else 1
+        bambu_ok = bambu is None or (bambu["status"] == "WRITTEN" and bambu["validation"]["level"] != "FAILED")
+        return 0 if (kit["status"]["cad"] == "CAD_VALID" and kit["status"]["fdm_estimate"] != "UNSUPPORTED_FEATURES"
+                     and bambu_ok) else 1
     raise StackError(f"unknown stack command {args.command}")
 
 

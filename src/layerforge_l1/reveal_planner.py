@@ -21,6 +21,7 @@ existing validator is reused unchanged to check the planner's output.
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -234,10 +235,69 @@ def _geodesic_reach(seed: np.ndarray, domain: np.ndarray, steps: int) -> np.ndar
     return reach
 
 
+def refine_cells(
+    native_cells: np.ndarray, cell_region: np.ndarray, targets: np.ndarray, tile: int, min_pixels: int
+) -> tuple[np.ndarray, np.ndarray]:
+    """Re-cut the cells in ``targets`` by a finer square tile grid.
+
+    Only the listed cells change; every other cell keeps its pixels.  Each new
+    piece keeps its parent's source region, and pieces smaller than
+    ``min_pixels`` merge into the largest adjacent piece of the *same parent*
+    (never into an unrefined neighbor, which would undo the refinement).
+    Returns the compacted cell map and per-cell source region.
+    """
+
+    cells = native_cells.copy()
+    regions = list(int(r) for r in cell_region)
+    boxes = ndimage.find_objects(native_cells + 1)
+    for parent in np.flatnonzero(targets):
+        box = boxes[parent]
+        if box is None:
+            continue
+        window = cells[box]
+        mask = native_cells[box] == parent
+        y0, x0 = box[0].start, box[1].start
+        pieces: list[int] = []
+        rows, cols = np.nonzero(mask)
+        for ty in np.unique((rows + y0) // tile):
+            for tx in np.unique((cols + x0) // tile):
+                ys = slice(max(ty * tile - y0, 0), max((ty + 1) * tile - y0, 0))
+                xs = slice(max(tx * tile - x0, 0), max((tx + 1) * tile - x0, 0))
+                components, count = ndimage.label(mask[ys, xs])
+                for index in range(1, count + 1):
+                    piece = int(parent) if not pieces else len(regions)
+                    if pieces:
+                        regions.append(regions[parent])
+                    window[ys, xs][components == index] = piece
+                    pieces.append(piece)
+        changed = True
+        while changed and len(pieces) > 1:
+            changed = False
+            for piece in list(pieces):
+                own = window == piece
+                if 0 < own.sum() < min_pixels:
+                    ring = ndimage.binary_dilation(own, np.ones((3, 3), bool)) & ~own
+                    near = [int(v) for v in np.unique(window[ring]) if int(v) in pieces and int(v) != piece]
+                    if near:
+                        window[own] = max(near, key=lambda v: int((window == v).sum()))
+                        pieces.remove(piece)
+                        changed = True
+    used = np.unique(cells)
+    remap = np.full(len(regions), -1, dtype=np.int32)
+    remap[used] = np.arange(len(used), dtype=np.int32)
+    return remap[cells], np.asarray([regions[int(v)] for v in used], dtype=np.int32)
+
+
+# Bounded local refinement after an infeasible closure: (tile mm, min cell mm2, neighbor rings).
+# Rings are added only when the blocked cells alone do not resolve.
+REFINEMENT_ROUNDS: tuple[tuple[float, float, int], ...] = ((1.2, 0.3, 0), (1.2, 0.3, 1), (0.8, 0.1, 1), (0.8, 0.1, 2))
+
+
 class RevealPlanner:
     """Front-to-back sheet planner over a fixed cell decomposition."""
 
-    def __init__(self, labels: np.ndarray, config: RevealConfig = RevealConfig()):
+    def __init__(self, labels: np.ndarray, config: RevealConfig = RevealConfig(),
+                 cells: tuple[np.ndarray, np.ndarray] | None = None):
         self.config = config
         self.labels = labels
         self.grid = physical_grid(config)
@@ -245,7 +305,12 @@ class RevealPlanner:
             self.grid, margin_pixels=config.planning_margin_pixels
         )
         _, self.perimeter = _outer_and_perimeter(self.grid)
-        native_cells, self.cell_color, self.cell_region = build_cells(labels, config)
+        if cells is None:
+            native_cells, self.cell_color, self.cell_region = build_cells(labels, config)
+        else:  # a refined decomposition (``refine_cells``); colors follow from the labels
+            native_cells, self.cell_region = cells
+            self.cell_color = np.zeros(int(native_cells.max()) + 1, dtype=np.int32)
+            self.cell_color[native_cells.ravel()] = labels.ravel()
         self.native_cells = native_cells
         self.cell_map = embed(native_cells, self.grid, -1)
         self.cell_count = len(self.cell_color)
@@ -370,6 +435,78 @@ class RevealPlanner:
             "obstruction_cells": np.flatnonzero(~covered).tolist(),
             "covered_cells": covered,
         }
+
+    def refined(self, targets: np.ndarray, tile_mm: float, min_cell_mm2: float) -> "RevealPlanner":
+        """A planner whose ``targets`` cells are cut finer; physics and every other cell unchanged."""
+
+        mm_per_pixel = (self.config.outer_sheet_mm * DEFAULT_CONFIG.analysis_pixels / DEFAULT_CONFIG.outer_pixels
+                        / self.native_cells.shape[1])
+        tile = max(2, int(round(tile_mm / mm_per_pixel)))
+        min_pixels = max(1, int(round(min_cell_mm2 / mm_per_pixel**2)))
+        cells = refine_cells(self.native_cells, self.cell_region, targets, tile, min_pixels)
+        return RevealPlanner(self.labels, self.config, cells)
+
+    def neighbor_cells(self, cells: np.ndarray, rings: int) -> np.ndarray:
+        """``cells`` plus the cells within ``rings`` adjacency steps."""
+
+        out = cells.copy()
+        for _ in range(rings):
+            mask = cv2.dilate(out[self.native_cells].astype(np.uint8), np.ones((3, 3), np.uint8)).astype(bool)
+            out[np.unique(self.native_cells[mask])] = True
+        return out
+
+    def closure_with_refinement(self, extra_rings: int = 0) -> tuple["RevealPlanner", dict[str, Any], list[dict[str, Any]]]:
+        """``closure``; if infeasible, re-cut only the blocked cells (then their neighbors) finer.
+
+        The physical rules (width footprint, perimeter anchoring, nub tolerance)
+        are not touched: refinement only lets one source region take more than
+        one depth where a coarse cell mixes a wide part that must lie in front of
+        a neighbor with a sub-width sliver that must lie behind it.  Rounds are
+        bounded (``REFINEMENT_ROUNDS``); a feasible first closure is returned
+        unchanged, so images that already plan keep their cells.
+
+        ``extra_rings`` (only used when refinement was needed) widens the refined
+        area around the originally blocked cells by that many neighbor rings
+        (-1: every cell) at the first level, to compare sheet count and seams of
+        a wider refinement; if that closure fails the minimal result is kept.
+        """
+
+        planner, closure, log = self, self.closure(), []
+        first_blocked = np.zeros(self.cell_count, dtype=bool)
+        first_blocked[closure["obstruction_cells"]] = True
+        for tile_mm, min_cell_mm2, rings in REFINEMENT_ROUNDS:
+            if closure["feasible"]:
+                break
+            started = time.perf_counter()
+            stuck = np.zeros(planner.cell_count, dtype=bool)
+            stuck[closure["obstruction_cells"]] = True
+            targets = planner.neighbor_cells(stuck, rings)
+            entry = {
+                "tile_mm": tile_mm, "min_cell_mm2": min_cell_mm2, "neighbor_rings": rings,
+                "blocked_cells_before": int(stuck.sum()), "blocked_pixels_before": int(stuck[planner.native_cells].sum()),
+                "cells_refined": int(targets.sum()), "pixels_refined": int(targets[planner.native_cells].sum()),
+            }
+            planner = planner.refined(targets, tile_mm, min_cell_mm2)
+            closure = planner.closure()
+            entry.update(cells_after=planner.cell_count, feasible_after=closure["feasible"],
+                         blocked_cells_after=len(closure["obstruction_cells"]),
+                         seconds=round(time.perf_counter() - started, 1))
+            log.append(entry)
+        if log and closure["feasible"] and extra_rings:
+            started = time.perf_counter()
+            tile_mm, min_cell_mm2, _ = REFINEMENT_ROUNDS[0]
+            targets = (np.ones(self.cell_count, dtype=bool) if extra_rings < 0
+                       else self.neighbor_cells(first_blocked, extra_rings))
+            wider = self.refined(targets, tile_mm, min_cell_mm2)
+            wider_closure = wider.closure()
+            log.append({"tile_mm": tile_mm, "min_cell_mm2": min_cell_mm2,
+                        "neighbor_rings": "all" if extra_rings < 0 else extra_rings, "widened": True,
+                        "cells_refined": int(targets.sum()), "pixels_refined": int(targets[self.native_cells].sum()),
+                        "cells_after": wider.cell_count, "feasible_after": wider_closure["feasible"],
+                        "used": wider_closure["feasible"], "seconds": round(time.perf_counter() - started, 1)})
+            if wider_closure["feasible"]:
+                planner, closure = wider, wider_closure
+        return planner, closure, log
 
     def beam_search(self) -> dict[str, Any]:
         """Shortest color sequence of maximal reveals, bounded beam."""

@@ -78,10 +78,16 @@ evidence: STATUS.md. Complete suite 127 PASS.
 
 ## L4: application user experience
 
-Status: `BLOCKED_BY_L-1`.
+Status: `READY_FOR_USER_TEST` (2026-10-26; started under user instruction after L3 approval).
+NOT APPROVED. **L-G10 physical print still PENDING**; the app shows the physical status as NOT
+VERIFIED everywhere. Complete suite 130 PASS (incl. 3 L4 end-to-end tests). Open item: the L0
+full-size reference regression remains NOT re-verified since 2026-10-25. Design: DECISIONS D-V3-030.
 
-- [ ] Decide UI and architecture based on validated L1-L3 pipeline; consider Python/FastAPI and React/Three.js.
-- [ ] End-to-end import, edit, visualize, save, and export.
+- [x] Decide UI and architecture based on validated L1-L3 pipeline; consider Python/FastAPI and React/Three.js. (Local web UI on the Python standard library + plain JavaScript; FastAPI/React/Three.js considered and not needed; the core is the only engine.)
+- [x] End-to-end import, edit, visualize, save, and export (`python -m layerforge_l1 app`; tested through the real server over HTTP and by driving the UI in headless Edge: import → L1 proposal → review → invalid edit reported → visible slot → accept artwork → optional rim, undo, re-apply → verify save/reload → page reload → FDM estimate → print kit → checksums).
+- [x] Portable Windows build: `dist\LayerForge\LayerForge.exe` (no Python needed), launcher with clean stop, port fallback and single instance (D-V3-031). Packaged tests only partly run on the final build: see STATUS.
+- [ ] Clean-machine test of the portable build.
+- [ ] Explicit user review and approval of L4.
 
 ## Future optional features
 

@@ -472,18 +472,51 @@ def _guide(stack: SheetStack, kit: dict[str, Any]) -> str:
                      + (f", width {f['width_mm']} mm" if f.get("width_mm") is not None else "")
                      + f": {f['note']}.")
     lines += ["", "Maps: `previews/printability/` (orange = RISK, red = UNSUPPORTED).", ""]
+    bambu = kit.get("bambu_3mf")
+    if bambu:
+        lines += ["## Bambu Studio project (optional)", ""]
+        if bambu["status"] == "WRITTEN":
+            check = bambu["bambu_studio_check"]
+            lines += [
+                f"`{bambu['file']}` for {bambu['printer']}: one plate per sheet, plate 1 = order 00 (back). Each sheet "
+                "lies flat as exported (back face on the bed), placed clear of the printer's keep-out zones.",
+                "",
+                f"- Validation: **{bambu['validation']['level']}**"
+                + (f" ({check['tool']}: loaded and sliced every plate)" if check["status"] == "PASS" else
+                   f" (Bambu Studio check: {check['status']})") + ".",
+                f"- Process preset `{bambu['process_preset']}`; filaments are Generic PLA slots carrying the sheet colors "
+                "(choose your real filament in Bambu Studio; the color stays).",
+                "- No AMS is assumed: every plate uses one filament. Without an AMS, load the spool shown for the plate "
+                "before printing it.",
+                "",
+                "| Plate | Sheet | Filament slot | Color |",
+                "|---|---|---|---|",
+            ]
+            lines += [f"| {p['plate']} | {p['plate_name']} | {p['filament_slot']} | {p['color_hex']} |"
+                      for p in bambu["plates"]]
+        else:
+            lines += ["Not written: " + "; ".join(bambu.get("problems", []))]
+        lines.append("")
     return "\n".join(lines)
 
 
 def build_print_kit(source: Path, output: Path, process: PrintProcess | None = None,
-                    progress: Callable[..., None] | None = None) -> dict[str, Any]:
-    """Validate, export, reopen and assess a saved stack; write the kit to ``output``."""
+                    progress: Callable[..., None] | None = None, bambu_printer: str | None = None) -> dict[str, Any]:
+    """Validate, export, reopen and assess a saved stack; write the kit to ``output``.
+
+    ``bambu_printer`` (a ``bambu3mf.BAMBU_PRINTERS`` preset) also writes the optional Bambu
+    Studio multi-plate project from the reopened STL files; the STEP/STL files are unchanged."""
 
     from .cad import export_stack, revalidate_cad
     from .preview import generate_previews
 
     process = process or PrintProcess()
     source, output = Path(source), Path(output)
+    if bambu_printer:
+        from .bambu3mf import BAMBU_PRINTERS
+
+        if bambu_printer not in BAMBU_PRINTERS:
+            raise PrintKitError(f"unsupported Bambu printer {bambu_printer!r}; choose one of {sorted(BAMBU_PRINTERS)}")
     stack = load_stack(source)
     validation = validate_stack(stack)
     if validation["status"] != "PASS":
@@ -534,6 +567,17 @@ def build_print_kit(source: Path, output: Path, process: PrintProcess | None = N
         entry["sheets"].append(Path(row["file_stl"]).stem)
         entry["estimated_g"] = round(entry["estimated_g"] + row["estimated_filament_g"], 2)
     (output / "print_kit.json").write_text(json.dumps(kit, indent=2) + "\n", encoding="utf-8")
+    if bambu_printer:
+        from .bambu3mf import write_bambu_project
+
+        if progress:
+            progress("BAMBU_3MF_STARTED", printer=bambu_printer)
+        kit["bambu_3mf"] = write_bambu_project(output, bambu_printer)
+        if kit["bambu_3mf"]["status"] == "WRITTEN":
+            kit["not_included"].pop("3mf")
+        else:
+            kit["not_included"]["3mf"] = "Bambu Studio project not written: " + "; ".join(kit["bambu_3mf"]["problems"])
+        (output / "print_kit.json").write_text(json.dumps(kit, indent=2) + "\n", encoding="utf-8")
     (output / "PRINT_AND_STACK_GUIDE.md").write_text(_guide(stack, kit), encoding="utf-8")
     write_checksums(output)
     return kit
