@@ -87,6 +87,7 @@ full-size reference regression remains NOT re-verified since 2026-10-25. Design:
 - [x] End-to-end import, edit, visualize, save, and export (`python -m layerforge_l1 app`; tested through the real server over HTTP and by driving the UI in headless Edge: import → L1 proposal → review → invalid edit reported → visible slot → accept artwork → optional rim, undo, re-apply → verify save/reload → page reload → FDM estimate → print kit → checksums).
 - [x] Portable Windows build: `dist\LayerForge\LayerForge.exe` (no Python needed), launcher with clean stop, port fallback and single instance (D-V3-031). Packaged tests only partly run on the final build: see STATUS.
 - [ ] Clean-machine test of the portable build.
+- [x] Region-based artwork recoloring with explicit re-planning (2026-10-30, D-V3-039); READY_FOR_USER_TEST, not approved.
 - [ ] Explicit user review and approval of L4.
 
 ## Future optional features

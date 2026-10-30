@@ -34,7 +34,7 @@ import numpy as np
 from PIL import Image
 from scipy import ndimage
 
-from .intake import IntakeConfig, load_image, prepare_target
+from .intake import IntakeConfig, load_image, prepare_target, use_edited_target
 from .model import StackError, StackGrid
 from .upscale import _crop, _save, _write, carry_decisions, compare_targets, recheck_previous_details
 
@@ -268,8 +268,13 @@ def dimensions(grid: StackGrid, measurements: dict[str, Any], thickness_mm: floa
 
 def preview_resize(image_path: Path, previous_dir: Path, output: Path, new_mm: float, analysis: dict[str, Any],
                    intake: IntakeConfig = IntakeConfig(), previous_decisions: dict[str, Any] | None = None,
-                   progress: Callable[..., None] | None = None) -> dict[str, Any]:
-    """Intake of the previous proposal's image on a ``new_mm`` sheet (same pixels); no planning."""
+                   progress: Callable[..., None] | None = None, edited: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Intake of the previous proposal's image on a ``new_mm`` sheet (same pixels); no planning.
+
+    ``edited`` ({"target_rgb", "frame_color", "region_recolors", "pending"}): the artwork carries user
+    region recolors, so it is kept pixel for pixel instead of re-deriving it from the source at the new
+    size; intake still runs for the grid, placement and frame, which the boundary checks compare.
+    """
 
     progress = progress or (lambda *a, **k: None)
     started = time.perf_counter()
@@ -284,14 +289,19 @@ def preview_resize(image_path: Path, previous_dir: Path, output: Path, new_mm: f
     carried, carry_report = carry_decisions(previous.get("intake_details", []), previous_decisions, first["details"], 1)
     prepared = prepare_target(rgb, opaque, new_grid, intake, carried) if carried else first
     del first
-    m = prepared["measurements"]
     old_target = np.asarray(Image.open(Path(previous_dir) / "intake" / "target.png").convert("RGB"))
+    intake_mask = prepared["artwork_mask"]
+    if edited is not None:
+        prepared = use_edited_target(prepared, edited["target_rgb"], intake, edited.get("frame_color"))
+    m = prepared["measurements"]
     frame = previous.get("frame_color")
     old_inside = ((old_target != np.array([int(frame[i:i + 2], 16) for i in (1, 3, 5)], np.uint8)).any(-1)
                   if frame else np.ones(old_target.shape[:2], bool))
-    boundaries = boundary_check(old_grid, previous["intake"], old_inside, new_grid, m, prepared["artwork_mask"],
+    boundaries = boundary_check(old_grid, previous["intake"], old_inside, new_grid, m, intake_mask,
                                 tuple(source["size_px"]), analysis["limit"]["max_sheet_mm"])
     new_target = prepared["target_rgb"]
+    if edited is not None:  # visible changes are measured against the edited artwork the user sees now
+        old_target = np.array(edited["target_rgb"], np.uint8)
     output = Path(output)
     changes, listed, summary = compare_targets(old_target, new_target, prepared["artwork_mask"], 1, m["artwork_mm_per_pixel"])
     for number, change in enumerate(changes, start=1):
@@ -303,7 +313,7 @@ def preview_resize(image_path: Path, previous_dir: Path, output: Path, new_mm: f
     _save(new_target, output / "target.png")
     _save(np.concatenate([old_target, np.full((old_target.shape[0], 8, 3), 255, np.uint8), highlight], axis=1),
           output / "comparison.png")
-    details = prepared["details"]
+    details = prepared["details"] if edited is None else []  # intake is not re-applied to the edited artwork
     for detail in details:
         detail["image"] = f"details/{detail['id']}.png"
         _save(prepared["detail_crops"][detail["id"]], output / detail["image"])
@@ -325,6 +335,11 @@ def preview_resize(image_path: Path, previous_dir: Path, output: Path, new_mm: f
                             "structural width and intake filters are in millimetres) and re-measures",
         "seconds": round(time.perf_counter() - started, 1),
     }
+    if edited is not None:
+        result["artwork_edits"] = {
+            "region_recolors": edited["region_recolors"], "pending": edited["pending"],
+            "note": "The edited artwork is kept pixel for pixel (same pixel grid); intake is not re-run on it, so "
+                    "details a larger sheet could keep from the source are not re-detected."}
     _write(output / "preview.json", result)
     progress("RESIZE_PREVIEW_DONE", status=result["status"], changes=len(changes))
     return result
@@ -332,8 +347,10 @@ def preview_resize(image_path: Path, previous_dir: Path, output: Path, new_mm: f
 
 # -- trial planning (failures that widths cannot predict) -------------------------------------------
 def trial_plan(image_path: Path, previous: dict[str, Any], sheet_mm: float, intake: IntakeConfig,
-               decisions: dict[str, Any] | None) -> dict[str, Any]:
-    """Plan once (first beam score, no CAD) on a ``sheet_mm`` sheet; the planner and validators are unchanged."""
+               decisions: dict[str, Any] | None, edited: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Plan once (first beam score, no CAD) on a ``sheet_mm`` sheet; the planner and validators are unchanged.
+
+    ``edited`` (as in ``preview_resize``) plans the user-edited artwork instead of the source's intake."""
 
     from dataclasses import replace
 
@@ -345,6 +362,8 @@ def trial_plan(image_path: Path, previous: dict[str, Any], sheet_mm: float, inta
     planning = replace(PlanningConfig(**settings), outer_sheet_mm=float(sheet_mm), beam_score=previous.get("beam_scores", ["area"])[0])
     rgb, opaque, _ = load_image(image_path)
     prepared = prepare_target(rgb, opaque, StackGrid.for_planner(planning.outer_sheet_mm, planning.scale), intake, decisions)
+    if edited is not None:
+        prepared = use_edited_target(prepared, edited["target_rgb"], intake, edited.get("frame_color"))
     planning = replace(planning, frame_color=prepared["frame_color"] if prepared["has_frame"] else None)
     row: dict[str, Any] = {"sheet_mm": float(sheet_mm), "beam_score": planning.beam_score}
     try:

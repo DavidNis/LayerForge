@@ -24,7 +24,7 @@ from typing import Any, Callable
 import numpy as np
 from PIL import Image
 
-from .intake import IntakeConfig, load_image, prepare_target
+from .intake import IntakeConfig, load_image, prepare_target, use_edited_target
 from .model import StackGrid, save_stack
 from .planning import PlanningConfig, PlanningError, plan_stack
 from .validation import validate_stack
@@ -33,6 +33,7 @@ PROPOSAL_SCHEMA = "layerforge.l1_proposal"
 PROPOSAL_VERSION = "1.0.0"
 READY = "PROPOSAL_READY_FOR_REVIEW"
 NEEDS_DECISION = "NEEDS_USER_DECISION"
+NOT_PLANNED = "ARTWORK_READY_NOT_PLANNED"  # intake only (``ProposalConfig.plan=False``): no sheets yet
 
 
 @dataclass(frozen=True)
@@ -45,6 +46,8 @@ class ProposalConfig:
     # neighbor rings, -1 = whole artwork) with the first beam score, as extra candidates, so
     # sheet count and seams can be compared; images that plan without refinement skip this.
     refinement_alternatives: tuple[int, ...] = (4, -1)
+    # False: stop after intake (status NOT_PLANNED) so the artwork can be reviewed before planning.
+    plan: bool = True
 
 
 def _flag(code: str, severity: str, message: str, **evidence: Any) -> dict[str, Any]:
@@ -123,11 +126,14 @@ def propose(
     config: ProposalConfig = ProposalConfig(),
     progress: Callable[..., None] | None = None,
     detail_decisions: dict[str, Any] | None = None,
+    artwork: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Propose a validated sheet stack for ``image_path`` and write the review package.
 
     ``detail_decisions`` (detail id -> {"action": "preserve" | "remove" | "adjust", "color"})
     resolve the details intake would otherwise recolor or erase; see ``intake.apply_detail_decisions``.
+    ``artwork`` ({"target_rgb": edited target, "provenance": {...}}) plans a user-edited version of
+    this intake's target instead (``core/artwork.py`` region recolors); the planner is unchanged.
     """
 
     progress = progress or (lambda *a, **k: None)
@@ -136,6 +142,9 @@ def propose(
     rgb, opaque, source = load_image(image_path)
     grid = StackGrid.for_planner(config.planning.outer_sheet_mm, config.planning.scale)
     prepared = prepare_target(rgb, opaque, grid, intake, detail_decisions)
+    if artwork is not None:
+        prepared = use_edited_target(prepared, artwork["target_rgb"], intake, artwork.get("frame_color"))
+        _save_image(prepared["intake_target_rgb"], output / "intake" / "target_before_artwork_edits.png")
     m = prepared["measurements"]
     progress("L1_INTAKE_DONE", palette=m["palette_size"], details=len(prepared["details"]),
              seconds=round(time.perf_counter() - started, 1))
@@ -159,12 +168,18 @@ def propose(
             details=len(details), using_default_action=len(undecided),
             recolored=sum(d["kind"] == "color_not_in_palette" for d in details),
             removed_by_cleanup=sum(d["kind"] == "removed_by_cleanup" for d in details)))
+    if artwork is not None:
+        flags.append(_flag(
+            "ARTWORK_EDITED", "INFO",
+            "Planned from the flat-color artwork as you edited it in LayerForge (region recolors). The source "
+            "image is unchanged; the sheets are proposed automatically for the edited artwork.",
+            **artwork.get("provenance", {})))
     frame = prepared["frame_color"] if prepared["has_frame"] else None
     planning = replace(config.planning, frame_color=frame)
 
     candidates = []
     stacks = {}
-    runs = [(f"beam_{score}", score, 0) for score in config.beam_scores]
+    runs = [(f"beam_{score}", score, 0) for score in config.beam_scores] if config.plan else []
     index = 0
     while index < len(runs):
         name, score, extra = runs[index]
@@ -240,7 +255,7 @@ def propose(
             "COLOR_REGIONS_SPLIT_ACROSS_SHEETS", "INFO",
             "Some single-color source regions are printed on more than one sheet (seams).",
             regions=selected["source_regions_split_across_sheets"]))
-    if not valid:
+    if not valid and config.plan:
         flags.append(_flag(
             "NO_VALID_CANDIDATE", "BLOCKER",
             "No candidate produced a valid stack; the artwork needs a user decision (e.g. widen or remove the "
@@ -259,6 +274,7 @@ def propose(
         "intake": m,
         "intake_details": details,
         "detail_decisions": detail_decisions or {},
+        "artwork_edits": artwork.get("provenance") if artwork is not None else None,
         "palette": [c["hex"] for c in m["colors"]],
         "frame_color": frame,
         "candidates": candidates,
@@ -297,6 +313,8 @@ def propose(
 
             generate_previews(stack, output / "selected" / "previews")
     result["status"] = READY if selected and not any(f["severity"] == "BLOCKER" for f in flags) else NEEDS_DECISION
+    if not config.plan:
+        result["status"] = NOT_PLANNED
     result["seconds"] = round(time.perf_counter() - started, 1)
     _write(output / "proposal.json", result)
     progress("L1_PROPOSAL_DONE", status=result["status"], selected=result["selected"], seconds=result["seconds"])

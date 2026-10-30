@@ -120,6 +120,15 @@ def test_packaged_browser_workflow(exe_app):
     l4.test_browser_workflow(exe_app)
 
 
+def test_packaged_artwork_recolor_browser(exe_app):
+    """Artwork colors in the frozen app: select, preview, apply, eyedropper, undo, verify, reload, Try Again."""
+
+    import test_artwork_recolor as recolor
+
+    client, workspace = exe_app
+    recolor.test_browser_artwork_panel((client, workspace, None))
+
+
 def _launch(args: list[str], local_appdata: Path, cwd: Path) -> subprocess.CompletedProcess:
     return subprocess.run([str(EXE), "--headless", *args], input="", capture_output=True, text=True, timeout=180,
                           env=_clean_env(local_appdata), cwd=str(cwd))

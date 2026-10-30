@@ -37,7 +37,15 @@ const ui = {
   resizeApproved: {},  // resize preview id -> {size, changes} approvals
   confirmProject: null, // project name whose inline delete confirmation is shown
   projectNotice: null,  // result of the last project deletion (shown on the project list)
+  planLater: false,     // import: stop after intake so artwork colors can be edited before planning
+  art: freshArt(),      // artwork recolor panel (flat-color target, not a sheet)
 };
+
+// Artwork recolor: one selected region, a chosen color and the server's preview of the change.
+function freshArt() {
+  return { mode: "select", box: null, drag: null, at: null, selection: null, preview: null, color: null, source: null,
+           sampled: null, view: "selection", verifying: false };
+}
 
 const TABS = [
   ["proposal", "Import & proposal"],
@@ -187,6 +195,7 @@ function afterJob(job) {
   if (job.kind === "resize_preview" || job.kind === "resize_search") setTab("proposal");
   if (job.kind === "resize_retry") { setTab("proposal"); ui.resizeApproved = {}; ui.resizeSize = null; }
   if (job.kind === "start_review") setTab("review");
+  if (job.kind === "artwork_replan") { setTab("proposal"); ui.art = freshArt(); }
   if (job.kind === "kit") { setTab("kit"); ui.kitBuildOpen = false; }
   if (job.kind === "printability") setTab("printability");
 }
@@ -201,6 +210,7 @@ function jobLabel(job) {
     resize_retry: "Resize & retry (L1 proposal at the new size, then the FDM estimate)",
     upscale_retry: "Upscale & Retry (L1 proposal at the finer resolution)",
     start_review: "Starting the review",
+    artwork_replan: "Try Again: planning sheets from the edited artwork (L1 proposal, validation, CAD check; previous attempt kept)",
     edit: "Applying the edit",
     undo: "Undo / revert (replaying the edit log)",
     verify: "Verifying save/reload (replaying the edit log)",
@@ -225,6 +235,7 @@ async function route() {
     ui.marker = null;
     ui.sheet = null;
     ui.job = null;
+    ui.art = freshArt();
     try {
       await loadState();
     } catch (err) {
@@ -278,6 +289,7 @@ function render() {
     bindCanvas();
     drawOverlay();
   }
+  bindArtwork();
 }
 
 function tabEnabled(id) {
@@ -353,6 +365,9 @@ function statusStrip() {
   } else {
     geo = ["bad", "Invalid draft", `${draft.validation.failures.length} validation failure(s); not exportable until fixed.`];
   }
+  if (s.artwork?.differs_from_planned) {
+    geo = ["warn", "Artwork edited — sheets not re-planned", `The sheets are validated against the previous artwork only (${s.artwork.edits.length} artwork edit(s) since). Plan from the edited artwork or undo the artwork edits; export is blocked until then.`];
+  }
   let fdm = ["neutral", "Not estimated", "Run the printability estimate or build a kit."];
   const est = kit && !kit.stale ? { status: kit.printability.status, counts: kit.printability.counts, from: `kit ${kit.id}` }
     : s.printability && !s.printability.stale ? { status: s.printability.status, counts: s.printability.counts, from: "draft estimate" } : null;
@@ -400,7 +415,8 @@ function importView() {
         <label class="field"><span>Max colors</span><input id="f-colors" type="number" value="12" min="2" max="32"></label>
       </div>
       <p class="small muted">The artwork occupies the sheet minus a 12.5 mm shared perimeter. Scale 2 is the default; scale 4 can take many minutes and much memory.</p>
-      <div class="row"><button class="primary" data-action="create" ${ui.upload && !busy() ? "" : "disabled"}>Import and propose layers</button></div>
+      <label class="check small"><input type="checkbox" id="f-plan-later" data-testid="plan-later" ${ui.planLater ? "checked" : ""}> Edit artwork colors before planning (prepare the flat-color artwork only; plan when you choose)</label>
+      <div class="row"><button class="primary" data-action="create" ${ui.upload && !busy() ? "" : "disabled"}>${ui.planLater ? "Import and prepare artwork" : "Import and propose layers"}</button></div>
     </div>
     <div class="panel stack">
       <h2>Projects</h2>
@@ -443,6 +459,7 @@ async function createProject() {
     thickness_mm: $("#f-thick").value,
     max_colors: $("#f-colors").value,
   });
+  if (ui.planLater) params.set("plan", "0");
   if ($("#f-name").value.trim()) params.set("name", $("#f-name").value.trim());
   ui.error = null;
   try {
@@ -469,6 +486,7 @@ function proposalView() {
     </div>`;
   }
   const ready = p.status === "PROPOSAL_READY_FOR_REVIEW";
+  const notPlanned = p.status === "ARTWORK_READY_NOT_PLANNED";
   const reviewing = record.candidate;
   const flags = (p.flags || []).map((f) => `<li>${badge(f.severity === "BLOCKER" ? "bad" : f.severity === "WARN" ? "warn" : "neutral", f.severity)} <strong>${esc(f.code)}</strong> — ${esc(f.message)}</li>`).join("");
   const rows = p.candidates.map((c) => `
@@ -487,19 +505,22 @@ function proposalView() {
   const obstruction = p.candidates.filter((c) => c.obstruction_url);
   return `<div class="panel stack">
       <div class="spread">
-        <h2>L1 proposal ${badge(ready ? "ok" : "warn", ready ? "Ready for review" : "Needs your decision")}</h2>
-        <span class="muted small">${fmt(p.seconds, 1)} s · automatic proposal (no manual layer plan)</span>
+        <h2>L1 proposal ${badge(ready ? "ok" : notPlanned ? "neutral" : "warn", ready ? "Ready for review" : notPlanned ? "Artwork prepared · not planned yet" : "Needs your decision")}</h2>
+        <span class="muted small">${fmt(p.seconds, 1)} s · automatic proposal (no manual layer plan)${p.artwork_edits ? ` · planned from artwork you edited (${p.artwork_edits.region_recolors} region recolor${p.artwork_edits.region_recolors === 1 ? "" : "s"})` : ""}</span>
       </div>
-      ${ready ? "" : `<div class="banner warn">No candidate passed every check. Nothing was edited automatically. ${obstruction.length ? "The obstruction map shows where the planner cannot support the artwork; widen or remove those features in the image and import it again." : "See the flags below."}${ui.state.upscale?.available ? " You can also try <strong>Upscale &amp; Retry</strong> below." : ""}</div>`}
+      ${notPlanned ? `<div class="banner info">Intake prepared the flat-color artwork; no sheets were planned. Review and recolor regions in <strong>Artwork colors</strong> below, then choose <strong>${ui.state.artwork?.edits?.length ? "Try Again" : "Plan sheets from this artwork"}</strong>.</div>` : ""}
+      ${p.artwork_check ? artworkCheck(p.artwork_check) : ""}
+      ${ready || notPlanned ? "" : `<div class="banner warn">No candidate passed every check. Nothing was edited automatically. ${obstruction.length ? "The obstruction map shows where the planner cannot support the artwork; widen or remove those features in the image and import it again." : "See the flags below."}${ui.state.upscale?.available ? " You can also try <strong>Upscale &amp; Retry</strong> below." : ""}</div>`}
       ${ui.state.upscale && ui.state.upscale.scale !== ui.state.upscale.import_scale ? `<p class="small muted" data-testid="processing-scale">Processing resolution: scale ${ui.state.upscale.scale} (imported at scale ${ui.state.upscale.import_scale}; raised by Upscale &amp; Retry). Physical size unchanged.</p>` : ""}
       <div class="row"><h4 style="margin:0">Palette</h4>${(p.palette || []).map((h) => swatch(h, true)).join("")}${p.frame_color ? `<span class="small muted">frame ${esc(p.frame_color)}</span>` : ""}</div>
-      <div class="table-wrap"><table>
+      ${rows ? `<div class="table-wrap"><table>
         <thead><tr><th>Candidate</th><th>Status</th><th>Sheets</th><th>Colors front → back</th><th>Split regions (seams)</th><th>Mismatch px</th><th>Time s</th><th></th></tr></thead>
-        <tbody>${rows}</tbody></table></div>
+        <tbody>${rows}</tbody></table></div>` : ""}
       ${reviewing ? `<p class="small">Reviewing <strong>${esc(reviewing)}</strong>. <a href="#/${encodeURIComponent(ui.name)}/review" data-action="tab" data-tab="review">Open the editor →</a></p>` : ""}
       ${flags ? `<div><h4>Flags to review</h4><ul class="small">${flags}</ul></div>` : ""}
       ${p.cad ? `<p class="small muted">Selected candidate CAD check: reopened STL ${p.cad.revalidation_pass ? "PASS" : "FAIL"}, stack mismatch ${fmt(p.cad.stack_mismatch_px)} px, STEP single solids ${p.cad.all_step_valid_single_solid ? "yes" : "no"}, watertight STL ${p.cad.all_stl_watertight_single_component ? "yes" : "no"}.</p>` : ""}
     </div>
+    ${ui.state.draft ? `<p class="small muted panel tight">Artwork colors are edited in <a href="#/${encodeURIComponent(ui.name)}/review" data-action="tab" data-tab="review">Review &amp; edit</a> while a review exists.</p>` : artworkPanel()}
     ${resizePanel()}
     ${upscalePanel()}
     ${detailsPanel(p, reviewing)}
@@ -632,7 +653,8 @@ function resizePreview(v, a) {
       ${pr.improved.length || pr.cleared.length ? `<details data-section="resize-improve" ${openAttr("resize-improve")}><summary>Improve (${pr.cleared.length + pr.improved.length})</summary><ul class="small">${list([...pr.improved, ...pr.cleared])}</ul></details>` : ""}
       ${pr.remaining.length ? `<details data-section="resize-remain" ${openAttr("resize-remain", true)}><summary>Remain (${pr.remaining.length})</summary><ul class="small">${list(pr.remaining)}</ul></details>` : ""}</div>
     <div><h4>Artwork fidelity ${badge(changes.length ? "warn" : "ok", `${changes.length} visible change${changes.length === 1 ? "" : "s"}`)}</h4>
-      <p class="small muted">Same pixels and colors; the intake filters work in millimetres, so a larger sheet can keep details a smaller one merged. ${(v.details || []).length} intake detail(s) at this size (removed pieces such as eye highlights are kept by default).</p>
+      ${v.artwork_edits ? `<div class="banner info small" data-testid="resize-keeps-artwork">Your ${v.artwork_edits.region_recolors} region recolor${v.artwork_edits.region_recolors === 1 ? "" : "s"}${v.artwork_edits.pending ? " (not planned yet)" : ""} ${v.artwork_edits.region_recolors === 1 ? "is" : "are"} kept: the edited artwork is planned at the new size pixel for pixel, and its edit history moves with the new proposal. ${esc(v.artwork_edits.note)}</div>`
+        : `<p class="small muted">Same pixels and colors; the intake filters work in millimetres, so a larger sheet can keep details a smaller one merged. ${(v.details || []).length} intake detail(s) at this size (removed pieces such as eye highlights are kept by default).</p>`}
       ${v.images?.comparison ? `<figure><img class="img" style="max-width:720px" src="${esc(v.images.comparison)}" alt="current target | new target"><figcaption>Current target | target at the new size (changes outlined)</figcaption></figure>` : ""}
       ${changeRows ? `<div class="table-wrap"><table><tbody>${changeRows}</tbody></table></div>` : ""}</div>
     ${ok ? `${review ? '<div class="banner warn">A review exists: it is archived with this attempt and a new proposal is planned at the new size; review edits are not carried over.</div>' : ""}
@@ -648,6 +670,10 @@ function resizePreview(v, a) {
 function upscalePanel() {
   const u = ui.state.upscale;
   if (!u?.available) return "";
+  if (u.blocked_by_artwork) {
+    return `<section class="panel stack" data-testid="upscale-panel"><h3>Upscale &amp; Retry <span class="small muted">(processing resolution, not physical size)</span></h3>
+      <div class="banner info small" data-testid="upscale-blocked">${esc(u.blocked_by_artwork)}</div></section>`;
+  }
   const option = u.options.find((o) => o.factor === ui.upscaleFactor) || u.options[0];
   const preview = u.previews?.[String(option.factor)];
   const radios = u.options.map((o) => `<label class="check" title="${esc(o.reason || "")}">
@@ -710,7 +736,7 @@ function attemptsPanel() {
       <td><strong>${esc(a.id)}</strong><br><span class="small muted">${esc(a.archived_utc)}</span></td>
       <td>scale ${a.scale}<br>${badge(a.status === "PROPOSAL_READY_FOR_REVIEW" ? "neutral" : "bad", a.status)} ${(a.blockers || []).map((b) => badge("neutral", b)).join(" ")}</td>
       <td class="small">${a.candidates.map((c) => `${esc(c.name)}: ${esc(c.status)}${c.reason ? ` — ${esc(c.reason)}` : ""}`).join("<br>")}</td>
-      <td class="small">${a.sheet_mm ? `${fmt(a.sheet_mm, 1)} mm sheet · ` : ""}replaced by ${a.replaced_by.kind === "physical_resize" ? `resize to ${fmt(a.replaced_by.sheet_mm, 1)} mm` : `${a.replaced_by.upscale_factor}× processing (scale ${a.replaced_by.scale})`}: ${esc(a.replaced_by.status)}; ${a.replaced_by.approved_visible_changes} visible changes approved</td>
+      <td class="small">${a.sheet_mm ? `${fmt(a.sheet_mm, 1)} mm sheet · ` : ""}replaced by ${a.replaced_by.kind === "physical_resize" ? `resize to ${fmt(a.replaced_by.sheet_mm, 1)} mm` : a.replaced_by.kind === "artwork_edit" ? `planning from the edited artwork (${a.replaced_by.region_recolors} region recolor${a.replaced_by.region_recolors === 1 ? "" : "s"})` : `${a.replaced_by.upscale_factor}× processing (scale ${a.replaced_by.scale})`}: ${esc(a.replaced_by.status)}; ${a.replaced_by.approved_visible_changes} visible changes approved</td>
       <td class="small"><a href="${esc(a.images.target)}" target="_blank" rel="noopener">target</a>${a.images.obstruction.map((u) => ` · <a href="${esc(u)}" target="_blank" rel="noopener">obstruction map</a>`).join("")} · ${a.images.comparison ? `<a href="${esc(a.images.comparison)}" target="_blank" rel="noopener">preview comparison</a>` : ""}</td></tr>`).join("");
   return `<details class="panel section" data-section="attempts" data-testid="attempts" ${openAttr("attempts")}>
     <summary><h3>Previous attempts ${badge("neutral", String(attempts.length))}</h3><span class="small muted">archived proposals with their diagnostics and settings</span></summary>
@@ -758,10 +784,287 @@ function detailsPanel(p, reviewing) {
       ${p.images?.details_overview ? `<details data-section="intake-details-overview" ${openAttr("intake-details-overview")}><summary>Where they are (numbered)</summary><img class="img" style="max-width:640px" src="${esc(p.images.details_overview)}" alt="details overview"></details>` : ""}
       <div class="table-wrap"><table><thead><tr><th>#</th><th>Original | default | planned</th><th>Detail</th><th>Choice</th></tr></thead><tbody>${rows}</tbody></table></div>
       ${reviewing ? '<p class="small muted">A review has started; the proposal (and these choices) can no longer be re-run for this project.</p>'
+        : p.intake_rerun_blocked ? `<div class="banner info small" data-testid="intake-rerun-blocked">${esc(p.intake_rerun_blocked)}</div>`
         : `<div class="row"><button class="${changed ? "primary" : ""}" data-action="apply-details" data-testid="apply-details" ${busy() ? "disabled" : ""}>Re-run the proposal with these choices</button>
           ${changed ? '<span class="small">Choices changed: re-run to plan them.</span>' : ""}</div>`}
     </div>
   </details>`;
+}
+
+// ----------------------------------------------------------------------- artwork colors
+// Region recolor of the processed flat-color artwork (the target the sheets must reproduce). An
+// artwork edit, not a sheet edit: no sheet changes until the user plans again from the artwork.
+const ART_MODES = [
+  ["select", "Select region", "Click a color region: only that connected region is selected, not every area of its color."],
+  ["box", "Limit box", "Drag a box; the next selection stays inside it (e.g. one leg when both legs are one region)."],
+  ["eyedropper", "Eyedropper", "Click any region to use its exact color as the new color."],
+];
+const ART_SOURCES = { palette: "palette color", picker: "color picker", eyedropper: "eyedropper" };
+
+function artworkCheck(c) {
+  const n = (v) => (v == null ? "–" : String(v));
+  return `<div class="subpanel stack" data-testid="artwork-check">
+    <h4 style="margin:0">Planned from the edited artwork ${badge(c.after.status === "PROPOSAL_READY_FOR_REVIEW" ? "ok" : "warn", c.after.status)}</h4>
+    <div class="table-wrap"><table><thead><tr><th></th><th>Palette (colors)</th><th>Sheets (measured)</th><th>Status</th></tr></thead><tbody>
+      <tr><td>Before (${esc(c.before.stage)})</td><td>${n(c.before.palette_size)}</td><td>${n(c.before.sheet_count)}</td><td class="small">${esc(c.before.status)}</td></tr>
+      <tr data-testid="artwork-check-after"><td>After ${c.region_recolors} region recolor${c.region_recolors === 1 ? "" : "s"}</td><td>${n(c.after.palette_size)}</td><td>${n(c.after.sheet_count)}${c.after.selected ? ` <span class="muted small">(${esc(c.after.selected)})</span>` : ""}</td><td class="small">${esc(c.after.status)}</td></tr>
+    </tbody></table></div>
+    <p class="small muted" style="margin:0">${esc(c.note)}${c.archived_as ? ` The previous attempt is kept as <code>${esc(c.archived_as)}</code> (Previous attempts).` : ""}</p></div>`;
+}
+
+function artworkPanel() {
+  const a = ui.state.artwork;
+  if (!a) return "";
+  if (!a.available) return `<div class="panel tight small muted">Artwork colors are unavailable: ${esc(a.reason || "")}</div>`;
+  const s = ui.art;
+  const dis = busy() ? "disabled" : "";
+  const edits = a.edits || [];
+  const failed = ui.state.proposal?.status === "NEEDS_USER_DECISION";
+  const palette = a.palette || [];
+  const mode = ART_MODES.find(([m]) => m === s.mode) || ART_MODES[0];
+  const sel = (s.preview || s.selection)?.selection;
+  const image = s.preview ? s.preview.images[s.view === "after" ? "after" : "selection"] : s.selection ? s.selection.images.selection : a.image;
+  const canPick = sel && !busy() ? "" : "disabled";
+
+  const banners = [
+    a.differs_from_planned ? `<div class="banner warn" data-testid="art-differs"><strong>Artwork edited after the sheets were planned.</strong> The current ${a.stage === "review" ? "reviewed stack" : "proposal"} is validated against the previous artwork only, not this one, so print-kit export is blocked. Choose <strong>Try Again</strong> to plan from the edited artwork (the current attempt is kept) or undo the artwork edits.</div>` : "",
+    a.base_changed ? '<div class="banner info small">The reviewed artwork changed (accepted front view) after these artwork edits started; planning uses the edited artwork shown here.</div>' : "",
+    a.planned_from_edited_artwork && !edits.length ? `<p class="small muted" style="margin:0">The current sheets were planned from artwork you edited (${a.planned_from_edited_artwork.region_recolors} region recolor${a.planned_from_edited_artwork.region_recolors === 1 ? "" : "s"}); that log is kept with the proposal.</p>` : "",
+  ].join("");
+
+  const selection = sel ? `<div class="subpanel stack" style="gap:4px" data-testid="art-selection">
+      <div class="row">${swatch(sel.color, true)} <strong>${esc(sel.color)}</strong> <span class="small">${fmt(sel.pixels)} px · ${fmt(sel.area_mm2, 2)} mm²</span></div>
+      <p class="small muted" style="margin:0">One connected region of ${sel.regions_of_color} with this color${sel.limited_by_box ? `, limited to the box (${fmt(sel.pixels)} of the region's ${fmt(sel.whole_region_pixels)} px)` : ""}. Only these pixels change.</p></div>`
+    : `<p class="small muted" style="margin:0">${esc(mode[2])}</p>`;
+
+  const chosen = s.color ? `${swatch(s.color, true)} <strong>${esc(s.color)}</strong> <span class="small muted">${esc(ART_SOURCES[s.source] || "")}${s.sampled ? ` at row ${s.sampled[0]}, column ${s.sampled[1]}` : ""}</span>`
+    : '<span class="small muted">No new color chosen yet.</span>';
+  const colors = `<div class="stack" style="gap:6px">
+      <h4 style="margin:0">New color</h4>
+      <div class="row" role="group" aria-label="Palette colors">${palette.map((c) => `<button class="small ghost" data-action="art-color" data-color="${esc(c.hex)}" title="${esc(c.hex)} · ${fmt(c.area_mm2, 1)} mm² · ${c.regions_4} region(s)" data-testid="art-palette-color" ${canPick}>${swatch(c.hex, true)}</button>`).join("")}</div>
+      <div class="row"><input type="color" id="art-picker" value="${esc((s.color || sel?.color || "#888888").toLowerCase())}" aria-label="Color picker">
+        <button class="small" data-action="art-picker" data-testid="art-use-picker" ${canPick}>Use picker color</button>
+        <button class="small ${s.mode === "eyedropper" ? "active" : ""}" data-action="art-mode" data-mode="eyedropper" data-testid="art-eyedropper" ${canPick} title="${esc(ART_MODES[2][2])}">Eyedropper…</button></div>
+      <div class="row">${chosen}</div></div>`;
+
+  const pv = s.preview;
+  const ch = pv?.change;
+  const preview = pv ? `<div class="stack" style="gap:6px" data-testid="art-preview">
+      <figure style="margin:0"><img class="img" src="${esc(pv.images.before_after)}" alt="before | after"><figcaption>Before (region outlined) | after — nothing is saved until Apply</figcaption></figure>
+      <dl class="kv small">
+        <dt>Change</dt><dd>${swatch(ch.from)} ${esc(ch.from)} → ${swatch(ch.to)} ${esc(ch.to)} · ${fmt(ch.pixels)} px</dd>
+        <dt>Palette</dt><dd data-testid="art-palette-change">${ch.palette_size_before} → ${ch.palette_size_after} colors${ch.colors_removed.length ? ` · removed ${ch.colors_removed.map((h) => swatch(h)).join(" ")}` : ""}${ch.colors_added.length ? ` · added ${ch.colors_added.map((h) => swatch(h)).join(" ")}` : ""}</dd>
+        <dt>Regions</dt><dd>${Object.keys(ch.regions_before).map((h) => `${swatch(h)} ${ch.regions_before[h]} → ${ch.regions_after[h]}`).join(" · ")}</dd>
+        <dt>Merge</dt><dd>${ch.merged_with_adjacent_regions ? `joins ${ch.merged_with_adjacent_regions} adjacent ${esc(ch.to)} region(s) into one` : "no adjacent region of the new color"}</dd>
+      </dl>
+      <p class="small muted" style="margin:0">${pv.notes.map(esc).join(" ")}</p>
+      <div class="row"><button class="small ghost" data-action="art-cancel" data-testid="art-cancel">Cancel</button><button class="small primary" data-action="art-apply" data-testid="art-apply" ${dis}>Apply to artwork</button></div></div>`
+    : sel ? '<div class="row"><button class="small ghost" data-action="art-cancel" data-testid="art-cancel">Clear selection</button></div>' : "";
+
+  const v = a.verify;
+  const history = `<div class="stack" style="gap:6px">
+      <h4 style="margin:0">Artwork edits ${badge("neutral", String(edits.length))}</h4>
+      ${edits.length ? `<ul class="history small" data-testid="art-history">${edits.slice().reverse().map((e) => `<li><span>#${e.index} ${swatch(e.from)} → ${swatch(e.to)} ${fmt(e.selection.pixels)} px${e.selection.limited_by_box ? " (box)" : ""} · ${esc(ART_SOURCES[e.op.source] || e.op.source)}${e.change.merged_with_adjacent_regions ? " · merged" : ""}</span>
+          <button class="small ghost" data-action="art-undo" data-keep="${e.index}" ${e.index === edits.length ? "disabled" : dis} title="Keep edits 1..${e.index}">Revert here</button></li>`).join("")}</ul>` : '<p class="small muted" style="margin:0">No artwork edits.</p>'}
+      <div class="row"><button class="small" data-action="art-undo" data-testid="art-undo" ${edits.length ? dis : "disabled"}>↶ Undo last</button>
+        <button class="small ghost" data-action="art-undo" data-keep="0" ${edits.length > 1 ? dis : "disabled"}>Revert all</button>
+        <button class="small" data-action="art-verify" data-testid="art-verify" ${edits.length ? dis : "disabled"} title="Reload the saved log and replay it from its base">Verify save/reload</button></div>
+      ${v ? `<p class="small" data-testid="art-verify-result">${v.replay_identical ? `<span class="yes">✓</span> Replaying all ${v.edits} saved edit(s) from the base reproduces the saved artwork exactly.` : `<span class="no">✗</span> ${esc(v.problems.join("; "))}`} <span class="muted">(${esc(v.checked_utc)})</span></p>` : ""}
+      <p class="small muted" style="margin:0">Saved after every edit; reloads after a restart.</p></div>`;
+
+  // After an applied color change the re-planning action is "Try Again"; before any edit (artwork
+  // prepared, not planned) it is the first planning.
+  const tryAgain = a.can_replan && edits.length > 0;
+  const replanNote = `Runs the same automatic proposal (unchanged planner and validators) on the artwork shown here.${a.planned ? " The current attempt (proposal, review, estimate) is archived in this project under Previous attempts." : ""} The palette size and the measured sheet count are shown afterwards; merging colors does not guarantee fewer sheets. Nothing is planned until you click.`;
+  const replanButton = (testid) => `<button class="primary" data-action="art-replan" data-testid="${testid}" ${dis}>${tryAgain ? "Try Again" : "Plan sheets from this artwork"}</button>`;
+  const callout = tryAgain && !sel ? `<div class="banner ok stack" style="gap:6px" data-testid="art-try-again-callout">
+      <strong>${edits.length} color change${edits.length === 1 ? "" : "s"} applied to the artwork.</strong>
+      <span class="small">The sheets are not planned for ${edits.length === 1 ? "it" : "them"} yet. Choose Try Again to plan sheets from the edited artwork, or keep editing first.</span>
+      <div class="row">${replanButton("art-try-again")}</div></div>` : "";
+  const replan = a.can_replan ? `<div class="subpanel stack" data-testid="art-replan">
+      <div class="row">${replanButton("art-replan-button")}</div>
+      <p class="small muted" style="margin:0">${esc(replanNote)}</p></div>` : "";
+
+  return `<details class="panel section" data-section="artwork" data-testid="artwork-panel" ${openAttr("artwork", !a.planned || failed || a.differs_from_planned || edits.length > 0)}>
+    <summary><h3>Artwork colors ${badge("neutral", "artwork edit · not a sheet edit")}</h3>
+      <span class="small muted">${palette.length ? `${palette.length} colors · ` : ""}${edits.length} edit${edits.length === 1 ? "" : "s"}${a.differs_from_planned ? " · not planned yet" : ""}</span></summary>
+    <div class="section-body stack">
+      <p class="small muted" style="margin:0">Recolor regions of the processed flat-color artwork, e.g. unify two skin tones, change a necklace, or change one leg only (Limit box). The uploaded image is never changed and no sheet is edited here: sheets follow only when you plan again.</p>
+      ${banners}
+      <div class="grid2">
+        <div class="stack" style="gap:6px">
+          <div class="row"><div class="segmented" role="tablist" aria-label="Artwork tool">${ART_MODES.map(([m, l, h]) => `<button class="small ${s.mode === m ? "active" : ""}" data-action="art-mode" data-mode="${m}" title="${esc(h)}" data-testid="art-mode-${m}" ${dis}>${l}</button>`).join("")}</div>
+            ${s.box ? '<button class="small ghost" data-action="art-clear-box" data-testid="art-clear-box">Clear box</button>' : ""}
+            ${pv ? `<div class="segmented" role="tablist" aria-label="Artwork view">${[["selection", "Selection"], ["after", "After"]].map(([k, l]) => `<button class="small ${s.view === k ? "active" : ""}" data-action="art-view" data-view="${k}">${l}</button>`).join("")}</div>` : ""}</div>
+          <div class="canvas-wrap" id="art-wrap"><img id="art-image" src="${esc(image)}" alt="flat-color artwork" draggable="false"><canvas id="art-overlay" aria-label="Artwork canvas" data-testid="art-canvas"></canvas></div>
+          <span class="small muted coords" id="art-coords">${s.box ? `Selections stay inside the box (rows ${s.box[0]}–${s.box[2] - 1}, columns ${s.box[1]}–${s.box[3] - 1}).` : esc(mode[2])}</span>
+        </div>
+        <div class="stack">${callout}${selection}${colors}${preview}</div>
+      </div>
+      <div class="grid2">
+        <div class="stack" style="gap:6px"><h4 style="margin:0">Palette now ${badge("neutral", `${palette.length} colors`)}</h4>
+          ${palette.length ? `<ul class="small" data-testid="art-palette" style="margin:0">${palette.map((c) => `<li>${swatch(c.hex)} <code>${esc(c.hex)}</code> · ${fmt(c.area_mm2, 1)} mm² · ${c.regions_4} region${c.regions_4 === 1 ? "" : "s"}</li>`).join("")}</ul>` : '<p class="small muted" style="margin:0">Shown after the first selection.</p>'}
+          <p class="small muted" style="margin:0">One filament color per sheet; the planner decides how many sheets these colors need.</p></div>
+        ${history}
+      </div>
+      ${replan}
+    </div>
+  </details>`;
+}
+
+function artPx(event) {
+  const img = $("#art-image");
+  const r = img.getBoundingClientRect();
+  const w = img.naturalWidth || 1;
+  const h = img.naturalHeight || 1;
+  return [Math.min(h - 1, Math.max(0, Math.floor(((event.clientY - r.top) / r.height) * h))),
+          Math.min(w - 1, Math.max(0, Math.floor(((event.clientX - r.left) / r.width) * w)))];
+}
+
+function artBox(a, b) {
+  return [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[0], b[0]) + 1, Math.max(a[1], b[1]) + 1];
+}
+
+function drawArtOverlay() {
+  const img = $("#art-image");
+  const canvas = $("#art-overlay");
+  if (!img || !canvas || !img.naturalWidth) return;
+  const rect = img.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  const w = Math.max(1, Math.round(rect.width * dpr));
+  const h = Math.max(1, Math.round(rect.height * dpr));
+  if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+  const ctx = canvas.getContext("2d");
+  ctx.clearRect(0, 0, w, h);
+  const sx = w / img.naturalWidth;
+  const sy = h / img.naturalHeight;
+  const box = ui.art.drag ? artBox(ui.art.drag.from, ui.art.drag.to) : ui.art.box;
+  ctx.lineWidth = 2 * dpr;
+  if (box) {
+    ctx.strokeStyle = "#00a0ff";
+    ctx.setLineDash([6 * dpr, 4 * dpr]);
+    ctx.strokeRect(box[1] * sx, box[0] * sy, (box[3] - box[1]) * sx, (box[2] - box[0]) * sy);
+    ctx.setLineDash([]);
+  }
+  for (const [point, color] of [[ui.art.at, "#ff2d55"], [ui.art.sampled, "#00a86b"]]) {
+    if (!point) continue;
+    ctx.strokeStyle = color;
+    ctx.beginPath(); ctx.arc((point[1] + 0.5) * sx, (point[0] + 0.5) * sy, 7 * dpr, 0, Math.PI * 2); ctx.stroke();
+  }
+}
+
+function bindArtwork() {
+  const canvas = $("#art-overlay");
+  if (!canvas) return;
+  $("#art-image")?.addEventListener("load", drawArtOverlay);
+  drawArtOverlay();
+  canvas.addEventListener("pointerdown", (e) => {
+    if (busy() || ui.art.mode !== "box") return;
+    canvas.setPointerCapture(e.pointerId);
+    const point = artPx(e);
+    ui.art.drag = { from: point, to: point };
+  });
+  canvas.addEventListener("pointermove", (e) => {
+    const point = artPx(e);
+    const c = $("#art-coords");
+    if (c) c.textContent = `row ${point[0]} · column ${point[1]} (artwork pixels)`;
+    if (ui.art.drag) { ui.art.drag.to = point; drawArtOverlay(); }
+  });
+  canvas.addEventListener("pointerup", async (e) => {
+    if (busy()) return;
+    const point = artPx(e);
+    if (ui.art.drag) {
+      const box = artBox(ui.art.drag.from, point);
+      ui.art.drag = null;
+      ui.art.box = box[2] - box[0] > 1 && box[3] - box[1] > 1 ? box : null;
+      ui.art.mode = "select";
+      render();
+      return;
+    }
+    if (ui.art.mode === "eyedropper") await artworkSample(point);
+    else await artworkSelect(point);
+  });
+}
+
+function artworkCall(action, body) {
+  return api("POST", `/api/projects/${encodeURIComponent(ui.name)}/artwork/${action}`, body);
+}
+
+async function artworkPreview() {
+  const s = ui.art;
+  const body = { at_px: s.at, box_px: s.box, color: s.color, source: s.source };
+  if (s.source === "eyedropper") body.sampled_at_px = s.sampled;
+  s.preview = await artworkCall("preview", body);
+  s.view = "after";
+}
+
+async function artworkSelect(at) {
+  ui.error = null;
+  ui.art.at = at;
+  ui.art.preview = null;
+  try {
+    ui.art.selection = await artworkCall("preview", { at_px: at, box_px: ui.art.box });
+    ui.art.view = "selection";
+    if (ui.art.color && ui.art.color !== ui.art.selection.selection.color) await artworkPreview();
+  } catch (err) {
+    ui.art.selection = null;
+    ui.art.at = null;
+    showError(err, "Artwork selection");
+    return;
+  }
+  render();
+}
+
+async function artworkChoose(color, source, sampled = null) {
+  ui.error = null;
+  Object.assign(ui.art, { color, source, sampled });
+  if (!ui.art.at) { render(); return; }
+  try {
+    await artworkPreview();
+  } catch (err) {
+    ui.art.preview = null;
+    showError(err, "Artwork preview");
+    return;
+  }
+  render();
+}
+
+async function artworkSample(at) {
+  try {
+    const sampled = await artworkCall("sample", { at_px: at });
+    ui.art.mode = "select";
+    await artworkChoose(sampled.color, "eyedropper", sampled.at_px);
+  } catch (err) {
+    showError(err, "Eyedropper");
+  }
+}
+
+async function artworkApply() {
+  const pv = ui.art.preview;
+  if (!pv || busy()) return;
+  try {
+    await artworkCall("apply", { op: pv.op, preview_id: pv.preview_id });
+    ui.art = { ...freshArt(), box: ui.art.box };
+    await loadState();
+  } catch (err) {
+    showError(err, "Apply artwork edit");
+    return;
+  }
+  render();
+  $('[data-testid="art-try-again-callout"]')?.scrollIntoView({ block: "center" });  // the next step, in view
+}
+
+async function artworkPost(action, body) {
+  if (busy()) return;
+  try {
+    await artworkCall(action, body);
+    if (action !== "verify") ui.art = { ...freshArt(), box: ui.art.box };
+    await loadState();
+  } catch (err) {
+    showError(err, `Artwork ${action}`);
+    return;
+  }
+  render();
 }
 
 // ------------------------------------------------------------------------------ review
@@ -779,6 +1082,7 @@ function reviewView() {
       ${draftBanner()}
       <div class="panel tight stage">${canvasPanel(sheet)}</div>
       ${validationPanel()}
+      ${artworkPanel()}
       ${changePanel()}
       ${previewsPanel()}
       ${advancedPanel()}
@@ -809,7 +1113,7 @@ function reviewBar() {
         title="Only for an intended visible change: the current front view becomes the reviewed artwork">Accept front view as artwork…</button>
       <span class="divider" aria-hidden="true"></span>
       <button class="small" data-action="tab" data-tab="printability">Printability →</button>
-      <button class="small primary" data-action="tab" data-tab="kit" ${ok ? "" : "disabled"} title="${ok ? "Export STEP/STL for every layer" : "Invalid drafts cannot be exported"}">Build print kit →</button>
+      <button class="small primary" data-action="tab" data-tab="kit" ${ok && !ui.state.artwork?.differs_from_planned ? "" : "disabled"} title="${ui.state.artwork?.differs_from_planned ? "The artwork was edited after these sheets were planned" : ok ? "Export STEP/STL for every layer" : "Invalid drafts cannot be exported"}">Build print kit →</button>
     </div>
     ${verified ? `<div class="review-bar-note">${verified} <span class="muted small">(${esc(v.checked_utc)})</span></div>` : ""}
   </div>`;
@@ -1329,7 +1633,7 @@ function kitNotice() {
 }
 
 function kitBuildPanel(latest) {
-  const valid = ui.state.draft.status.printable;
+  const valid = ui.state.draft.status.printable && !ui.state.artwork?.differs_from_planned;
   // The build form is the main action until a kit matches the current draft; then it folds away.
   const needed = !latest || latest.stale || latest.status.cad !== "CAD_VALID";
   return `<section class="panel kit-build" data-testid="kit-build">
@@ -1340,7 +1644,8 @@ function kitBuildPanel(latest) {
       ${processForm("kit")}
       ${bambuOption()}
       <div class="row"><button class="${needed ? "primary" : ""}" data-action="build-kit" ${valid && !busy() ? "" : "disabled"}>${latest ? "Build new print kit" : "Build print kit"}</button>
-        ${valid ? "" : '<span class="small no">The draft is invalid (see Review &amp; edit); invalid drafts are never exported.</span>'}</div>
+        ${ui.state.artwork?.differs_from_planned ? '<span class="small no">The artwork was edited after these sheets were planned; plan from the edited artwork or undo the artwork edits (Review &amp; edit → Artwork colors).</span>'
+          : valid ? "" : '<span class="small no">The draft is invalid (see Review &amp; edit); invalid drafts are never exported.</span>'}</div>
     </div>
   </section>`;
 }
@@ -1615,7 +1920,7 @@ async function onClick(event) {
       const p = ui.state.proposal;
       const decisions = {};
       for (const d of p.details || []) decisions[d.id] = detailChoice(p, d);
-      submit(`${project}/propose`, { detail_decisions: decisions });
+      submit(`${project}/propose`, { detail_decisions: decisions, plan: p.status !== "ARTWORK_READY_NOT_PLANNED" });
       ui.detailChoices = {};
       break;
     }
@@ -1685,6 +1990,16 @@ async function onClick(event) {
       render();
       break;
     case "dismiss-kit-notice": ui.kitNotice = null; render(); break;
+    case "art-mode": ui.art.mode = el.dataset.mode; render(); break;
+    case "art-clear-box": ui.art.box = null; if (ui.art.at) await artworkSelect(ui.art.at); else render(); break;
+    case "art-color": await artworkChoose(el.dataset.color, "palette"); break;
+    case "art-picker": await artworkChoose($("#art-picker").value.toUpperCase(), "picker"); break;
+    case "art-view": ui.art.view = el.dataset.view; render(); break;
+    case "art-cancel": ui.art = { ...freshArt(), mode: ui.art.mode, box: ui.art.box }; render(); break;
+    case "art-apply": await artworkApply(); break;
+    case "art-undo": await artworkPost("undo", el.dataset.keep === undefined ? {} : { keep: Number(el.dataset.keep) }); break;
+    case "art-verify": await artworkPost("verify", {}); break;
+    case "art-replan": submit(`${project}/artwork/replan`, {}); break;
     case "toggle-kit-build": ui.kitBuildOpen = !ui.kitBuildOpen; render(); break;
     default: break;
   }
@@ -1694,6 +2009,10 @@ function onChange(event) {
   const el = event.target;
   if (el.id === "project-select") {
     location.hash = el.value ? `#/${encodeURIComponent(el.value)}` : "#/";
+  } else if (el.id === "f-plan-later") {
+    ui.planLater = el.checked;  // no re-render: that would reset the other import fields
+    const button = $('[data-action="create"]');
+    if (button) button.textContent = ui.planLater ? "Import and prepare artwork" : "Import and propose layers";
   } else if (el.id === "p-rim-all") {
     ui.rimAll = el.checked;
   } else if (el.id === "resize-printer") {
@@ -1751,7 +2070,7 @@ async function main() {
     if (details?.dataset.section) ui.sections[details.dataset.section] = !details.open;
   });
   window.addEventListener("hashchange", route);
-  window.addEventListener("resize", () => { if (ui.tab === "review") drawOverlay(); });
+  window.addEventListener("resize", () => { if (ui.tab === "review") drawOverlay(); drawArtOverlay(); });
   try {
     ui.info = await api("GET", "/api/info");
     ui.process = { ...ui.info.process_presets[0] };

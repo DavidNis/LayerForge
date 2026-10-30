@@ -9,6 +9,12 @@ and return a job id at once; the page polls ``/api/jobs/<id>`` for progress.
     POST /api/projects?filename=&scale=&...     body = image bytes -> project + L1 proposal job
     GET  /api/projects/<p>                      project state (+ active or latest job)
     POST /api/projects/<p>/propose              re-run the L1 proposal (before a review exists)
+    POST /api/projects/<p>/artwork/preview      {"at_px", "box_px"?, "color"?, "source"?} -> region / recolor preview
+    POST /api/projects/<p>/artwork/sample       {"at_px"} -> eyedropper color
+    POST /api/projects/<p>/artwork/apply        {"op", "preview_id"} -> one artwork recolor, saved
+    POST /api/projects/<p>/artwork/undo         {} or {"keep": n} -> undo last / revert artwork edits
+    POST /api/projects/<p>/artwork/verify       replay the artwork edit log from its base
+    POST /api/projects/<p>/artwork/replan       plan sheets from the edited artwork (job; keeps the attempt)
     POST /api/projects/<p>/review               {"candidate"} -> start the L2 review
     POST /api/projects/<p>/edit                 {"op": {...}} -> one L2 edit, saved and validated
     POST /api/projects/<p>/undo                 {} or {"keep": n} -> undo last / revert to n edits
@@ -191,9 +197,10 @@ class Handler(BaseHTTPRequestHandler):
         if parts == ["api", "projects"]:
             settings = {k: v[0] for k, v in query.items()}
             filename = settings.pop("filename", "")
+            plan = settings.pop("plan", "1") not in ("0", "false")  # 0: intake only, edit colors before planning
             data = self._body(MAX_UPLOAD_BYTES)
             name = ws.create(filename, data, settings)
-            job = app.submit("propose", name, partial(ws.propose, name))
+            job = app.submit("propose", name, partial(ws.propose, name, plan=plan))
             self._json({"project": name, "job": job}, 201)
             return
         if len(parts) < 4 or parts[:2] != ["api", "projects"]:
@@ -211,7 +218,9 @@ class Handler(BaseHTTPRequestHandler):
             decisions = body.get("detail_decisions")
             if decisions is not None:
                 decisions = check_detail_decisions(decisions)  # a bad request fails now, not in the job
-            job = app.submit("propose", name, partial(ws.propose, name, decisions=decisions))
+            ws.refuse_if_artwork_edited(name, "re-running intake")
+            job = app.submit("propose", name, partial(ws.propose, name, decisions=decisions,
+                                                      plan=body.get("plan", True) is not False))
         elif action == "resize" and len(parts) == 5 and parts[4] == "analyze":
             ws.resize_subject(name)  # something to assess; checked now, not in the job
             job = app.submit("resize_analysis", name, partial(ws.resize_analysis, name, body.get("process"),
@@ -237,6 +246,24 @@ class Handler(BaseHTTPRequestHandler):
             args = (body.get("factor"), body.get("preview_id"), body.get("approve_changes"))
             ws.check_upscale_retry(name, *args)  # stale preview, missing approval or memory: refused now
             job = app.submit("upscale_retry", name, partial(ws.upscale_retry, name, *args))
+        elif action == "artwork" and len(parts) == 5 and parts[4] in ("preview", "sample", "apply", "undo", "verify"):
+            active = app.jobs.active(name)
+            if active is not None:  # a running job reads or replaces the artwork
+                raise JobConflict(f"'{active.kind}' is still {active.status} for this project; edit the artwork when it has finished")
+            if parts[4] == "preview":
+                self._json(ws.artwork_preview(name, body))
+            elif parts[4] == "sample":
+                self._json(ws.artwork_sample(name, body.get("at_px")))
+            elif parts[4] == "apply":
+                self._json(ws.artwork_apply(name, body.get("op"), body.get("preview_id")))
+            elif parts[4] == "undo":
+                self._json(ws.artwork_undo(name, body.get("keep")))
+            else:
+                self._json(ws.artwork_verify(name))
+            return
+        elif action == "artwork" and len(parts) == 5 and parts[4] == "replan":
+            ws.check_artwork_replan(name)  # nothing to plan, or a log that does not replay: refused now
+            job = app.submit("artwork_replan", name, partial(ws.artwork_replan, name))
         elif action == "review" and len(parts) == 4:
             job = app.submit("start_review", name, partial(ws.start_review, name, str(body.get("candidate", ""))))
         elif action == "edit" and len(parts) == 4:
@@ -248,6 +275,7 @@ class Handler(BaseHTTPRequestHandler):
         elif action == "printability" and len(parts) == 4:
             job = app.submit("printability", name, partial(ws.printability, name, body.get("process")))
         elif action == "kits" and len(parts) == 4:
+            ws.check_artwork_matches_stack(name)  # refused now, not in the job
             job = app.submit("kit", name, partial(ws.build_kit, name, body.get("process"), bambu_printer=body.get("bambu_printer")))
         elif action == "kits" and len(parts) == 6 and parts[5] == "verify":
             self._json(ws.verify_kit(name, parts[4]))

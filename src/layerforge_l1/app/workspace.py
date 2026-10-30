@@ -10,6 +10,8 @@ One project directory per artwork::
                             (validation, inspection, last change), previews/
     printability/           L3 ``assess_printability`` estimate of the draft + maps
     kits/<kit id>/          L3 ``build_print_kit`` output
+    artwork/                region recolors of the flat-color artwork (``core/artwork.py`` log),
+                            not yet planned; moved to ``proposal/artwork_edits/`` by a re-plan
 
 Planning, editing, validation, CAD and printability are not implemented here:
 this module only calls ``propose``, ``review.*``, ``validate_stack``,
@@ -25,6 +27,7 @@ import os
 import re
 import shutil
 import stat
+import threading
 import zipfile
 from dataclasses import asdict, fields
 from datetime import datetime, timezone
@@ -46,6 +49,13 @@ IMAGE_SUFFIXES = (".png", ".jpg", ".jpeg", ".jfif", ".jpe")  # .jfif/.jpe are JP
 MAX_UPLOAD_BYTES = 64 * 1024 * 1024
 SCALES = (1, 2, 4)
 KIT_ID = re.compile(r"kit_\d{8}_\d{6}x*")  # ids made by ``build_kit``; nothing else is ever deleted
+# Why actions that rebuild the artwork from the source cannot keep region recolors (yet).
+ARTWORK_LIMITS = {
+    "Upscale & Retry": "it re-samples the source into a finer pixel grid, and recolors are recorded as exact pixel "
+                       "regions of the current grid (mapping them onto new pixels is not implemented)",
+    "re-running intake": "it rebuilds the flat-color artwork from the source with new intake settings or detail "
+                         "choices, so the recolored regions may no longer exist as recorded",
+}
 PHYSICAL_STATUS = {
     "status": "NOT_VERIFIED",
     "note": "Only a real print reviewed by you (L-G10) can verify a result; no file or estimate does.",
@@ -246,6 +256,8 @@ class Workspace:
     def __init__(self, root: Path) -> None:
         self.root = Path(root).resolve()
         self.root.mkdir(parents=True, exist_ok=True)
+        self._artwork_lock = threading.Lock()  # artwork edits are quick requests, not queued jobs
+        self._basis_sha: dict[tuple[str, int, int], str] = {}  # artwork file stamp -> pixel hash
 
     # -- paths and records -----------------------------------------------------------
     def path(self, name: str) -> Path:
@@ -367,8 +379,10 @@ class Workspace:
         return out
 
     def propose(self, name: str, progress: Callable[..., None],
-                decisions: dict[str, Any] | None = None) -> dict[str, Any]:
-        """Run the L1 proposal; ``decisions`` (intake detail id -> action) replace the saved ones."""
+                decisions: dict[str, Any] | None = None, plan: bool = True) -> dict[str, Any]:
+        """Run the L1 proposal; ``decisions`` (intake detail id -> action) replace the saved ones.
+
+        ``plan=False`` stops after intake so the artwork colors can be edited before planning."""
 
         from ..core.intake import IntakeConfig
         from ..core.planning import PlanningConfig
@@ -377,6 +391,7 @@ class Workspace:
         path, record = self.path(name), self.record(name)
         if (path / "review").exists():
             raise AppError("this project already has a review; start a new project to re-propose")
+        self.refuse_if_artwork_edited(name, "re-running intake")
         if decisions is not None:
             record["detail_decisions"] = check_detail_decisions(decisions)
             self._save_record(name, record)
@@ -385,8 +400,9 @@ class Workspace:
         s = record["proposal_settings"]
         planning = PlanningConfig(outer_sheet_mm=self.sheet_outer_mm(record), scale=self.processing_scale(record),
                                   thickness_mm=s["thickness_mm"])
+        shutil.rmtree(path / "artwork", ignore_errors=True)  # an empty log on the replaced artwork
         result = propose(path / record["source"]["file"], path / "proposal", IntakeConfig(max_colors=s["max_colors"]),
-                         ProposalConfig(planning=planning), progress, record.get("detail_decisions") or None)
+                         ProposalConfig(planning=planning, plan=plan), progress, record.get("detail_decisions") or None)
         return {"status": result["status"], "selected": result["selected"]}
 
     # -- 1b. Upscale & Retry of a failed proposal ----------------------------------------------
@@ -413,6 +429,7 @@ class Workspace:
             raise AppError("Upscale & Retry is only offered when the automatic proposal failed")
         if (path / "review").exists():
             raise AppError("this project already has a review; start a new project to re-propose")
+        self.refuse_if_artwork_edited(name, "Upscale & Retry")
         return path, record, proposal
 
     def _preview_id(self, record: dict[str, Any], factor: int) -> str:
@@ -482,6 +499,7 @@ class Workspace:
 
         saved = self.check_upscale_retry(name, factor, preview, approve_changes)
         path, record = self.path(name), self.record(name)
+        shutil.rmtree(path / "artwork", ignore_errors=True)  # checked empty; its base is replaced
         s = record["proposal_settings"]
         staging = path / "proposal.next"
         shutil.rmtree(staging, ignore_errors=True)
@@ -539,6 +557,10 @@ class Workspace:
         else:
             raise AppError("the proposal has no selected candidate to assess")
         basis.update(sheet_mm=self.sheet_outer_mm(record), scale=self.processing_scale(record))
+        edited = self.edited_artwork(name, load=False)
+        if edited is not None:
+            basis["artwork"] = {"sha256": edited["sha256"], "region_recolors": edited["region_recolors"],
+                                "pending": edited["pending"]}
         return path, record, proposal, basis
 
     def resize_analysis(self, name: str, process_values: dict[str, Any] | None, bambu_printer: str | None,
@@ -574,6 +596,9 @@ class Workspace:
             issues = resize.issue_requirements(report["features"], process, stack.grid.mm_per_pixel)
             measured = {"source": f"FDM estimate of the {basis['stage']} ({process.name})", "counts": report["counts"],
                         "sheet_count": len(stack.sheets)}
+        if basis.get("artwork", {}).get("pending"):
+            measured["source"] += ("; measured on the sheets planned from the previous artwork (the artwork has "
+                                   f"{basis['artwork']['region_recolors']} unplanned region recolor(s), planned by the retry)")
         options = resize.size_options(issues, basis["sheet_mm"], limit["max_sheet_mm"])
         analysis = {"schema": resize.ANALYSIS_SCHEMA, "basis": basis, "process": asdict(process),
                     "bambu_printer": bambu_printer or None, "limit": limit, "measured": measured,
@@ -605,9 +630,10 @@ class Workspace:
         intake = IntakeConfig(max_colors=record["proposal_settings"]["max_colors"])
         source = path / record["source"]["file"]
         decisions = record.get("detail_decisions") or None
+        edited = self.edited_artwork(name)
 
         def plan(size: float) -> dict[str, Any]:
-            return resize.trial_plan(source, previous, size, intake, decisions)
+            return resize.trial_plan(source, previous, size, intake, decisions, edited)
 
         found = resize.search_plannable_size(plan, analysis["basis"]["sheet_mm"], analysis["limit"]["max_sheet_mm"],
                                              progress=progress)
@@ -642,7 +668,7 @@ class Workspace:
         shutil.rmtree(out, ignore_errors=True)
         result = preview_resize(path / record["source"]["file"], path / "proposal", out, size, analysis,
                                 IntakeConfig(max_colors=record["proposal_settings"]["max_colors"]),
-                                record.get("detail_decisions"), progress)
+                                record.get("detail_decisions"), progress, self.edited_artwork(name))
         result["preview_id"] = self._resize_preview_id(record, analysis, size)
         _write_json(out / "preview.json", result)
         return {"status": result["status"], "changes": len(result["changes"])}
@@ -668,7 +694,7 @@ class Workspace:
     def check_resize_retry(self, name: str, preview: Any, approve_size: Any, approve_changes: Any) -> dict[str, Any]:
         from ..core.resize import READY
 
-        path, record, analysis = self.current_analysis(name)
+        path, record, analysis = self.current_analysis(name)  # out of date if the artwork changed since
         saved = _read_json(path / "resize" / "preview" / "preview.json")
         if saved is None:
             raise AppError("preview the new size first")
@@ -690,6 +716,10 @@ class Workspace:
         previous proposal, review draft, printability estimate and the size analysis/preview are
         archived under ``attempts/`` (kits stay listed).  The image is never changed.  Planning uses
         the same planner, including its local cell refinement when a closure is infeasible.
+
+        With region recolors (unplanned, or already planned), the edited artwork shown in the preview
+        is planned pixel for pixel instead of the source's intake, and its edit log moves with the new
+        proposal (``proposal/artwork_edits/``); the archived attempt keeps the previous state.
         """
 
         from ..core.intake import IntakeConfig
@@ -704,6 +734,9 @@ class Workspace:
         saved = self.check_resize_retry(name, preview, approve_size, approve_changes)
         analysis = saved.pop("_analysis")
         path, record = self.path(name), self.record(name)
+        edited = self.edited_artwork(name)
+        if bool(edited) != bool(saved.get("artwork_edits")):
+            raise AppError("the artwork edits changed since the size preview; preview the size again")
         s = record["proposal_settings"]
         staging = path / "proposal.next"
         shutil.rmtree(staging, ignore_errors=True)
@@ -712,7 +745,14 @@ class Workspace:
         progress("RESIZE_RETRY_STARTING", from_mm=saved["from_mm"], to_mm=saved["to_mm"])
         try:
             result = propose(path / record["source"]["file"], staging, IntakeConfig(max_colors=s["max_colors"]),
-                             ProposalConfig(planning=planning), progress, saved["decisions"] or None)
+                             ProposalConfig(planning=planning), progress, saved["decisions"] or None,
+                             artwork=None if edited is None else {
+                                 "target_rgb": edited["target_rgb"], "frame_color": edited["frame_color"],
+                                 "provenance": {**edited["provenance"], "carried_by": "physical_resize",
+                                                "sheet_mm": saved["to_mm"]}})
+        except StackError as error:
+            shutil.rmtree(staging, ignore_errors=True)
+            raise AppError(f"could not plan the edited artwork at {saved['to_mm']:g} mm: {error}") from None
         except BaseException:
             shutil.rmtree(staging, ignore_errors=True)
             raise
@@ -733,6 +773,7 @@ class Workspace:
                 (path / part).replace(archive / part)
         staging.replace(path / "proposal")
         shutil.rmtree(path / "upscale", ignore_errors=True)
+        self._carry_artwork_log(path, archive, edited)
 
         check: dict[str, Any] = {"from_mm": saved["from_mm"], "to_mm": saved["to_mm"], "process": analysis["process"],
                                  "before": {**analysis["measured"], "stage": analysis["basis"]["stage"]},
@@ -740,6 +781,9 @@ class Workspace:
                                  "predicted_basis": "estimate: measured widths times the size ratio; not a result",
                                  "artwork_matches_approved_preview": True,
                                  "proposal_status": result["status"], "proposal_seconds": result["seconds"]}
+        if edited is not None:
+            check["artwork_edits"] = {"region_recolors": edited["region_recolors"], "pending_before": edited["pending"],
+                                      "kept_pixel_for_pixel": True, "log": "artwork_edits/edits.json"}
         if result["selected"]:
             stack = load_stack(path / "proposal" / "candidates" / result["selected"] / "stack")
             progress("ASSESSING_PRINTABILITY", sheets=len(stack.sheets))
@@ -890,6 +934,7 @@ class Workspace:
         from ..core.printkit import build_print_kit
 
         path, record = self.path(name), self.record(name)
+        self.check_artwork_matches_stack(name)
         process = process_from(process_values)
         if bambu_printer and bambu_printer not in BAMBU_PRINTERS:
             raise AppError(f"unsupported Bambu printer {bambu_printer!r}")
@@ -974,6 +1019,401 @@ class Workspace:
                 archive.write(file, f"{name}_{kit_id}/{file.relative_to(kit).as_posix()}")
         return buffer.getvalue()
 
+    # -- artwork recolor (flat-color target, not a sheet) ------------------------------------
+    def artwork_basis(self, name: str, load: bool = True) -> tuple[Path, dict[str, Any], Any, dict[str, Any]]:
+        """The artwork the stack was (or will be) planned from: the review's reviewed artwork if a
+        review exists, else the proposal's intake target.  Returns (path, proposal, image, origin);
+        ``load=False`` returns no image and takes the pixel hash from a cache keyed by file stamp."""
+
+        from ..core import artwork as art
+
+        path = self.path(name)
+        proposal = _read_json(path / "proposal" / "proposal.json")
+        if proposal is None:
+            raise AppError("no processed artwork yet; run the proposal (or intake) first")
+        if (path / "review" / MANIFEST_NAME).is_file() and (path / "review" / "target.png").is_file():
+            file, stage = path / "review" / "target.png", "review"
+        else:
+            file, stage = path / "proposal" / "intake" / "target.png", "proposal"
+        info = file.stat()
+        key = (str(file), info.st_mtime_ns, info.st_size)
+        image = art.load_rgb(file) if load or key not in self._basis_sha else None
+        if image is not None:
+            self._basis_sha[key] = art.rgb_sha256(image)
+        origin = {"stage": stage, "file": file.relative_to(path).as_posix(), "sha256": self._basis_sha[key],
+                  "proposal_status": proposal["status"]}
+        return path, proposal, image if load else None, origin
+
+    @staticmethod
+    def _planned_sha(path: Path, proposal: dict[str, Any], basis_sha: str) -> str | None:
+        """Hash of the artwork the current sheets were planned from (None: nothing planned yet)."""
+
+        from ..core.propose import NOT_PLANNED
+
+        return None if proposal["status"] == NOT_PLANNED else basis_sha
+
+    def _artwork_log(self, name: str, create: bool = False) -> tuple[Path, dict[str, Any] | None, dict[str, Any]]:
+        """The artwork edit log, (re)started on the current basis when it has no edits."""
+
+        from ..core import artwork as art
+
+        path, proposal, image, origin = self.artwork_basis(name, load=create)
+        directory = path / "artwork"
+        try:
+            log = art.read_log(directory)
+        except (art.ArtworkError, json.JSONDecodeError) as error:
+            raise AppError(f"the artwork edit log cannot be read: {error}") from None
+        if log is not None and not log["edits"] and log["base"]["sha256"] != origin["sha256"]:
+            log = None  # an empty log on an artwork that has since been replaced
+        if log is None and create:
+            shutil.rmtree(directory, ignore_errors=True)
+            log = art.start(directory, image, origin, proposal["frame_color"], proposal["intake"]["artwork_mm_per_pixel"])
+        return directory, log, {"proposal": proposal, "origin": origin, "path": path}
+
+    def artwork_differs(self, name: str) -> dict[str, Any] | None:
+        """Why the current sheets are not validated against the current artwork, or None."""
+
+        _, log, ctx = self._artwork_log(name)
+        if not log or not log["edits"]:
+            return None
+        planned = self._planned_sha(ctx["path"], ctx["proposal"], ctx["origin"]["sha256"])
+        if planned is None or log["current_sha256"] == planned:
+            return None
+        return {"edits": len(log["edits"]), "stage": ctx["origin"]["stage"]}
+
+    def edited_artwork(self, name: str, load: bool = True) -> dict[str, Any] | None:
+        """The artwork with region recolors that a physical resize must keep, or None.
+
+        Either unplanned edits (``artwork/``, replayed and verified first) or a proposal already planned
+        from edited artwork (its basis artwork: the review's, else the intake target it planned)."""
+
+        from ..core import artwork as art
+
+        path = self.path(name)
+        proposal = _read_json(path / "proposal" / "proposal.json")
+        if proposal is None:
+            return None
+        directory, log, ctx = self._artwork_log(name)
+        if log and log["edits"]:
+            out = {"pending": True, "sha256": log["current_sha256"], "region_recolors": len(log["edits"]),
+                   "frame_color": log["base"]["frame_color"], "log_dir": directory,
+                   "provenance": {"region_recolors": len(log["edits"]), "base_sha256": log["base"]["sha256"],
+                                  "base_origin": log["base"]["origin"], "artwork_sha256": log["current_sha256"],
+                                  "log": "artwork_edits/edits.json"}}
+            if load:
+                check = art.verify(directory)
+                if not check["replay_identical"]:
+                    raise AppError("the artwork edit log does not replay: " + "; ".join(check["problems"]))
+                out["target_rgb"] = art.load_rgb(directory / "current.png")
+            return out
+        planned = proposal.get("artwork_edits")
+        if not planned:
+            return None
+        origin = ctx["origin"]
+        out = {"pending": False, "sha256": origin["sha256"], "region_recolors": planned["region_recolors"],
+               "frame_color": proposal["frame_color"], "log_dir": path / "proposal" / "artwork_edits",
+               "provenance": {**{k: v for k, v in planned.items() if k not in ("carried_by", "sheet_mm")},
+                              "artwork_sha256": origin["sha256"], "log": "artwork_edits/edits.json"}}
+        if load:
+            out["target_rgb"] = self.artwork_basis(name)[2]
+        return out
+
+    @staticmethod
+    def _carry_artwork_log(path: Path, archive: Path, edited: dict[str, Any] | None) -> None:
+        """After a retry swapped in a new proposal: the edit history goes with it (the attempt keeps its own)."""
+
+        if edited is None:
+            shutil.rmtree(path / "artwork", ignore_errors=True)  # an empty log on the replaced artwork
+            return
+        if edited["pending"]:
+            shutil.rmtree(path / "artwork" / "preview", ignore_errors=True)
+            (path / "artwork").replace(path / "proposal" / "artwork_edits")
+        else:  # the previous proposal (with its log) is in the archive now; the new one gets a copy
+            source = archive / "proposal" / "artwork_edits"
+            if source.is_dir():
+                shutil.copytree(source, path / "proposal" / "artwork_edits")
+
+    def refuse_if_artwork_edited(self, name: str, action: str) -> None:
+        path = self.path(name)
+        proposal = _read_json(path / "proposal" / "proposal.json") or {}
+        why = ARTWORK_LIMITS.get(action, "it starts again from the source image")
+        if proposal.get("artwork_edits"):
+            raise AppError(f"this proposal was planned from artwork with your region recolors; {action} is not available "
+                           f"for it because {why}, which would lose those recolors. Physical resize keeps them.")
+        if (path / "proposal" / "proposal.json").is_file():
+            _, log, _ = self._artwork_log(name)
+            if log and log["edits"]:
+                raise AppError(f"{len(log['edits'])} region recolor(s) are not planned yet; {action} is not available "
+                               f"while they exist because {why}. Use Try Again (or Physical resize) to plan them, "
+                               "or undo them first.")
+
+    def check_artwork_matches_stack(self, name: str) -> None:
+        differs = self.artwork_differs(name)
+        if differs:
+            raise AppError(f"the artwork was edited ({differs['edits']} region recolor(s)) after these sheets were planned; "
+                           "the sheets are validated only against the previous artwork. Plan from the edited artwork "
+                           "(the current attempt is kept) or undo the artwork edits before exporting.")
+
+    def _artwork_op(self, op: Any) -> dict[str, Any]:
+        from ..core import artwork as art
+
+        try:
+            return art.check_op(op)
+        except art.ArtworkError as error:
+            raise AppError(str(error)) from None
+
+    def artwork_preview(self, name: str, request: Any) -> dict[str, Any]:
+        """Select the region at a point (optionally inside a box) and, given a color, preview the recolor.
+
+        Nothing is saved except preview images; Apply must name the returned ``preview_id``."""
+
+        from ..core import artwork as art
+
+        if not isinstance(request, dict):
+            raise AppError("an artwork preview needs at_px and optionally box_px, color and source")
+        with self._artwork_lock:
+            directory, log, ctx = self._artwork_log(name, create=True)
+            image = art.load_rgb(directory / "current.png")
+            frame, mpp = log["base"]["frame_color"], log["base"]["mm_per_pixel"]
+            out = directory / "preview"
+            shutil.rmtree(out, ignore_errors=True)
+            out.mkdir(parents=True)
+            try:
+                if not request.get("color"):
+                    mask, selection = art.select_region(image, frame, request.get("at_px"), request.get("box_px"), mpp)
+                    stamp = selection["region_sha256"][:12]
+                    art.save_rgb(art.highlight(image, mask, selection["box_px"]), out / "selection.png")
+                    return {"selection": selection, "images": {
+                        "selection": self.url(name, "artwork/preview/selection.png", stamp)}}
+                op = art.check_op({**request, "op": "recolor_region"})
+                after, mask, selection, change = art.plan_edit(image, op, frame, mpp)
+            except art.ArtworkError as error:
+                raise AppError(str(error)) from None
+            pid = art.preview_id(log["current_sha256"], op)
+            art.save_rgb(art.highlight(image, mask, selection["box_px"]), out / "selection.png")
+            art.save_rgb(after, out / "after.png")
+            art.save_rgb(art.before_after(image, after, mask), out / "before_after.png")
+            return {"preview_id": pid, "op": op, "selection": selection, "change": change,
+                    "palette_after": art.palette_summary(after, frame, mpp),
+                    "images": {k: self.url(name, f"artwork/preview/{k}.png", pid)
+                               for k in ("selection", "after", "before_after")},
+                    "notes": ["Artwork edit only: no sheet changes until you plan again from the edited artwork.",
+                              "The sheet count is known only after planning; fewer colors do not guarantee fewer sheets."]}
+
+    def artwork_sample(self, name: str, at_px: Any) -> dict[str, Any]:
+        """Eyedropper: the exact artwork color at a point."""
+
+        from ..core import artwork as art
+
+        with self._artwork_lock:
+            directory, log, ctx = self._artwork_log(name)
+            image = art.load_rgb(directory / "current.png") if log else self.artwork_basis(name)[2]
+            try:
+                row, col = art.check_point(image, at_px)
+            except art.ArtworkError as error:
+                raise AppError(str(error)) from None
+            color = "#%02X%02X%02X" % tuple(int(v) for v in image[row, col])
+            frame = ctx["proposal"]["frame_color"]
+            if frame and color == frame.upper():
+                raise AppError("that point is the frame padding (never visible); sample a color inside the artwork")
+            return {"color": color, "at_px": [row, col]}
+
+    def artwork_apply(self, name: str, op: Any, preview: Any) -> dict[str, Any]:
+        from ..core import artwork as art
+
+        op = self._artwork_op(op)
+        with self._artwork_lock:
+            directory, log, _ = self._artwork_log(name)
+            if log is None or preview != art.preview_id(log["current_sha256"], op):
+                raise AppError("this preview is out of date (the artwork changed since); preview the edit again")
+            try:
+                _, entry = art.apply(directory, op)
+            except art.ArtworkError as error:
+                raise AppError(str(error)) from None
+            shutil.rmtree(directory / "preview", ignore_errors=True)
+            (directory / "verify.json").unlink(missing_ok=True)
+            return {"edit": entry["index"], "change": entry["change"]}
+
+    def artwork_undo(self, name: str, keep: Any = None) -> dict[str, Any]:
+        from ..core import artwork as art
+
+        with self._artwork_lock:
+            directory, log, _ = self._artwork_log(name)
+            if not log or not log["edits"]:
+                raise AppError("there are no artwork edits to undo")
+            count = len(log["edits"])
+            if keep is None:
+                keep = count - 1
+            if isinstance(keep, bool) or not isinstance(keep, int):
+                raise AppError("keep must be a whole number of edits")
+            try:
+                _, log = art.revert(directory, keep)
+            except art.ArtworkError as error:
+                raise AppError(str(error)) from None
+            shutil.rmtree(directory / "preview", ignore_errors=True)
+            (directory / "verify.json").unlink(missing_ok=True)
+            return {"edits_before": count, "edits_after": len(log["edits"])}
+
+    def artwork_verify(self, name: str) -> dict[str, Any]:
+        from ..core import artwork as art
+
+        with self._artwork_lock:
+            directory, log, _ = self._artwork_log(name)
+            if log is None:
+                raise AppError("there are no artwork edits to verify")
+            report = art.verify(directory)
+            _write_json(directory / "verify.json", report)
+            return report
+
+    def check_artwork_replan(self, name: str) -> tuple[dict[str, Any] | None, dict[str, Any], Any]:
+        """(log, context, artwork to plan) when planning from the current artwork is meaningful."""
+
+        from ..core import artwork as art
+        from ..core.propose import NOT_PLANNED
+
+        with self._artwork_lock:
+            directory, log, ctx = self._artwork_log(name)
+            if log and log["edits"]:
+                check = art.verify(directory)
+                if not check["replay_identical"]:
+                    raise AppError("the artwork edit log does not replay: " + "; ".join(check["problems"]))
+                edited = art.load_rgb(directory / "current.png")
+            else:
+                edited = self.artwork_basis(name)[2]
+            if ctx["proposal"]["status"] != NOT_PLANNED and art.rgb_sha256(edited) == ctx["origin"]["sha256"]:
+                raise AppError("the artwork is the one the current sheets were planned from; there is nothing to re-plan")
+        return log, ctx, edited
+
+    def artwork_replan(self, name: str, progress: Callable[..., None]) -> dict[str, Any]:
+        """Plan sheets from the edited artwork (explicit request only).
+
+        The proposal is re-run with the same source, settings and detail choices; its intake target
+        is replaced by the edited artwork (frame and grid unchanged) and planned by the unchanged
+        planner.  The previous proposal, review, estimate and size check are archived as an attempt
+        (kits stay listed); the artwork log moves with the new proposal as its provenance."""
+
+        from ..core import artwork as art
+        from ..core.intake import IntakeConfig
+        from ..core.model import load_stack
+        from ..core.planning import PlanningConfig
+        from ..core.propose import NOT_PLANNED, ProposalConfig, propose
+
+        path, record = self.path(name), self.record(name)
+        log, ctx, edited = self.check_artwork_replan(name)
+        proposal, origin = ctx["proposal"], ctx["origin"]
+        edits = log["edits"] if log else []
+        edited_sha = art.rgb_sha256(edited)
+        if proposal["status"] != NOT_PLANNED and (path / "review" / MANIFEST_NAME).is_file():
+            before_sheets = len(review.load_project(path / "review").sheets)
+        else:
+            row = next((c for c in proposal["candidates"] if c["name"] == proposal.get("selected")), None)
+            before_sheets = row["sheet_count"] if row else None
+        before = {"status": proposal["status"], "stage": origin["stage"], "palette_size": proposal["intake"]["palette_size"],
+                  "sheet_count": before_sheets, "artwork_sha256": origin["sha256"]}
+        s = record["proposal_settings"]
+        staging = path / "proposal.next"
+        shutil.rmtree(staging, ignore_errors=True)
+        planning = PlanningConfig(outer_sheet_mm=self.sheet_outer_mm(record), scale=self.processing_scale(record),
+                                  thickness_mm=s["thickness_mm"])
+        provenance = {"region_recolors": len(edits), "base_sha256": log["base"]["sha256"] if log else origin["sha256"],
+                      "base_origin": log["base"]["origin"] if log else origin, "artwork_sha256": edited_sha,
+                      "log": "artwork_edits/edits.json" if edits else None}
+        progress("ARTWORK_REPLAN_STARTING", edits=len(edits))
+        try:
+            result = propose(path / record["source"]["file"], staging, IntakeConfig(max_colors=s["max_colors"]),
+                             ProposalConfig(planning=planning), progress, record.get("detail_decisions") or None,
+                             artwork={"target_rgb": edited, "provenance": provenance} if edits else None)
+        except StackError as error:
+            shutil.rmtree(staging, ignore_errors=True)
+            raise AppError(f"could not plan from the edited artwork: {error}") from None
+        except BaseException:
+            shutil.rmtree(staging, ignore_errors=True)
+            raise
+        planned = art.load_rgb(staging / "intake" / "target.png")
+        if art.rgb_sha256(planned) != edited_sha:
+            shutil.rmtree(staging, ignore_errors=True)
+            raise AppError("the planned artwork differs from the edited artwork; nothing was changed")
+        with self._artwork_lock:
+            attempts = record.setdefault("attempts", [])
+            if proposal["status"] == NOT_PLANNED:
+                shutil.rmtree(path / "proposal")  # intake only: nothing was planned, nothing to archive
+                folder = None
+            else:
+                folder = f"attempt_{len(attempts) + 1:02d}_artwork"
+                archive = path / "attempts" / folder
+                archive.mkdir(parents=True, exist_ok=False)
+                for part in ("proposal", "review", "draft", "printability", "resize"):
+                    if (path / part).exists():
+                        (path / part).replace(archive / part)
+            staging.replace(path / "proposal")
+            shutil.rmtree(path / "upscale", ignore_errors=True)
+            if (path / "artwork").exists():
+                shutil.rmtree(path / "artwork" / "preview", ignore_errors=True)
+                if edits:
+                    (path / "artwork").replace(path / "proposal" / "artwork_edits")
+                else:
+                    shutil.rmtree(path / "artwork", ignore_errors=True)
+        after_sheets = None
+        if result["selected"]:
+            after_sheets = len(load_stack(path / "proposal" / "candidates" / result["selected"] / "stack").sheets)
+        after = {"status": result["status"], "palette_size": result["intake"]["palette_size"],
+                 "sheet_count": after_sheets, "selected": result["selected"], "artwork_sha256": edited_sha}
+        _write_json(path / "proposal" / "artwork_check.json", {
+            "before": before, "after": after, "region_recolors": len(edits), "archived_as": folder, "checked_utc": _now(),
+            "note": "Sheet counts are measured from the planned stacks. Merging colors can leave the count unchanged "
+                    "or raise it; only these measured values count."})
+        if folder:
+            attempts.append({
+                "id": folder, "archived_utc": _now(), "scale": self.processing_scale(record),
+                "sheet_mm": self.sheet_outer_mm(record), "status": proposal["status"], "stage": origin["stage"],
+                "blockers": [f["code"] for f in proposal["flags"] if f["severity"] == "BLOCKER"],
+                "detail_decisions": record.get("detail_decisions") or {},
+                "replaced_by": {"kind": "artwork_edit", "region_recolors": len(edits), "status": result["status"],
+                                "approved_visible_changes": len(edits)},
+            })
+        record["candidate"] = None
+        self._save_record(name, record)
+        return {"status": result["status"], "selected": result["selected"], "before": before, "after": after}
+
+    def _artwork_view(self, name: str, path: Path, proposal: dict[str, Any]) -> dict[str, Any]:
+        """Artwork colors panel: current artwork, its palette, the edit log and whether the sheets match it."""
+
+        from ..core.propose import NOT_PLANNED
+
+        try:
+            directory, log, ctx = self._artwork_log(name)
+        except Exception as error:  # noqa: BLE001 - a broken log must not hide the rest of the project
+            return {"available": False, "reason": str(error)}
+        origin = ctx["origin"]
+        planned_sha = self._planned_sha(path, proposal, origin["sha256"])
+        if log is not None:
+            stamp = log["current_sha256"][:12]
+            current_sha = log["current_sha256"]
+            palette = log["edits"][-1]["palette_after"] if log["edits"] else log["base"]["palette"]
+            image = self.url(name, "artwork/current.png", stamp)
+        else:
+            current_sha = origin["sha256"]
+            palette = [{"hex": c["hex"], "area_mm2": c["area_mm2"], "regions_4": c["source_regions_4"]}
+                       for c in proposal["intake"]["colors"]] if origin["stage"] == "proposal" else None
+            image = self.url(name, origin["file"], current_sha[:12])
+        edits = (log or {}).get("edits", [])
+        differs = bool(edits) and planned_sha is not None and current_sha != planned_sha
+        view = {
+            "available": True, "stage": origin["stage"], "planned": proposal["status"] != NOT_PLANNED,
+            "image": image, "frame_color": proposal["frame_color"],
+            "mm_per_pixel": proposal["intake"]["artwork_mm_per_pixel"],
+            "current_sha256": current_sha, "planned_sha256": planned_sha,
+            "edits": [{k: e[k] for k in ("index", "op", "from", "to", "selection", "change", "applied_utc")} for e in edits],
+            "palette": palette, "differs_from_planned": differs,
+            "base_changed": bool(log and edits and log["base"]["sha256"] != origin["sha256"]),
+            "can_replan": proposal["status"] == NOT_PLANNED or differs,
+            "planned_from_edited_artwork": proposal.get("artwork_edits"),
+        }
+        verify = _read_json(directory / "verify.json")
+        if verify is not None and log is not None:
+            view["verify"] = verify
+        return view
+
     # -- state for the UI --------------------------------------------------------------
     def state(self, name: str) -> dict[str, Any]:
         path, record = self.path(name), self.record(name)
@@ -987,6 +1427,7 @@ class Workspace:
             state["proposal"] = self._proposal_view(name, path, proposal)
             state["upscale"] = self._upscale_view(name, path, record, proposal)
             state["resize"] = self._resize_view(name, path, record, proposal)
+            state["artwork"] = self._artwork_view(name, path, proposal)
         draft = _read_json(path / "draft" / "state.json")
         if draft is not None:
             state["draft"] = self._draft_view(name, path, draft, current_sha)
@@ -1011,7 +1452,15 @@ class Workspace:
     def _proposal_view(self, name: str, path: Path, proposal: dict[str, Any]) -> dict[str, Any]:
         stamp = int((path / "proposal" / "proposal.json").stat().st_mtime)
         view = {k: proposal.get(k) for k in ("status", "selected", "palette", "frame_color", "flags", "candidates",
-                                             "cad", "seconds", "color_topology", "planning_config", "source")}
+                                             "cad", "seconds", "color_topology", "planning_config", "source",
+                                             "artwork_edits")}
+        check = _read_json(path / "proposal" / "artwork_check.json")
+        if check is not None:
+            view["artwork_check"] = check
+        try:
+            self.refuse_if_artwork_edited(name, "re-running intake")
+        except AppError as error:
+            view["intake_rerun_blocked"] = str(error)
         view["intake"] = {k: proposal["intake"].get(k) for k in ("palette_size", "colors", "transparency",
                                                                   "non_flat_interior_fraction", "snap_changed_fraction")
                           if k in proposal["intake"]}
@@ -1043,7 +1492,7 @@ class Workspace:
         view: dict[str, Any] = {"scale": scale, "import_scale": record["proposal_settings"]["scale"], "attempts": []}
         for row in record.get("attempts", []):
             base = f"attempts/{row['id']}"
-            if not re.fullmatch(r"attempt_\d{2}_(scale\d+|[\d_]+mm)", row["id"]) or _is_link(path / base):
+            if not re.fullmatch(r"attempt_\d{2}_(scale\d+|[\d_]+mm|artwork)", row["id"]) or _is_link(path / base):
                 continue
             old = _read_json(path / base / "proposal" / "proposal.json") or {}
             view["attempts"].append({**row, "images": {
@@ -1056,6 +1505,10 @@ class Workspace:
         view["available"] = proposal.get("status") == NEEDS_DECISION and not (path / "review").exists()
         if not view["available"]:
             return view
+        try:
+            self.refuse_if_artwork_edited(name, "Upscale & Retry")
+        except AppError as error:  # shown instead of the options; the server refuses the request too
+            view["blocked_by_artwork"] = str(error)
         view["options"] = [{"factor": f, **resource_check(self.sheet_outer_mm(record), scale * f)} for f in UPSCALE_FACTORS]
         view["previews"] = {}
         for factor in UPSCALE_FACTORS:

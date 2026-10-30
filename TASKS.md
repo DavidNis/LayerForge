@@ -286,3 +286,21 @@ No complete UI/server, arbitrary photographic depth estimation, frame design, gl
 - [x] API + workspace deletion (confined, links not followed, project.json last, partial-failure retry), project list and project screen actions with confirmation, notice, return to the list.
 - [x] Tests: API (complete/failed/partially generated projects, held-open file, junction to outside data, traversal and non-project folders, linked project folder, restart, re-create same name) and browser (screen + list).
 - [ ] The Hebrew guide does not mention Delete Project yet.
+
+## Artwork recoloring (2026-10-30, D-V3-039)
+
+- [x] `core/artwork.py`: 4-connected region selection (+ optional limit box), recolor, palette/region
+  measurement, replayable log with undo/revert/verify; `intake.use_edited_target`; `propose(artwork=...)`
+  and `ProposalConfig.plan=False` (intake only).
+- [x] App: preview/sample/apply/undo/verify/replan endpoints; Artwork colors panel in Import & proposal
+  (before planning, after a failed or ready proposal) and in Review & edit; kit export blocked while the
+  artwork differs from the planned one; explicit re-plan archives the previous attempt and reports palette
+  size and measured sheet count.
+- [x] Tests `tests/test_artwork_recolor.py` (6 core, 4 API, 1 browser drive `tests/e2e/drive_artwork.mjs`).
+- [x] Manual evaluation on a scratch copy of the couple project (necklace, skin tones, one trouser leg).
+- [ ] User review in the app; explicit approval.
+- [x] 2026-10-30 refinements: "Try Again" right after Apply; Physical Resize & Retry keeps region recolors
+  (unplanned or planned) pixel for pixel with the edit history; Upscale and intake re-runs stay refused with
+  the reason shown; deterministic memory handling in upscale tests (`tests/resource_guard.py`); Hebrew
+  guide chapter 12 (HTML; PDF re-printed before the user said the PDF could be skipped); exe + zip rebuilt.
+- [ ] Not done: carrying recolors across Upscale & Retry (pixel-grid re-mapping) and intake re-runs.

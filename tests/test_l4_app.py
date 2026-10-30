@@ -26,6 +26,7 @@ from pathlib import Path
 import pytest
 
 from layerforge_l1.app import make_server
+from resource_guard import PLENTY, fixed_memory, require_free_memory, require_memory_for_planning
 
 ROOT = Path(__file__).resolve().parents[1]
 SAILBOAT = ROOT / "fixtures" / "l3_print_kit" / "sailboat_512.png"
@@ -501,6 +502,9 @@ def test_upscale_and_retry_after_a_failed_proposal(app, monkeypatch):
         return real(target, config, name)
 
     monkeypatch.setattr(core_propose, "plan_stack", fails_at_scale_1)
+    # Pinned memory decision; the retry really plans at scale 2, so that needs real free memory.
+    fixed_memory(monkeypatch, PLENTY)
+    require_memory_for_planning(150.0, 2, "the real scale-2 retry")
     client, workspace = app
     name = client.ok("POST", "/api/projects?filename=sailboat_512.png&scale=1&outer_mm=150", raw=SAILBOAT.read_bytes())["project"]
     client.wait({"id": client.state(name)["job"]["id"]})
@@ -555,6 +559,8 @@ def test_upscale_is_refused_when_memory_is_insufficient(app, monkeypatch):
         raise PlanningError("simulated failure", {"closure_feasible": False})
 
     monkeypatch.setattr(core_propose, "plan_stack", fails)
+    fixed_memory(monkeypatch, PLENTY)  # the preview passes on any machine; then memory drops
+    require_free_memory(0.5, "the real 2x intake preview")
     client, _ = app
     name = client.ok("POST", "/api/projects?filename=sailboat_512.png&scale=1", raw=SAILBOAT.read_bytes())["project"]
     client.wait({"id": client.state(name)["job"]["id"]})

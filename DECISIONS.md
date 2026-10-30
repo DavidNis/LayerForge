@@ -655,3 +655,55 @@ FDM thresholds remain generic assumptions until a print calibrates them).
 - UI: "Delete…" per row in the project list and "Delete project…" on the project screen (any stage,
   including failed proposals); inline confirmation naming the project and folder, stating it is permanent;
   afterwards the project list/import screen with a result notice.
+
+## D-V3-039 | 2026-10-30 | Region-based artwork recoloring (L4)
+
+**Status:** IMPLEMENTED; READY_FOR_USER_TEST.
+
+- USER_REQUIRED: recolor one connected color region of the processed flat-color artwork (not every area of
+  that color, not a sheet, never the source image), with highlight, palette/picker/eyedropper colors,
+  before/after preview, Apply/Cancel, undo and persistent save; available before planning, after a failed
+  proposal and in Review & edit; explicit re-planning only, keeping the previous attempt.
+- DESIGN_CHOICE: a region is one 4-connected component of one exact target color (the connectivity intake
+  reports as `source_regions_4`). An optional **limit box** restricts the component to the part inside the
+  box, for one of two connected parts (e.g. one trouser leg; the couple's trousers are one region).
+- DESIGN_CHOICE: `core/artwork.py` keeps an edit log in `<project>/artwork/` (`base.png` copy, `current.png`,
+  `edits.json`). Each edit stores the replaced color and a hash of the exact changed pixels; replay from the
+  base must reproduce `current.png` bit for bit (Verify), undo/revert replay a prefix. Apply must name the
+  preview id computed from the current artwork hash and the op, so only a previewed edit can be applied.
+  The eyedropper color must still be present at the sampled point. The frame color is refused.
+- DESIGN_CHOICE: the artwork basis is the review's reviewed artwork when a review exists, else the
+  proposal's intake target. While the edited artwork differs from the one the sheets were planned from,
+  the status strip says so and **print-kit export is refused** (server and UI); review sheet edits and the
+  FDM estimate still work on the old stack, labelled as such. Undoing all artwork edits lifts the block.
+- DESIGN_CHOICE: re-planning (`POST .../artwork/replan`, a job; refused up front when nothing changed)
+  re-runs `propose` with the same source, settings and detail choices; `intake.use_edited_target` swaps in
+  the edited target only if grid and frame padding are identical and the frame color is unused, and
+  re-measures palette, regions, areas and thin features. The planner is unchanged. The previous proposal,
+  review, draft, estimate and size check are archived as `attempts/attempt_NN_artwork`; the log moves to
+  `proposal/artwork_edits/`; `proposal/artwork_check.json` records palette size and the **measured** sheet
+  count before/after. No sheet reduction is promised. Flag `ARTWORK_EDITED` (INFO) discloses user edits.
+- DESIGN_CHOICE: import option "Edit artwork colors before planning" (`plan=0`) runs intake only
+  (`ProposalConfig.plan=False`, status `ARTWORK_READY_NOT_PLANNED`); planning starts only from the button.
+- LIMITATION: re-running intake (detail choices), Upscale & Retry and resize retry start again from the
+  source image, so they are refused while unplanned artwork edits exist or after planning from edited
+  artwork (message says why); artwork edits are not carried across a change of processing grid.
+- 2026-10-30 refinements before approval (user instruction):
+  - DESIGN_CHOICE: after an applied color change the re-planning action is **Try Again**, shown in a callout
+    where the Apply button was (scrolled into view) and in the "artwork edited" banner; "Plan sheets from this
+    artwork" remains only for an intake-only project with no edits.
+  - DESIGN_CHOICE: Physical Resize & Retry keeps region recolors. With unplanned edits or a proposal planned
+    from edited artwork, the size analysis basis includes the artwork hash (any artwork change makes the
+    analysis/preview out of date), the preview and trial planning use the edited artwork pixel for pixel
+    (`resize.preview_resize(..., edited=)`, `trial_plan(..., edited=)`); intake still runs at the new size
+    only for grid/placement/frame and boundary checks. `use_edited_target(..., edited_frame=)` re-maps the
+    never-visible frame padding when intake picks another frame color at the new size (same pixels
+    required). Size approval is still required; the previous attempt is archived; the edit log moves to (or
+    is copied into) the new `proposal/artwork_edits/`. LIMITATION: details a larger sheet could keep from the
+    source are not re-detected on the kept artwork.
+  - LIMITATION kept: Upscale & Retry (finer pixel grid; recolors are exact regions of the current grid and
+    re-mapping is not implemented) and intake re-runs with other detail choices stay refused while region
+    recolors exist; the UI shows the reason in place of the buttons (`ARTWORK_LIMITS`).
+  - Tests: memory decisions in upscale tests are pinned with `tests/resource_guard.py` (fixed probe values);
+    explicit just-below/just-above threshold rejection tests; real work that needs real memory skips with a
+    `RESOURCE:` reason instead of failing. `core/upscale.resource_check` and its headroom are unchanged.

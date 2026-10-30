@@ -850,3 +850,43 @@ follow the light-blue body). Not user approved; no CAD exported.
   exe incl. browser deletion from screen and list) = 181 PASS / 0 FAIL / 0 SKIP. Rebuilt
   dist\LayerForge-0.1.0-win64.zip 2026-10-29 19:09, SHA-256
   77975efd8c8d4c7ef1f3c19040e7822042318b6322ccd8c4db149dd296f8256d (static files byte-identical to src).
+- 2026-10-30 Region-based artwork recoloring (D-V3-039). State: READY_FOR_USER_TEST. Not committed.
+  Click a color region of the processed flat-color artwork -> that 4-connected region only (optional limit
+  box for one part of a connected region) is highlighted; new color from the palette, a picker or an
+  eyedropper; before/after preview with palette and region changes (incl. merges); Apply/Cancel; undo,
+  revert, verify (replay) and persistence in <project>/artwork/. Available before planning (new import
+  option, intake only), after failed or ready proposals and in Review & edit. Artwork edits are labelled
+  "artwork edit, not a sheet edit"; while the artwork differs from the planned one, the status strip warns
+  and kit export is refused (server + UI). "Plan sheets from this artwork" is explicit, archives the
+  previous attempt (attempt_NN_artwork) and reports palette size and measured sheet count. Source image
+  never changed; planner unchanged.
+  Tests: tests/test_artwork_recolor.py 11 PASS (6 core, 4 API through the real server, 1 headless-Edge
+  drive). Full suite during the couple evaluation: 189 PASS / 2 FAIL (both memory-gated upscale checks
+  that saw INSUFFICIENT_MEMORY while the evaluation re-planned at scale 2). Re-run afterwards of
+  test_l4_app.py + test_upscale_retry.py + test_artwork_recolor.py: 28 PASS / 1 FAIL
+  (test_upscale_retry[4]: INSUFFICIENT_MEMORY with 2.37 GB free; that code is unchanged).
+  test_windows_build passed in the full run, but dist\ was NOT rebuilt and does not contain this feature.
+  Manual evaluation, couple illustration (scratch copy of the user's "us" project, scale 2, 200 mm;
+  review of 16 sheets, 10 colors): necklace only (620 px; bracelet of the same gold untouched) -> cream;
+  three darker skin regions -> light skin via eyedropper (merged with 1/2/1 adjacent skin regions);
+  left trouser leg only via limit box (17,821 of 67,629 px of the one trouser region) -> new color #5B6B7A;
+  undo + redo, verify replay identical, reload on a second server identical; kit refused (400) before
+  re-planning. Re-plan (724 s): PROPOSAL_READY_FOR_REVIEW, 11 colors (one added by the trouser color),
+  candidates 20/17/15/20 sheets, selected 15 (was 16); review archived as attempt_01_artwork; assembled
+  front from the reopened STL matches the edited artwork. The 16 -> 15 is a measured result for this case
+  only, not a general effect of merging colors.
+- 2026-10-30 artwork recoloring refinements (D-V3-039 addendum). State: READY_FOR_USER_TEST. Not committed.
+  "Try Again" (re-planning after a color change) appears where Apply was, scrolled into view, and in the
+  warning banner. Physical Resize & Retry now keeps region recolors (unplanned, or a proposal already
+  planned from edited artwork): the edited artwork is planned pixel for pixel at the new size, the size
+  approval is still required, the previous attempt is archived, the edit log moves/copies into the new
+  proposal; source never changed. Upscale & Retry and intake re-runs stay refused while recolors exist, with
+  the reason shown in place of the buttons. Upscale tests: memory decisions pinned (fixed probe values),
+  explicit below/above-threshold rejection tests, real work skips with "RESOURCE:" if memory is short;
+  the production memory check is unchanged. Hebrew guide: new chapter 12 (+ TOC, statuses,
+  troubleshooting, glossary; chapters 12-16 renumbered 13-17); the PDF had already been re-printed (35 pages) when the user said the PDF update could be skipped.
+  Focused verification, run sequentially (no overlapping heavy jobs): artwork recolor 12, upscale + resize
+  16, app + launcher 16, core L0/L1/L2 + intake details 65 = 109 PASS / 0 FAIL / 0 SKIP. Exe rebuilt:
+  dist\LayerForge\LayerForge.exe and dist\LayerForge-0.1.0-win64.zip (2026-10-30 13:05, SHA-256
+  e1ae1f70d088c9ed670c3863622e8cce9018b6cb08fb0ebe80c22c4ac8c7777b; static files byte-identical to src).
+  Packaged tests: 6 PASS (5 existing + new artwork browser drive against the frozen exe).

@@ -24,6 +24,7 @@ from layerforge_l1.core import upscale
 from layerforge_l1.core.upscale import (BOUNDARY_FAILED, INSUFFICIENT_MEMORY, READY, boundary_check, carry_decisions,
                                         compare_targets, preview_upscale, resource_check)
 
+from resource_guard import GIB, PLENTY, PREVIEW_INTAKE_GIB, fixed_memory, require_free_memory
 from test_refinement_and_details import _eyes
 
 
@@ -38,7 +39,11 @@ def previous(tmp_path_factory):
 
 
 @pytest.mark.parametrize("factor", [2, 4])
-def test_preview_keeps_physical_boundaries_and_lists_visible_changes(previous, factor) -> None:
+def test_preview_keeps_physical_boundaries_and_lists_visible_changes(previous, factor, monkeypatch) -> None:
+    # The memory decision is pinned (this test is about boundaries and changes, not about this machine's
+    # load); the intake at the finer grid is real work, so it needs real free memory or is skipped.
+    fixed_memory(monkeypatch, PLENTY)
+    require_free_memory(PREVIEW_INTAKE_GIB[factor], f"the real {factor}x intake preview")
     old = json.loads((previous / "p" / "proposal.json").read_text(encoding="utf-8"))
     view = preview_upscale(previous / "eyes.png", previous / "p", previous / f"x{factor}", factor, IntakeConfig(max_colors=4))
     assert view["status"] == READY and view["to_scale"] == factor
@@ -114,3 +119,26 @@ def test_memory_limits_are_checked_before_any_work(previous, monkeypatch) -> Non
     view = preview_upscale(previous / "eyes.png", previous / "p", previous / "low", 4, IntakeConfig(max_colors=4))
     assert view["status"] == INSUFFICIENT_MEMORY and view["boundaries"]["pass"]
     assert BOUNDARY_FAILED != INSUFFICIENT_MEMORY
+
+
+@pytest.mark.parametrize("factor", [2, 4])
+def test_insufficient_memory_is_rejected_deterministically(previous, factor, monkeypatch) -> None:
+    """Just below and just above the threshold, independent of this machine's real free memory."""
+
+    need = upscale.estimate_peak_bytes(StackGrid.for_planner(150.0, factor)) / upscale.MEMORY_HEADROOM
+    fixed_memory(monkeypatch, int(need * 0.99))
+    below = resource_check(150.0, factor)
+    assert not below["fits"] and "close other programs" in below["reason"]
+    fixed_memory(monkeypatch, int(need * 1.01) + 1)
+    assert resource_check(150.0, factor)["fits"]
+    # The preview reports the refusal with the same rule (its own intake work is small and is done).
+    require_free_memory(PREVIEW_INTAKE_GIB[factor], f"the real {factor}x intake preview")
+    fixed_memory(monkeypatch, int(need * 0.99))
+    view = preview_upscale(previous / "eyes.png", previous / "p", previous / f"short{factor}", factor, IntakeConfig(max_colors=4))
+    assert view["status"] == INSUFFICIENT_MEMORY and not view["resources"]["fits"]
+    assert view["resources"]["available_gb"] == pytest.approx(need * 0.99 / GIB, abs=0.01)
+
+
+def test_real_memory_probe_reports_a_value() -> None:
+    free = upscale.available_memory_bytes()
+    assert free is None or free > 0

@@ -343,6 +343,59 @@ def detail_images(canvas: np.ndarray, default_rgb: np.ndarray, result_rgb: np.nd
     return overview, crops
 
 
+def use_edited_target(prepared: dict[str, Any], edited: np.ndarray, config: IntakeConfig = IntakeConfig(),
+                      edited_frame: str | None = None) -> dict[str, Any]:
+    """Replace ``prepared``'s target by a user-edited version of it (artwork recolor) and re-measure.
+
+    The edit may only change artwork pixels to exact colors other than the frame: the shape and the
+    frame padding must be identical, so the grid, placement and frame stay those of this intake.
+    ``edited_frame`` is the edited artwork's own frame color; when this intake chose another one (the
+    palette, and so the farthest frame candidate, can differ on another sheet size), the edited frame
+    padding is given this intake's frame color, provided it covers exactly the same pixels.
+    Color measurements (palette, areas, regions, thin features, near duplicates) are recomputed
+    for the edited target; source-fidelity measurements (snap/flatness) still describe intake.
+    """
+
+    target, inside = prepared["target_rgb"], prepared["artwork_mask"]
+    edited = np.array(edited, dtype=np.uint8)
+    if edited.shape != target.shape:
+        raise StackError(f"the edited artwork is {edited.shape[:2]} px, intake produced {target.shape[:2]} px; "
+                         "settings changed since it was edited")
+    frame = np.asarray(_parse_hex(prepared["frame_color"]), np.uint8)
+    if edited_frame and edited_frame.upper() != prepared["frame_color"].upper() and (~inside).any():
+        padding = np.all(edited == np.asarray(_parse_hex(edited_frame), np.uint8), axis=2)
+        if not np.array_equal(padding, ~inside):
+            raise StackError("the edited artwork's frame padding does not cover the same pixels as this intake's")
+        edited[padding] = frame
+    if not np.array_equal(edited[~inside], target[~inside]) or np.all(edited[inside] == frame, axis=1).any():
+        raise StackError("the edited artwork changes the frame padding or uses the frame color inside the artwork")
+    m = dict(prepared["measurements"])
+    mm_per_pixel, width_px = m["artwork_mm_per_pixel"], m["structural_width_px"]
+    colors_rgb, counts = np.unique(edited[inside].reshape(-1, 3), axis=0, return_counts=True)
+    order = {c["hex"]: i for i, c in enumerate(m["colors"])}
+    rows = []
+    for rgb, count in zip(colors_rgb, counts):
+        mask = inside & np.all(edited == rgb, axis=2)
+        n, components = cv2.connectedComponents(mask.astype(np.uint8), connectivity=4)
+        sizes = np.bincount(components.ravel())[1:] if n > 1 else np.array([], int)
+        rows.append({
+            "hex": hex_color(rgb), "share": round(float(count) / max(int(inside.sum()), 1), 6),
+            "area_mm2": round(float(count) * mm_per_pixel**2, 2), "source_regions_4": int(n - 1),
+            "smallest_region_mm2": round(float(sizes.min()) * mm_per_pixel**2, 3) if sizes.size else 0.0,
+            "sub_width_feature_mm2": round(_thin_feature_pixels(mask, width_px) * mm_per_pixel**2, 2),
+        })
+    rows.sort(key=lambda r: (order.get(r["hex"], len(order)), r["hex"]))  # intake order, new colors last
+    lab = _lab(np.array([_parse_hex(r["hex"]) for r in rows]))
+    distances = np.linalg.norm(lab[:, None] - lab[None], axis=2)
+    np.fill_diagonal(distances, np.inf)
+    m.update(colors=rows, palette_size=len(rows),
+             min_palette_delta=round(float(distances.min()), 2) if len(rows) > 1 else None,
+             nearest_palette_pairs=[[rows[i]["hex"], rows[j]["hex"], round(float(distances[i, j]), 2)]
+                                    for i, j in zip(*np.nonzero(np.triu(distances < config.near_duplicate_delta)))])
+    return {**prepared, "target_rgb": edited, "intake_target_rgb": target, "measurements": m,
+            "palette": np.array([_parse_hex(r["hex"]) for r in rows], np.uint8)}
+
+
 def prepare_target(
     rgb: np.ndarray, opaque: np.ndarray | None, grid: StackGrid, config: IntakeConfig = IntakeConfig(),
     decisions: dict[str, Any] | None = None,

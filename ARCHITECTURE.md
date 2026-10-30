@@ -163,3 +163,12 @@ Portable Windows build (D-V3-031): `packaging/LayerForge.spec` bundles `packagin
 -> `app/launcher.py` (window, port choice, single-instance lock, log) -> `make_server`, the same server as
 `python -m layerforge_l1 app`. When frozen, `layerforge_l1.PROJECT_ROOT` is the bundle folder (read-only
 `fixtures/print_processes`, `app/static`); user data lives in `Documents\LayerForge` and `%LOCALAPPDATA%\LayerForge`.
+
+### Artwork recoloring (2026-10-30, D-V3-039)
+
+`core/artwork.py` edits the processed flat-color artwork (planner target), never a sheet or the source:
+4-connected region selection (optional limit box), recolor, palette/region measurement, and a replayable
+log in `<project>/artwork/`. `intake.use_edited_target` lets `propose(..., artwork=...)` plan the edited
+target with the unchanged planner; `ProposalConfig.plan=False` stops after intake. The app exposes
+`/api/projects/<p>/artwork/{preview,sample,apply,undo,verify,replan}`; kit export is refused while the
+edited artwork differs from the artwork the current sheets were planned from.
