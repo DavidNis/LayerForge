@@ -44,3 +44,10 @@ artifacts/l4_app_v1/
 # Portable Windows build output (scripts/build_windows.ps1).
 build/
 dist/
+
+# Local working instructions (kept on disk, not published).
+AGENTS.md
+prompts/
+
+# Derived from third-party reference artwork: private use only, not published.
+artifacts/l1_van_gogh_v1/

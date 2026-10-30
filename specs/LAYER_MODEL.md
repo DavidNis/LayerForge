@@ -61,7 +61,7 @@
 }
 ```
 
-**Illustrative numeric values only.** The agent must decide a validated exact JSON schema and document how handles, polygons, masks, persistent provenance and physical mm geometry are encoded. Don't treat this snippet as complete production schema or claim it can build as-is.
+**Illustrative numeric values only.** The implementation must define a validated exact JSON schema and document how handles, polygons, masks, persistent provenance and physical mm geometry are encoded. Don't treat this snippet as complete production schema or claim it can build as-is.
 
 ## Essential invariants
 

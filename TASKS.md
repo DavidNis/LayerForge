@@ -2,7 +2,7 @@
 
 ## L-1 (current; stop after feasibility deliverables)
 
-- [x] Verify `AGENTS.md`, all six `specs/` files, and the clean-start prompt exist in the open workspace.
+- [x] Verify all six `specs/` files exist in the workspace.
 - [x] Check Python 3.12, CAD dependencies, printer target/configuration; document tested commands.
 - [x] Draw/create an original legal source fixture and ground-truth/reference visible composite with traceable annotation provenance.
 - [x] Define a versioned physical `LayerStack` (not a semantic-object manifest); record one color per layer, common XY, order, thickness and any gaps.

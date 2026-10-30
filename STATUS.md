@@ -16,7 +16,7 @@
 - Housing, slotted frame, glue graph, peg, mount and stand are outside current work.
 - L-1 can use a manually reviewed layer plan; automatic interpretation of new images is a later, separately gated milestone L1.
 
-## Agent must update after each session
+## Session log
 
 ```text
 Date: 2026-10-16

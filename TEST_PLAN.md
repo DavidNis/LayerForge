@@ -33,14 +33,14 @@
 - Invalid/nonmanifold STEP/STL or rescaled layer -> FAIL CAD/export validation.
 - Preview geometry differs from exported solid or an intended layer is omitted -> FAIL view-export parity.
 - Frame is omitted -> should **NOT** fail unless optional frame validation specifically enabled.
-- Any agent claim "automatic" while masks are hand authored -> FAIL provenance review.
+- Any claim of "automatic" while masks are hand authored -> FAIL provenance review.
 
 ## Quantitative measures
 
 - Orthographic source-aligned outer silhouette IoU, per-visible-color pixel mask IoU/coverage, and annotated critical-detail coverage.
 - Measure at fixed raster resolution and target size; log anti-alias settings, mask alignment and source edits.
 - Proposed initial engineering target: source-composite silhouette IoU ≥ 0.95 **for the controlled flat fixture**. This threshold is only a proposed test setting and cannot on its own prove quality or user satisfaction.
-- Bound/volume after STEP/STL read-back checked against source CAD; tolerances chosen, justified and reported by agent (not assumed automatically).
+- Bound/volume after STEP/STL read-back checked against source CAD; tolerances chosen, justified and reported (not assumed automatically).
 - Number of physical layers, printable connected components and intended colors each measured distinctly.
 
 ## Physical test before L-1 approval

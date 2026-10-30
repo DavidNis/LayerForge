@@ -17,6 +17,6 @@
 
 - Produced a new-repository edition of the V3 docs with L-1 as the first milestone.
 - Removed V2 migration prompt and incompatible L-0 audit startup workflow.
-- Added `prompts/START_FRESH_PROJECT.md`, verified complete six-spec package, and documented precise PowerShell checks.
+- Verified the complete six-spec package and documented precise PowerShell checks.
 - Unchanged core product scope: printable single-color physical 2.5D layers; not semantic objects; housing out of scope.
 - No runnable CAD implementation or L-1 validation is included in this documentation package.

@@ -44,7 +44,7 @@ Every view is produced from the same layer solids as STEP and STL. An AI mockup 
 - **Q4:** Desired allowable palette / max layer count for user's typical art. A layer count is not equivalent to a unique color count.
 - **Q5:** Whether user wants all layers to fit one bed and be printed one at a time or supports multi-bed subdivision. Do not enforce without asking.
 
-The coding agent should **not block the controlled L-1 experiment** on these choices. It should expose them as parameters, use transparent experiment-only defaults for L-1, and request clarification before fixing a final product policy.
+The implementation should **not block the controlled L-1 experiment** on these choices. It should expose them as parameters, use transparent experiment-only defaults for L-1, and request clarification before fixing a final product policy.
 
 ## D-V3-007 | 2026-10-16 | Controlled L-1 fixture and experiment-only dimensions
 
