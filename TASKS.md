@@ -304,3 +304,7 @@ No complete UI/server, arbitrary photographic depth estimation, frame design, gl
   the reason shown; deterministic memory handling in upscale tests (`tests/resource_guard.py`); Hebrew
   guide chapter 12 (HTML; PDF re-printed before the user said the PDF could be skipped); exe + zip rebuilt.
 - [ ] Not done: carrying recolors across Upscale & Retry (pixel-grid re-mapping) and intake re-runs.
+- [x] 2026-10-30 zoom/pan (buttons, Fit, 100 %, Ctrl+wheel, Space/middle drag) and multi-region selection
+  (Shift+Click toggle, mixed colors, limit box) with batch recolor as one undoable edit.
+- [x] exe/zip rebuilt with zoom/pan and multi-region selection (2026-10-30 15:49); packaged tests 6 PASS.
+- [ ] Not done: Hebrew guide chapter 12 does not describe zoom/pan or Shift+Click yet.

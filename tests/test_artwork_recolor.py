@@ -137,6 +137,80 @@ def test_edited_target_is_remeasured_and_may_not_touch_the_frame():
         use_edited_target(prepared, edited[:30])
 
 
+# -- multi-region selection and batch recolor ------------------------------------------------
+LEFT_RED, RIGHT_RED, BAR, GREEN_AT = [8, 8], [8, 22], [8, 30], [25, 10]
+
+
+def _union(image, regions):
+    mask = np.zeros(image.shape[:2], bool)
+    for region in regions:
+        mask |= art.select_region(image, FRAME, region["at_px"], region.get("box_px"))[0]
+    return mask
+
+
+def test_shift_click_adds_and_removes_disconnected_and_mixed_color_regions():
+    image = _image()
+    regions = art.toggle_region(image, FRAME, [], LEFT_RED)
+    regions = art.toggle_region(image, FRAME, regions, RIGHT_RED)  # same color, disconnected
+    regions = art.toggle_region(image, FRAME, regions, BAR)  # another color
+    mask, info = art.select_regions(image, FRAME, regions)
+    assert info["regions"] == 3 and info["colors"] == [BLUE, RED] and info["color"] == "mixed"
+    assert info["pixels"] == 49 + 49 + 42 and np.array_equal(mask, _union(image, regions))
+    # Shift+Click anywhere inside a selected region removes exactly that region.
+    fewer = art.toggle_region(image, FRAME, regions, [10, 10])
+    assert [r["at_px"] for r in fewer] == [RIGHT_RED, BAR]
+    assert art.toggle_region(image, FRAME, fewer, [11, 5]) == fewer + [{"at_px": [11, 5]}]
+    # The same region listed twice counts once; the frame and points outside a box are refused.
+    _, twice = art.select_regions(image, FRAME, [{"at_px": LEFT_RED}, {"at_px": [6, 6]}])
+    assert twice["regions"] == 1 and twice["pixels"] == 49
+    with pytest.raises(art.ArtworkError, match="frame"):
+        art.toggle_region(image, FRAME, regions, [0, 0])
+    with pytest.raises(art.ArtworkError, match="outside the limit box"):
+        art.toggle_region(image, FRAME, regions, [25, 30], [18, 2, 32, 20])
+    with pytest.raises(art.ArtworkError, match="no region"):
+        art.select_regions(image, FRAME, [])
+
+
+def test_batch_recolor_changes_only_the_selected_pixels_including_a_limit_box():
+    image = _image()
+    regions = [{"at_px": LEFT_RED}, {"at_px": BAR}, {"at_px": GREEN_AT, "box_px": [18, 2, 32, 20]}]
+    op = art.check_op({"op": "recolor_regions", "regions": regions, "color": "#123456", "source": "picker"})
+    after, mask, selection, change = art.plan_edit(image, op, FRAME, 0.5)
+    changed = np.any(after != image, axis=2)
+    assert np.array_equal(changed, mask) and np.array_equal(mask, _union(image, regions))
+    assert (after[mask] == (0x12, 0x34, 0x56)).all() and np.array_equal(after[~mask], image[~mask])
+    assert selection["regions"] == 3 and selection["limited_by_box"] and (after[25, 30] == (0, 255, 0)).all()
+    assert change["from"] == "mixed" and change["from_colors"] == [BLUE, GREEN, RED] and change["pixels"] == int(mask.sum())
+    assert change["regions_before"][RED] == 2 and change["regions_after"][RED] == 1
+    assert change["colors_removed"] == [BLUE] and change["colors_added"] == ["#123456"]
+    # Regions that already have the new color are kept as they are; all of them -> nothing to do.
+    same = art.check_op({"regions": [{"at_px": LEFT_RED}, {"at_px": RIGHT_RED}], "color": RED})
+    with pytest.raises(art.ArtworkError, match="every selected region already has"):
+        art.plan_edit(image, same, FRAME, 0.5)
+    partly = art.check_op({"regions": [{"at_px": LEFT_RED}, {"at_px": BAR}], "color": RED})
+    after, mask, _, change = art.plan_edit(image, partly, FRAME, 0.5)
+    bar = _union(image, [{"at_px": BAR}])
+    assert change["pixels"] == int(bar.sum()) == 42 and np.array_equal(np.any(after != image, axis=2), bar)
+    for bad in ({"regions": [], "color": RED}, {"regions": [{"at_px": [1]}], "color": RED},
+                {"regions": "x", "color": RED}, {"op": "paint", "color": RED}):
+        with pytest.raises(art.ArtworkError):
+            art.check_op(bad)
+
+
+def test_batch_recolor_is_one_undoable_logged_edit_that_replays(tmp_path):
+    image = _image()
+    folder = tmp_path / "artwork"
+    art.start(folder, image, {"stage": "test"}, FRAME, 0.5)
+    first, _ = art.apply(folder, art.check_op({"at_px": GREEN_AT, "color": WHITE}))  # single-region op (legacy form)
+    batch = art.check_op({"regions": [{"at_px": LEFT_RED}, {"at_px": RIGHT_RED}, {"at_px": BAR}], "color": GREEN})
+    second, entry = art.apply(folder, batch)
+    log = art.read_log(folder)
+    assert len(log["edits"]) == 2 and entry["selection"]["regions"] == 3 and entry["from_colors"] == [BLUE, RED]
+    assert np.array_equal(np.any(second != first, axis=2), _union(first, batch["regions"]))
+    assert art.verify(folder)["replay_identical"] and np.array_equal(art.replay(folder, log), second)
+    undone, log = art.revert(folder, 1)  # the whole batch is one undo step
+    assert len(log["edits"]) == 1 and np.array_equal(undone, first)
+
 # -- app ----------------------------------------------------------------------------------------
 @pytest.fixture()
 def app(tmp_path):
@@ -404,6 +478,65 @@ def test_physical_resize_keeps_region_recolors(app):
     assert (workspace / name / "proposal" / "artwork_edits" / "edits.json").is_file()
 
 
+def test_multi_region_batch_recolor_through_the_server(app):
+    """Shift+Click toggling (server-side), mixed colors and a limit box, one batch edit, undo, reload, explicit planning."""
+
+    client, workspace, _ = app
+    name = _import(client, "&plan=0")
+    base = f"/api/projects/{name}/artwork"
+
+    def toggle(regions, at, box=None):
+        result = client.ok("POST", f"{base}/preview", {"regions": regions, "toggle": {"at_px": at, "box_px": box}})
+        return result["regions"], result["selection"]
+
+    regions, sel = toggle([], PORTHOLES[0])
+    assert sel["regions"] == 1 and sel["colors"] == [SKY]
+    regions, sel = toggle(regions, PORTHOLES[1])  # another disconnected region of the same color
+    regions, sel = toggle(regions, SUN_AT)  # a different original color
+    regions, sel = toggle(regions, SEA_LEFT, [400, 0, 512, 256])  # part of the sea only
+    assert sel["regions"] == 4 and sel["colors"] == ["#1C478D", SKY, SUN] and sel["limited_by_box"]
+    regions, sel = toggle(regions, [PORTHOLES[1][0] + 1, PORTHOLES[1][1]])  # Shift+Click a selected one: removed
+    assert sel["regions"] == 3 and [r["at_px"] for r in regions] == [PORTHOLES[0], SUN_AT, SEA_LEFT]
+    empty, none = toggle([{"at_px": PORTHOLES[0]}], PORTHOLES[0])
+    assert empty == [] and none is None  # deselecting the last region clears the selection
+
+    before = art.load_rgb(workspace / name / "artwork" / "current.png")
+    preview = client.ok("POST", f"{base}/preview", {"regions": regions, "color": "#C0392B", "source": "picker"})
+    assert preview["op"]["op"] == "recolor_regions" and preview["selection"]["regions"] == 3
+    assert preview["change"]["from"] == "mixed" and "one edit" in " ".join(preview["notes"])
+    for key in ("selection", "after", "before_after"):
+        assert client.ok("GET", preview["images"][key])[:4] == b"\x89PNG"
+    applied = client.ok("POST", f"{base}/apply", {"op": preview["op"], "preview_id": preview["preview_id"]})
+    assert applied["edit"] == 1
+    after = art.load_rgb(workspace / name / "artwork" / "current.png")
+    expected = np.zeros(before.shape[:2], bool)
+    for region in regions:
+        expected |= art.select_region(before, None, region["at_px"], region.get("box_px"))[0]
+    assert np.array_equal(np.any(after != before, axis=2), expected)  # only the selected pixels changed
+    assert np.array_equal(after[~expected], before[~expected]) and (after[expected] == (0xC0, 0x39, 0x2B)).all()
+    assert art.hex_color(after[PORTHOLES[1][0], PORTHOLES[1][1]]) == SKY and art.hex_color(after[SEA_RIGHT[0], SEA_RIGHT[1]]) == "#1C478D"
+
+    view = client.state(name)["artwork"]
+    assert len(view["edits"]) == 1 and view["edits"][0]["selection"]["regions"] == 3
+    assert view["edits"][0]["from_colors"] == ["#1C478D", SKY, SUN] and view["can_replan"]
+    assert client.ok("POST", f"{base}/undo", {}) == {"edits_before": 1, "edits_after": 0}  # one undo step
+    assert np.array_equal(art.load_rgb(workspace / name / "artwork" / "current.png"), before)
+    preview = client.ok("POST", f"{base}/preview", {"regions": regions, "color": "#C0392B", "source": "picker"})
+    client.ok("POST", f"{base}/apply", {"op": preview["op"], "preview_id": preview["preview_id"]})
+
+    server2, client2 = start(workspace)  # save/reload
+    try:
+        assert client2.ok("POST", f"{base}/verify", {})["replay_identical"]
+        assert client2.state(name)["artwork"]["edits"][0]["selection"]["regions"] == 3
+    finally:
+        server2.shutdown()
+        server2.server_close()
+    client.run(name, "artwork/replan")  # Plan sheets from this artwork: explicit, never automatic
+    p = client.state(name)["proposal"]
+    assert p["status"] == "PROPOSAL_READY_FOR_REVIEW" and p["artwork_edits"]["region_recolors"] == 1
+    assert np.array_equal(art.load_rgb(workspace / name / "proposal" / "intake" / "target.png"), after)
+
+
 def test_artwork_requests_are_checked(app):
     client, workspace, _ = app
     name = _import(client, "&plan=0")
@@ -438,7 +571,7 @@ def test_browser_artwork_panel(app):
     result = json.loads(lines[-1])
     assert result["ok"], result.get("error", "") + "\n" + run.stderr[-3000:]
     assert result["console_errors"] == []
-    assert result["create_label"] == "Import and prepare artwork" and "no sheets were planned" in result["not_planned_banner"]
+    assert result["create_label"] == "Import and prepare artwork" and "no sheets are planned" in result["not_planned_banner"]
     assert "One connected region of 4" in result["selection"]
     assert result["preview_palette"].startswith("5 → 5 colors") and "Apply to artwork" in result["preview_text"]
     assert result["history_after_cancel"] == 0
@@ -446,5 +579,34 @@ def test_browser_artwork_panel(app):
     assert "eyedropper" in result["history_text"] and "palette color" in result["history_text"]
     assert "reproduces the saved artwork exactly" in result["verify"] and result["history_after_reload"] == 1
     assert "limited to the box" in result["box_selection"]
+    # Zoom: buttons, Fit, Ctrl+wheel around the cursor; hit-testing and the eyedropper exact when zoomed.
+    zoom = result["zoom"]
+    pct = lambda label: int(label.split("%")[0])  # noqa: E731
+    assert zoom["no_plus_minus_buttons"] and zoom["fit_active_at_start"] and not zoom["fit_active_when_zoomed"]
+    assert pct(zoom["after_wheel"]) >= 3 * pct(zoom["fit"])  # plain wheel, no modifier
+    assert not zoom["page_scrolled_while_zooming"] and zoom["page_scrolls_outside"]
+    assert pct(zoom["fit"]) < pct(zoom["after_wheel_down"]) < pct(zoom["after_wheel"])  # wheel down zooms out
+    assert zoom["anchor_drift_down_px"] < zoom["screen_px_per_art_px"] * 1.5
+    near = lambda a, b: abs(pct(a) - pct(b)) <= 2  # noqa: E731 - fit depends on the viewport width (scrollbar)
+    assert near(zoom["after_fit"], zoom["fit"]) and pct(zoom["after_key_plus"]) > pct(zoom["fit"]) + 5 and near(zoom["after_key_zero"], zoom["fit"])
+    # The artwork pixel under the cursor stays under it while zooming (drift below one artwork pixel).
+    assert zoom["anchor_drift_px"] < zoom["screen_px_per_art_px"], zoom
+    assert "#AAD7F4" in result["zoomed_selection"] and "69 px" in result["zoomed_selection"]
+    assert "#774627" in result["zoomed_eyedropper"]  # hull sampled a few pixels from two portholes
+    # Pan: Space + drag and middle drag move the view (no edit); clicks stay exact afterwards.
+    pan = result["pan"]
+    assert pan["space_drag"] != pan["before"] and pan["middle_drag"] != pan["space_drag"] and pan["history"] == 1
+    assert "#AAD7F4" in result["panned_selection"] and "69 px" in result["panned_selection"]
+    # Multi-region: Shift+Click adds/removes, mixed colors, one batch edit, one undo step.
+    multi = result["multi"]
+    assert "3 regions selected" in multi["three"] and "2 different original colors" in multi["three"]
+    assert multi["after_remove"].startswith("2 regions selected") and "in 2 regions" in multi["preview"]
+    assert "2 regions" in multi["history"] and multi["try_again"] and multi["after_undo"] == 1  # entry #2 only
     assert "After 1 region recolor" in result["check_after_row"]
-    assert "Try Again" in result["try_again"] and result["try_again_in_view"] and result["replan_label"] == "Try Again"
+    # Review & edit canvas: wheel zoom toward the cursor, exact clicks at high zoom, panning never edits.
+    rz = result["review_zoom"]
+    assert int(rz["after_wheel"].split("%")[0]) >= 3 * int(rz["fit"].split("%")[0]) and not rz["page_scrolled"]
+    assert rz["anchor_drift_px"] < rz["screen_px_per_image_px"] * 1.5
+    assert rz["clicked_mm"] and all(abs(a - b) <= 0.15 for a, b in zip(rz["clicked_mm"], rz["target_mm"])), rz
+    assert rz["panned"] and rz["pending_unchanged_by_pan"] and near(rz["after_fit"], rz["fit"])
+    assert "Plan sheets from this artwork" in result["try_again"] and result["try_again_in_view"] and result["replan_label"] == "Plan sheets from this artwork"

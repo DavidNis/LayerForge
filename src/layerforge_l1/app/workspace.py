@@ -1144,7 +1144,7 @@ class Workspace:
             _, log, _ = self._artwork_log(name)
             if log and log["edits"]:
                 raise AppError(f"{len(log['edits'])} region recolor(s) are not planned yet; {action} is not available "
-                               f"while they exist because {why}. Use Try Again (or Physical resize) to plan them, "
+                               f"while they exist because {why}. Use Plan sheets from this artwork (or Physical resize) to plan them, "
                                "or undo them first.")
 
     def check_artwork_matches_stack(self, name: str) -> None:
@@ -1165,7 +1165,11 @@ class Workspace:
     def artwork_preview(self, name: str, request: Any) -> dict[str, Any]:
         """Select the region at a point (optionally inside a box) and, given a color, preview the recolor.
 
-        Nothing is saved except preview images; Apply must name the returned ``preview_id``."""
+        Multi-region form: ``{"regions": [...], "toggle": {"at_px", "box_px"?} (optional), "color"?, ...}``.
+        ``toggle`` (Shift+Click) removes the selected region containing the point or adds the region
+        there; the normalized ``regions`` list is returned.  With a color, all selected regions are
+        previewed as one recolor.  Nothing is saved except preview images; Apply must name the
+        returned ``preview_id``."""
 
         from ..core import artwork as art
 
@@ -1179,6 +1183,8 @@ class Workspace:
             shutil.rmtree(out, ignore_errors=True)
             out.mkdir(parents=True)
             try:
+                if "regions" in request:
+                    return self._artwork_preview_regions(name, request, image, frame, mpp, log, out)
                 if not request.get("color"):
                     mask, selection = art.select_region(image, frame, request.get("at_px"), request.get("box_px"), mpp)
                     stamp = selection["region_sha256"][:12]
@@ -1199,6 +1205,39 @@ class Workspace:
                                for k in ("selection", "after", "before_after")},
                     "notes": ["Artwork edit only: no sheet changes until you plan again from the edited artwork.",
                               "The sheet count is known only after planning; fewer colors do not guarantee fewer sheets."]}
+
+    def _artwork_preview_regions(self, name: str, request: dict[str, Any], image: Any, frame: str | None, mpp: float,
+                                 log: dict[str, Any], out: Path) -> dict[str, Any]:
+        from ..core import artwork as art
+
+        regions = art.check_regions(request.get("regions"))
+        toggle = request.get("toggle")
+        if toggle is not None:
+            if not isinstance(toggle, dict):
+                raise art.ArtworkError("toggle needs at_px and optionally box_px")
+            regions = art.toggle_region(image, frame, regions, toggle.get("at_px"), toggle.get("box_px"))
+        if not regions:
+            return {"regions": [], "selection": None, "images": {}}
+        if not request.get("color"):
+            mask, selection = art.select_regions(image, frame, regions, mpp)
+            stamp = selection["region_sha256"][:12]
+            art.save_rgb(art.highlight(image, mask, selection["box_px"]), out / "selection.png")
+            return {"regions": regions, "selection": selection,
+                    "images": {"selection": self.url(name, "artwork/preview/selection.png", stamp)}}
+        op = art.check_op({**{k: request[k] for k in ("color", "source", "sampled_at_px") if k in request},
+                           "op": "recolor_regions", "regions": regions})
+        after, mask, selection, change = art.plan_edit(image, op, frame, mpp)
+        pid = art.preview_id(log["current_sha256"], op)
+        art.save_rgb(art.highlight(image, mask, selection["box_px"]), out / "selection.png")
+        art.save_rgb(after, out / "after.png")
+        art.save_rgb(art.before_after(image, after, mask), out / "before_after.png")
+        return {"preview_id": pid, "op": op, "regions": regions, "selection": selection, "change": change,
+                "palette_after": art.palette_summary(after, frame, mpp),
+                "images": {k: self.url(name, f"artwork/preview/{k}.png", pid) for k in ("selection", "after", "before_after")},
+                "notes": ["Artwork edit only: no sheet changes until you plan again from the edited artwork.",
+                          f"All {selection['regions']} selected region(s) change together as one edit (one undo step)."
+                          if selection["regions"] > 1 else "One region changes; nothing else in the artwork.",
+                          "The sheet count is known only after planning; fewer colors do not guarantee fewer sheets."]}
 
     def artwork_sample(self, name: str, at_px: Any) -> dict[str, Any]:
         """Eyedropper: the exact artwork color at a point."""
@@ -1403,7 +1442,8 @@ class Workspace:
             "image": image, "frame_color": proposal["frame_color"],
             "mm_per_pixel": proposal["intake"]["artwork_mm_per_pixel"],
             "current_sha256": current_sha, "planned_sha256": planned_sha,
-            "edits": [{k: e[k] for k in ("index", "op", "from", "to", "selection", "change", "applied_utc")} for e in edits],
+            "edits": [{**{k: e[k] for k in ("index", "op", "from", "to", "selection", "change", "applied_utc")},
+                       "from_colors": e.get("from_colors", [e["from"]])} for e in edits],
             "palette": palette, "differs_from_planned": differs,
             "base_changed": bool(log and edits and log["base"]["sha256"] != origin["sha256"]),
             "can_replan": proposal["status"] == NOT_PLANNED or differs,

@@ -95,7 +95,7 @@ async function setValue(selector, value) {
 async function canvasPoint(mm) {
   await evaluate(`document.querySelector("#overlay").scrollIntoView({block: "center"})`);
   await sleep(150);
-  const r = await evaluate(`(() => { const b = document.querySelector("#overlay").getBoundingClientRect(); return {x: b.left, y: b.top, w: b.width, h: b.height}; })()`);
+  const r = await evaluate(`(() => { const b = document.querySelector("#edit-image").getBoundingClientRect(); return {x: b.left, y: b.top, w: b.width, h: b.height}; })()`);
   return { x: r.x + (mm[0] / 225) * r.w, y: r.y + (1 - mm[1] / 225) * r.h };
 }
 async function mouse(type, p, buttons = 1) {

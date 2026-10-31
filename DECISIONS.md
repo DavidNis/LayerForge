@@ -707,3 +707,47 @@ FDM thresholds remain generic assumptions until a print calibrates them).
   - Tests: memory decisions in upscale tests are pinned with `tests/resource_guard.py` (fixed probe values);
     explicit just-below/just-above threshold rejection tests; real work that needs real memory skips with a
     `RESOURCE:` reason instead of failing. `core/upscale.resource_check` and its headroom are unchanged.
+- 2026-10-30 zoom/pan and multi-region selection (user instruction):
+  - DESIGN_CHOICE: the artwork sits in a square viewport; a stage sized artwork pixels x zoom is translated
+    inside it (pixelated rendering), and the overlay canvas covers only the viewport. Hit-testing, the limit
+    box and the eyedropper map pointer positions through the image's on-screen rectangle, so they resolve
+    the same artwork pixel at every zoom and pan. Zoom: +/- (x1.5), Fit (reset), 100% (1 screen px per
+    artwork px), Ctrl+wheel around the cursor; range Fit..3200 %. Pan: Space + left drag or middle drag;
+    pan never edits anything.
+  - DESIGN_CHOICE: a selection is a list of regions `{at_px, box_px?}`; click replaces it, Shift+Click
+    toggles on the server (`artwork.toggle_region`: the selected region containing the point is removed,
+    otherwise the region there is added, within the active limit box). Regions may have different colors;
+    a region listed twice counts once.
+  - DESIGN_CHOICE: new op `recolor_regions` recolors the union of all selected regions in one step and is
+    logged as ONE edit (one undo step) with the union pixel hash; only selected pixels change (verified
+    against the union mask). Regions already in the new color are left as they are; if every one is, the
+    edit is refused. The single-region op `recolor_region` is unchanged and old logs still replay.
+- 2026-10-30 user correction: the post-edit planning action is named **"Plan sheets from this artwork"** again
+  (the "Try Again" rename is reverted everywhere: buttons, banners, job label, server message, README, Hebrew
+  guide HTML). The box shown right after Apply stays, with that button. The Artwork colors section (with New
+  color) is open by default in every tab; the user can still fold it.
+- 2026-10-30 Artwork colors panel polish (user instruction; this panel only, no backend change):
+  icon tool buttons with short labels (Select, Box); the eyedropper is a pipette icon "Sample color" in the
+  color row; the color input itself is the "Custom" control and applies its color on change (the "Use
+  picker color" button is gone); chosen color shown as a swatch with a ring; Clear selection is a neutral,
+  13 px semibold button with a 32 px target; secondary explanations moved into "i" tooltips that show on
+  hover and on keyboard focus (CSS `data-tip`, `aria-label` for icon-only controls); Apply (blue, check icon)
+  and Plan sheets from this artwork (green, play icon) as the two primary actions; keyboard focus inside the
+  panel is kept across re-renders. The user-chosen button name "Plan sheets from this artwork" is kept.
+- 2026-10-31 application-wide UX cleanup and image zoom (user instruction; UI only, no change to planning,
+  validation, CAD, project data or export):
+  - Workflow stepper replaces the four tabs: Import -> Edit artwork -> Plan -> Review layers -> (Check
+    printability, minor) -> Export; each step shows its state and opens the existing tab (tab ids unchanged).
+  - One primary action per stage; secondary actions quieter; long explanations moved into "i" tooltips (hover
+    and keyboard focus); diagnostics folded: candidate table, proposal notes + CAD check line, Physical size,
+    Details changed by intake, previews, printer/process forms, printability maps. They open automatically
+    when they matter (failed proposal, findings present, a size analysis exists). Blocking flags, required
+    approvals (Accept front view highlighted when the front view changed), artwork-change and export
+    restrictions, and NOT VERIFIED stay visible.
+  - Zoom (Artwork colors and Review & edit): one shared viewport implementation; plain mouse wheel zooms toward
+    the cursor (point under the cursor measured on the rendered image and kept exact); the page does not
+    scroll while the wheel is over the image and scrolls normally elsewhere; middle drag or Space + drag pans;
+    compact Fit button + percentage replace the +/-/100% buttons; with the viewport focused: + / - zoom, 0
+    fits, arrows pan; zoom range fit .. 40x fit; viewport resize keeps the same centre. Viewport only: pixel
+    data, resolution, physical dimensions and geometry are untouched; hit-testing maps through the image's
+    on-screen rectangle.

@@ -121,7 +121,7 @@ def test_packaged_browser_workflow(exe_app):
 
 
 def test_packaged_artwork_recolor_browser(exe_app):
-    """Artwork colors in the frozen app: select, preview, apply, eyedropper, undo, verify, reload, Try Again."""
+    """Artwork colors in the frozen app: select, preview, apply, eyedropper, undo, verify, reload, planning."""
 
     import test_artwork_recolor as recolor
 

@@ -39,12 +39,14 @@ const ui = {
   projectNotice: null,  // result of the last project deletion (shown on the project list)
   planLater: false,     // import: stop after intake so artwork colors can be edited before planning
   art: freshArt(),      // artwork recolor panel (flat-color target, not a sheet)
+  artSpace: false,      // Space held: a left drag on a zoomable image pans
+  editView: { zoom: null, pan: [0, 0], panning: null },  // Review & edit canvas zoom (viewport only)
 };
 
 // Artwork recolor: one selected region, a chosen color and the server's preview of the change.
 function freshArt() {
-  return { mode: "select", box: null, drag: null, at: null, selection: null, preview: null, color: null, source: null,
-           sampled: null, view: "selection", verifying: false };
+  return { mode: "select", box: null, drag: null, regions: [], selection: null, preview: null, color: null, source: null,
+           sampled: null, view: "selection", zoom: null, pan: [0, 0], panning: null };
 }
 
 const TABS = [
@@ -210,7 +212,7 @@ function jobLabel(job) {
     resize_retry: "Resize & retry (L1 proposal at the new size, then the FDM estimate)",
     upscale_retry: "Upscale & Retry (L1 proposal at the finer resolution)",
     start_review: "Starting the review",
-    artwork_replan: "Try Again: planning sheets from the edited artwork (L1 proposal, validation, CAD check; previous attempt kept)",
+    artwork_replan: "Planning sheets from the edited artwork (L1 proposal, validation, CAD check; previous attempt kept)",
     edit: "Applying the edit",
     undo: "Undo / revert (replaying the edit log)",
     verify: "Verifying save/reload (replaying the edit log)",
@@ -236,6 +238,7 @@ async function route() {
     ui.sheet = null;
     ui.job = null;
     ui.art = freshArt();
+    ui.editView = { zoom: null, pan: [0, 0], panning: null };
     try {
       await loadState();
     } catch (err) {
@@ -259,6 +262,7 @@ function defaultTab() {
 // ---------------------------------------------------------------------------- rendering
 function render() {
   renderProjectSelect();
+  const focusKey = artFocusKey();
   const root = $("#app");
   if (!ui.name) {
     root.innerHTML = errorBanner() + importView();
@@ -270,26 +274,70 @@ function render() {
     return;
   }
   root.innerHTML = `
-    <div class="spread" style="margin-bottom:12px">
+    <div class="project-head">
       <div><h1>${esc(ui.state.name)}</h1>
-        <p class="muted small">Source <code>${esc(ui.state.record.source.original_name)}</code> · sha256 ${esc(ui.state.record.source.sha256.slice(0, 12))}… · scale ${esc(ui.state.record.proposal_settings.scale)} · ${esc(ui.state.record.proposal_settings.outer_mm)} mm sheet</p>
+        <p class="muted small">${esc(ui.state.record.source.original_name)} · ${esc(ui.state.resize?.sheet_mm ?? ui.state.record.proposal_settings.outer_mm)} mm sheet · scale ${esc(ui.state.upscale?.scale ?? ui.state.record.proposal_settings.scale)} ${infoTip(`Source image sha256 ${ui.state.record.source.sha256}. The imported image is never changed.`)}</p>
       </div>
       ${ui.confirmProject === ui.state.name ? "" : `<button class="small ghost danger" data-action="delete-project-ask" data-project="${esc(ui.state.name)}" data-testid="project-delete" ${busy() ? 'disabled title="Wait for the running job to finish"' : ""}>Delete project…</button>`}
     </div>
     ${ui.confirmProject === ui.state.name ? projectDeleteConfirm(ui.state.name) : ""}
+    ${workflowNav()}
     ${statusStrip()}
     <div id="job-slot">${jobBanner()}</div>
     ${errorBanner()}
-    <nav class="tabs" role="tablist">${TABS.map(([id, label], i) => `
-      <button class="tab ${ui.tab === id ? "current" : ""}" role="tab" aria-selected="${ui.tab === id}" data-action="tab" data-tab="${id}" ${tabEnabled(id) ? "" : "disabled"}>
-        <span class="step">${i + 1}</span>${esc(label)}</button>`).join("")}
-    </nav>
     <section id="tab-body">${tabBody()}</section>`;
   if (ui.tab === "review" && ui.state.draft) {
     bindCanvas();
     drawOverlay();
   }
   bindArtwork();
+  restoreArtFocus(focusKey);
+}
+
+// The workflow as one stepper: Import -> Edit artwork -> Plan -> Review layers -> (Check printability)
+// -> Export.  Each step opens the tab where it happens (tab ids unchanged) and shows its state.
+const STEP_MARK = { done: "✓", warn: "!", bad: "✕" };
+function workflowSteps() {
+  const s = ui.state;
+  const p = s.proposal;
+  const d = s.draft;
+  const a = s.artwork;
+  const kit = latestKit();
+  const edits = a?.edits?.length || 0;
+  const selected = p?.candidates?.find((c) => c.name === p.selected);
+  const plan = !p ? ["todo", busy() ? "Running…" : "Not run"]
+    : p.status === "PROPOSAL_READY_FOR_REVIEW" ? ["done", selected ? `${selected.sheet_count} sheets` : "Ready"]
+    : p.status === "ARTWORK_READY_NOT_PLANNED" ? ["todo", "Not planned yet"] : ["warn", "Needs decision"];
+  const art = a?.differs_from_planned || (edits && !a.planned) ? ["warn", `${edits} change${edits === 1 ? "" : "s"} not planned`]
+    : edits ? ["todo", `${edits} change${edits === 1 ? "" : "s"}`] : ["todo", "Optional"];
+  const review = !d ? ["todo", "Not started"] : d.status.printable ? ["done", `${d.sheets.length} layers`] : ["bad", "Invalid draft"];
+  const est = s.printability;
+  const check = !est ? ["todo", "Optional"] : est.stale ? ["todo", "Out of date"]
+    : est.status === "NO_RISKS_FOUND" ? ["done", "No risks"] : est.status === "RISKS_REPORTED" ? ["warn", "Risks"] : ["bad", "Unsupported"];
+  const exp = !kit ? ["todo", "No kit yet"] : kit.stale ? ["warn", "Kit out of date"] : kit.status.cad === "CAD_VALID" ? ["done", "Kit ready"] : ["bad", "CAD problem"];
+  return [
+    { key: "import", label: "Import", state: ["done", "Image"], tab: null },
+    { key: "artwork", label: "Edit artwork", state: art, tab: d ? "review" : "proposal", focus: "artwork" },
+    { key: "plan", label: "Plan", state: plan, tab: "proposal" },
+    { key: "review", label: "Review layers", state: review, tab: "review" },
+    { key: "printability", label: "Check printability", state: check, tab: "printability", minor: true },
+    { key: "kit", label: "Export", state: exp, tab: "kit" },
+  ];
+}
+
+function workflowNav() {
+  const steps = workflowSteps();
+  const current = { proposal: "plan", review: "review", printability: "printability", kit: "kit" }[ui.tab];
+  return `<nav class="workflow" role="tablist" aria-label="Workflow">${steps.map((st, i) => {
+    const [state, sub] = st.state;
+    const mark = STEP_MARK[state] || String(i + 1);
+    const body = `<span class="wf-dot" aria-hidden="true">${mark}</span><span class="wf-text"><span class="wf-label">${esc(st.label)}</span><span class="wf-sub">${esc(sub)}</span></span>`;
+    const cls = `wf-step state-${state}${st.minor ? " minor" : ""}${st.key === current ? " current" : ""}`;
+    const step = st.tab
+      ? `<button class="${cls}" role="tab" aria-selected="${st.key === current}" data-action="tab" data-tab="${st.tab}"${st.focus ? ` data-focus="${st.focus}"` : ""} data-step="${st.key}" ${tabEnabled(st.tab) ? "" : "disabled"}>${body}</button>`
+      : `<div class="${cls}" data-step="${st.key}">${body}</div>`;
+    return (i ? '<span class="wf-sep" aria-hidden="true">›</span>' : "") + step;
+  }).join("")}</nav>`;
 }
 
 function tabEnabled(id) {
@@ -373,7 +421,7 @@ function statusStrip() {
     : s.printability && !s.printability.stale ? { status: s.printability.status, counts: s.printability.counts, from: "draft estimate" } : null;
   if (est) {
     const cls = est.status === "NO_RISKS_FOUND" ? "ok" : est.status === "RISKS_REPORTED" ? "warn" : "bad";
-    fdm = [cls, fdmLabel(est.status), `${est.counts.UNSUPPORTED} unsupported · ${est.counts.RISK} risk (${est.from}). Geometric estimate, not a slicer result.`];
+    fdm = [cls, fdmLabel(est.status), `${est.counts.UNSUPPORTED} unsupported · ${est.counts.RISK} risk (${est.from})`];
   } else if (s.printability || kit) {
     fdm = ["neutral", "Estimate out of date", "The draft changed since the last estimate."];
   }
@@ -383,13 +431,13 @@ function statusStrip() {
     <div class="status-card neutral physical" data-testid="status-physical">
       <div class="label">Physical print</div>
       <div class="value">${badge("outline", "NOT VERIFIED")}</div>
-      <div class="note">${esc(s.physical.note)} Test print L-G10 is pending.</div>
+      <div class="note">Only your test print can confirm a result. ${infoTip(s.physical.note + " Test print L-G10 is pending.")}</div>
     </div>
   </div>`;
 }
 
 function statusCard(label, [cls, value, note], testid) {
-  return `<div class="status-card ${cls}" data-testid="${testid}"><div class="label">${esc(label)}</div><div class="value">${esc(value)}</div><div class="note">${esc(note)}</div></div>`;
+  return `<div class="status-card ${cls}" data-testid="${testid}"><div class="label">${esc(label)}</div><div class="value">${esc(value)}</div><div class="note" title="${esc(note)}">${esc(note)}</div></div>`;
 }
 
 function fdmLabel(status) {
@@ -402,20 +450,25 @@ function importView() {
   return `<div class="grid2">
     <div class="panel stack">
       <h1>New project</h1>
-      <p class="muted">Import a flat-color illustration (PNG or JPEG). LayerForge proposes physical layer sheets with the approved L1 planner, then you review, edit and export a print kit.</p>
+      <p class="muted">Import a flat-color PNG or JPEG. ${infoTip("LayerForge prepares the flat-color artwork, plans physical layer sheets automatically, then you review, edit and export a print kit.")}</p>
       <div class="dropzone" id="dropzone" tabindex="0" role="button" aria-label="Choose an image">
         ${ui.upload ? `<strong>${esc(ui.upload.name)}</strong> <span class="muted">(${(ui.upload.size / 1024).toFixed(0)} KB)</span><img id="upload-preview" alt="selected image">` : "<strong>Drop an image here</strong><br><span class=\"muted\">or click to choose a file</span>"}
         <input type="file" id="file-input" accept=".png,.jpg,.jpeg,.jfif,.jpe,image/png,image/jpeg" hidden>
       </div>
+      <label class="field"><span>Project name</span><input id="f-name" placeholder="from file name"></label>
+      <label class="check small"><input type="checkbox" id="f-plan-later" data-testid="plan-later" ${ui.planLater ? "checked" : ""}> Edit artwork colors before planning ${infoTip("Prepares the flat-color artwork only. You plan the sheets when you choose.")}</label>
+      <details class="section subtle" data-section="import-settings" ${openAttr("import-settings")}>
+        <summary><h4 style="margin:0">Settings</h4><span class="small muted">sheet size, thickness, grid scale, colors</span></summary>
+        <div class="section-body">
       <div class="form-grid">
-        <label class="field"><span>Project name</span><input id="f-name" placeholder="from file name"></label>
         <label class="field"><span>Grid scale</span><select id="f-scale">${scales.map((s) => `<option value="${s}" ${s === 2 ? "selected" : ""}>${s} · ${(0.390625 / s).toFixed(3)} mm/px${s === 1 ? " · fast" : s === 4 ? " · slow" : ""}</option>`).join("")}</select></label>
         <label class="field"><span>Sheet size (mm)</span><input id="f-outer" type="number" value="225" min="50" step="1"></label>
         <label class="field"><span>Sheet thickness (mm)</span><input id="f-thick" type="number" value="1.6" min="0.2" step="0.2"></label>
         <label class="field"><span>Max colors</span><input id="f-colors" type="number" value="12" min="2" max="32"></label>
       </div>
-      <p class="small muted">The artwork occupies the sheet minus a 12.5 mm shared perimeter. Scale 2 is the default; scale 4 can take many minutes and much memory.</p>
-      <label class="check small"><input type="checkbox" id="f-plan-later" data-testid="plan-later" ${ui.planLater ? "checked" : ""}> Edit artwork colors before planning (prepare the flat-color artwork only; plan when you choose)</label>
+      <p class="small muted">The artwork fills the sheet minus a 12.5 mm shared border. Scale 4 can take many minutes and much memory.</p>
+        </div>
+      </details>
       <div class="row"><button class="primary" data-action="create" ${ui.upload && !busy() ? "" : "disabled"}>${ui.planLater ? "Import and prepare artwork" : "Import and propose layers"}</button></div>
     </div>
     <div class="panel stack">
@@ -426,7 +479,7 @@ function importView() {
           <td>${ui.confirmProject === p.name ? "" : `<button class="small ghost danger" data-action="delete-project-ask" data-project="${esc(p.name)}" data-testid="project-delete">Delete…</button>`}</td></tr>
         ${ui.confirmProject === p.name ? `<tr><td colspan="4">${projectDeleteConfirm(p.name)}</td></tr>` : ""}`).join("")}</tbody></table>`
         : '<p class="muted">No projects yet.</p>'}
-      <p class="small muted">Projects are saved in the workspace folder after every step and reopen after a restart.</p>
+      <p class="small muted">Saved automatically. ${infoTip("Projects are saved in the workspace folder after every step and reopen after a restart.")}</p>
     </div>
   </div>`;
 }
@@ -499,43 +552,65 @@ function proposalView() {
       <td>${fmt(c.reconstruction_mismatched_pixels)}</td>
       <td>${fmt(c.planning_seconds, 1)}</td>
       <td>${c.status === "PLANNING_FAILED" ? `<span class="small muted">${esc(c.reason || "")}</span>` :
-        reviewing ? "" : `<button class="small ${c.name === p.selected ? "primary" : ""}" data-action="start-review" data-candidate="${esc(c.name)}" ${busy() ? "disabled" : ""}>Review this candidate</button>`}</td>
+        reviewing ? "" : `<button class="small" data-action="start-review" data-candidate="${esc(c.name)}" ${busy() ? "disabled" : ""}>Review this candidate</button>`}</td>
     </tr>`).join("");
   const img = p.images || {};
   const obstruction = p.candidates.filter((c) => c.obstruction_url);
+  const sel = p.candidates.find((c) => c.name === p.selected);
+  const blockers = (p.flags || []).filter((f) => f.severity === "BLOCKER");
+  const notes = (p.flags || []).filter((f) => f.severity !== "BLOCKER");
+  const warnings = notes.filter((f) => f.severity === "WARN").length;
+  const cadLine = p.cad ? `<p class="small muted" style="margin:0">CAD check of the selected candidate: reopened STL ${p.cad.revalidation_pass ? "PASS" : "FAIL"}, stack mismatch ${fmt(p.cad.stack_mismatch_px)} px, STEP single solids ${p.cad.all_step_valid_single_solid ? "yes" : "no"}, watertight STL ${p.cad.all_stl_watertight_single_component ? "yes" : "no"}.</p>` : "";
+  const reviewAction = !sel ? "" : reviewing
+    ? `<a class="button" href="#/${encodeURIComponent(ui.name)}/review" data-action="tab" data-tab="review">Open the editor →</a><span class="small muted">Reviewing <strong>${esc(reviewing)}</strong></span>`
+    : `<button class="primary large" data-action="start-review" data-candidate="${esc(sel.name)}" ${busy() ? "disabled" : ""}>Review this candidate</button>`;
+  const summary = sel ? `<div class="plan-summary">
+      ${img.assembled_front ? `<img class="img plan-thumb" src="${esc(img.assembled_front)}" alt="assembled front view of the selected plan">` : ""}
+      <div class="stack" style="gap:6px">
+        <div class="plan-figure"><strong>${fmt(sel.sheet_count)} sheets</strong> <span class="muted">· ${(p.palette || []).length} colors</span></div>
+        <div class="row" title="Colors front to back">${(sel.front_to_back_colors || []).map((h) => swatch(h, true)).join("")}<span class="small muted">front → back</span></div>
+        <div class="small muted">Candidate <strong>${esc(sel.name)}</strong> · ${fmt(sel.source_regions_split_across_sheets)} split region(s) · ${fmt(sel.reconstruction_mismatched_pixels)} px mismatch</div>
+        <div class="row">${reviewAction}</div>
+      </div></div>`
+    : `<div class="row"><h4 style="margin:0">Palette</h4>${(p.palette || []).map((h) => swatch(h, true)).join("")}</div>`;
   return `<div class="panel stack">
       <div class="spread">
-        <h2>L1 proposal ${badge(ready ? "ok" : notPlanned ? "neutral" : "warn", ready ? "Ready for review" : notPlanned ? "Artwork prepared · not planned yet" : "Needs your decision")}</h2>
-        <span class="muted small">${fmt(p.seconds, 1)} s · automatic proposal (no manual layer plan)${p.artwork_edits ? ` · planned from artwork you edited (${p.artwork_edits.region_recolors} region recolor${p.artwork_edits.region_recolors === 1 ? "" : "s"})` : ""}</span>
+        <h2>Plan ${badge(ready ? "ok" : notPlanned ? "neutral" : "warn", ready ? "Ready for review" : notPlanned ? "Artwork prepared · not planned yet" : "Needs your decision")}</h2>
+        <span class="muted small">Automatic proposal · ${fmt(p.seconds, 1)} s${p.artwork_edits ? ` · planned from artwork you edited (${p.artwork_edits.region_recolors} region recolor${p.artwork_edits.region_recolors === 1 ? "" : "s"})` : ""} ${infoTip("No manual layer plan is used: the sheets are proposed automatically, validated, exported to STEP/STL, reopened and checked.")}</span>
       </div>
-      ${notPlanned ? `<div class="banner info">Intake prepared the flat-color artwork; no sheets were planned. Review and recolor regions in <strong>Artwork colors</strong> below, then choose <strong>${ui.state.artwork?.edits?.length ? "Try Again" : "Plan sheets from this artwork"}</strong>.</div>` : ""}
+      ${notPlanned ? `<div class="banner info">The flat-color artwork is ready; no sheets are planned yet. Recolor regions in <strong>Artwork colors</strong> below if needed, then choose <strong>Plan sheets from this artwork</strong>.</div>` : ""}
       ${p.artwork_check ? artworkCheck(p.artwork_check) : ""}
-      ${ready || notPlanned ? "" : `<div class="banner warn">No candidate passed every check. Nothing was edited automatically. ${obstruction.length ? "The obstruction map shows where the planner cannot support the artwork; widen or remove those features in the image and import it again." : "See the flags below."}${ui.state.upscale?.available ? " You can also try <strong>Upscale &amp; Retry</strong> below." : ""}</div>`}
+      ${ready || notPlanned ? "" : `<div class="banner warn">No candidate passed every check. Nothing was edited automatically. ${obstruction.length ? "The obstruction maps (Previews) show where the planner cannot support the artwork." : "See the notes below."}${ui.state.upscale?.available ? " You can also try <strong>Upscale &amp; Retry</strong> below." : ""}</div>`}
+      ${blockers.length ? `<ul class="banner error small blockers" data-testid="proposal-blockers">${blockers.map((f) => `<li><strong>${esc(f.code)}</strong> — ${esc(f.message)}</li>`).join("")}</ul>` : ""}
       ${ui.state.upscale && ui.state.upscale.scale !== ui.state.upscale.import_scale ? `<p class="small muted" data-testid="processing-scale">Processing resolution: scale ${ui.state.upscale.scale} (imported at scale ${ui.state.upscale.import_scale}; raised by Upscale &amp; Retry). Physical size unchanged.</p>` : ""}
-      <div class="row"><h4 style="margin:0">Palette</h4>${(p.palette || []).map((h) => swatch(h, true)).join("")}${p.frame_color ? `<span class="small muted">frame ${esc(p.frame_color)}</span>` : ""}</div>
-      ${rows ? `<div class="table-wrap"><table>
+      ${summary}
+      ${rows ? `<details class="section subtle" data-section="candidates" ${openAttr("candidates", !ready && !notPlanned)}>
+        <summary><h4 style="margin:0">Compare candidates</h4><span class="small muted">${p.candidates.length} candidate${p.candidates.length === 1 ? "" : "s"} · ${p.candidates.filter((c) => c.status === "VALID").length} valid</span></summary>
+        <div class="section-body"><div class="table-wrap"><table>
         <thead><tr><th>Candidate</th><th>Status</th><th>Sheets</th><th>Colors front → back</th><th>Split regions (seams)</th><th>Mismatch px</th><th>Time s</th><th></th></tr></thead>
-        <tbody>${rows}</tbody></table></div>` : ""}
-      ${reviewing ? `<p class="small">Reviewing <strong>${esc(reviewing)}</strong>. <a href="#/${encodeURIComponent(ui.name)}/review" data-action="tab" data-tab="review">Open the editor →</a></p>` : ""}
-      ${flags ? `<div><h4>Flags to review</h4><ul class="small">${flags}</ul></div>` : ""}
-      ${p.cad ? `<p class="small muted">Selected candidate CAD check: reopened STL ${p.cad.revalidation_pass ? "PASS" : "FAIL"}, stack mismatch ${fmt(p.cad.stack_mismatch_px)} px, STEP single solids ${p.cad.all_step_valid_single_solid ? "yes" : "no"}, watertight STL ${p.cad.all_stl_watertight_single_component ? "yes" : "no"}.</p>` : ""}
+        <tbody>${rows}</tbody></table></div></div></details>` : ""}
+      ${notes.length || cadLine ? `<details class="section subtle" data-section="flags" ${openAttr("flags", !ready && !notPlanned)}>
+        <summary><h4 style="margin:0">Notes</h4><span class="small muted">${notes.length} note${notes.length === 1 ? "" : "s"}${warnings ? ` · ${warnings} to check` : ""}</span></summary>
+        <div class="section-body stack" style="gap:6px"><ul class="small" style="margin:0">${notes.map((f) => `<li>${badge(f.severity === "WARN" ? "warn" : "neutral", f.severity)} <strong>${esc(f.code)}</strong> — ${esc(f.message)}</li>`).join("")}</ul>${cadLine}</div></details>` : ""}
     </div>
     ${ui.state.draft ? `<p class="small muted panel tight">Artwork colors are edited in <a href="#/${encodeURIComponent(ui.name)}/review" data-action="tab" data-tab="review">Review &amp; edit</a> while a review exists.</p>` : artworkPanel()}
     ${resizePanel()}
     ${upscalePanel()}
     ${detailsPanel(p, reviewing)}
     ${attemptsPanel()}
-    <div class="panel">
-      <h3>Proposal previews <span class="muted small">(selected candidate, drawn from the reopened STL)</span></h3>
-      <div class="gallery">
+    <details class="panel section" data-section="proposal-previews" ${openAttr("proposal-previews", !ready && !notPlanned)}>
+      <summary><h3>Previews</h3><span class="small muted">source · flat-color target · assembled · exploded${obstruction.length ? " · obstruction maps" : ""} ${infoTip("Drawn from the reopened STL of the selected candidate. Click an image to open it full size.")}</span></summary>
+      <div class="section-body stack">
+      <div class="gallery compact">
         <figure><img class="img" src="${esc(ui.state.source_url)}" alt="source"><figcaption>Source image</figcaption></figure>
-        ${img.target ? `<figure><img class="img" src="${esc(img.target)}" alt="target"><figcaption>Flat-color target after intake</figcaption></figure>` : ""}
+        ${img.target ? `<figure><img class="img" src="${esc(img.target)}" alt="target"><figcaption>Flat-color target</figcaption></figure>` : ""}
         ${img.assembled_front ? `<figure><img class="img" src="${esc(img.assembled_front)}" alt="assembled"><figcaption>Assembled front view</figcaption></figure>` : ""}
         ${img.exploded ? `<figure><img class="img" src="${esc(img.exploded)}" alt="exploded"><figcaption>Exploded stack</figcaption></figure>` : ""}
         ${obstruction.map((c) => `<figure><img class="img" src="${esc(c.obstruction_url)}" alt="obstruction"><figcaption>${esc(c.name)}: cells the planner cannot support</figcaption></figure>`).join("")}
       </div>
-      ${img.source_comparison ? `<figure style="margin-top:12px"><img class="img" src="${esc(img.source_comparison)}" alt="comparison"><figcaption>Target | assembled | mismatches in red</figcaption></figure>` : ""}
-    </div>`;
+      ${img.source_comparison ? `<figure style="margin:0"><img class="img" style="max-width:720px" src="${esc(img.source_comparison)}" alt="comparison"><figcaption>Target | assembled | mismatches in red</figcaption></figure>` : ""}
+      </div>
+    </details>`;
 }
 
 // Physical size: measure the findings now, tabulate them against larger sheets that fit the
@@ -556,16 +631,19 @@ function resizePanel() {
   const printers = env ? `<label class="field"><span>Usable area of</span><select id="resize-printer" ${busy() ? "disabled" : ""}>
       <option value="">the process bed (${fmt(Number(ui.process.bed_x_mm), 0)} × ${fmt(Number(ui.process.bed_y_mm), 0)} mm)</option>
       ${env.printers.map((x) => `<option value="${esc(x.preset)}" ${x.preset === chosen ? "selected" : ""}>${esc(x.model)} (keep-out zones excluded)</option>`).join("")}</select></label>` : "";
-  return `<section class="panel stack" data-testid="resize-panel">
-    <h3>Physical size ${r.sheet_mm !== r.import_sheet_mm ? badge("neutral", `resized from ${fmt(r.import_sheet_mm, 1)} mm`) : ""}</h3>
-    <p class="small">Every printability threshold is in millimetres (planner structural width, nozzle, minimum opening and material width). A larger sheet widens every opening, gap and material strip by the same ratio, so some findings can be cleared by size alone; others (topology, unmeasured necks) cannot. Nothing is resized without your approval; the image is never edited.</p>
+  const failed = ui.state.proposal?.status === "NEEDS_USER_DECISION";
+  return `<details class="panel section" data-section="resize" data-testid="resize-panel" ${openAttr("resize", Boolean(a || last || failed))}>
+    <summary><h3>Physical size ${r.sheet_mm !== r.import_sheet_mm ? badge("neutral", `resized from ${fmt(r.import_sheet_mm, 1)} mm`) : ""}</h3><span class="small muted">${fmt(r.sheet_mm, 1)} mm sheet · check whether a larger sheet prints better</span></summary>
+    <div class="section-body stack">
+    <p class="small muted" style="margin:0">A larger sheet widens every opening and strip by the same ratio. Nothing is resized without your approval. ${infoTip("Every printability threshold is in millimetres (planner structural width, nozzle, minimum opening and material width), so some findings clear by size alone; others (topology, unmeasured necks) cannot. The image is never edited.")}</p>
     ${last ? resizeCheck(last) : ""}
     ${r.available ? `<details class="section" data-section="resize-process" ${openAttr("resize-process")}><summary>Printer and process for the check: <strong>${esc(ui.process.name)}</strong></summary>${processForm("rs")}</details>
     <div class="row">${printers}<button class="${a ? "" : "primary"}" data-action="resize-analyze" data-testid="resize-analyze" ${busy() ? "disabled" : ""}>Check printability at larger sizes</button></div>`
       : `<p class="small muted">${esc(r.reason || "")}</p>`}
     ${a ? resizeAnalysis(a) : ""}
     ${a && r.preview ? resizePreview(r.preview, a) : ""}
-  </section>`;
+    </div>
+  </details>`;
 }
 
 // A finding's location, with a Locate button once a review of the same sheets exists.
@@ -682,8 +760,7 @@ function upscalePanel() {
       ${o.fits ? "" : badge("bad", "not enough memory", o.reason)}</label>`).join("");
   return `<section class="panel stack" data-testid="upscale-panel">
     <h3>Upscale &amp; Retry <span class="small muted">(processing resolution, not physical size)</span></h3>
-    <p class="small">Re-run intake and planning in this project with 2× or 4× more pixels per millimetre. Only the processing resolution changes: the sheet size, artwork aperture, shared perimeter, artwork position and aspect stay exactly as they are, and every physical rule and minimum width is unchanged. The image is resampled by the normal intake (no AI upscaling, no invented detail).
-      <strong>A finer grid can represent thin details more faithfully, but it does not necessarily resolve physical or topological constraints</strong> (openings narrower than the structural width, unsupportable islands).</p>
+    <p class="small">Plan again with 2× or 4× more pixels per millimetre. Physical size and rules stay the same. ${infoTip("Only the processing resolution changes: the sheet size, artwork aperture, shared perimeter, artwork position and aspect stay as they are, and every physical rule and minimum width is unchanged. The image is resampled by the normal intake (no AI upscaling, no invented detail). A finer grid can represent thin details more faithfully, but it does not necessarily resolve physical or topological constraints (openings narrower than the structural width, unsupportable islands).")}</p>
     <div class="stack" style="gap:4px">${radios}</div>
     <div class="row"><button class="${preview ? "" : "primary"}" data-action="upscale-preview" data-testid="upscale-preview" ${option.fits && !busy() ? "" : "disabled"}>Preview at ${option.factor}×</button>
       <span class="small muted">Intake only (no planning); the current proposal stays until you retry.</span></div>
@@ -776,7 +853,7 @@ function detailsPanel(p, reviewing) {
       </div></td>
     </tr>`;
   }).join("");
-  return `<details class="panel section" data-section="intake-details" data-testid="intake-details" ${openAttr("intake-details", true)}>
+  return `<details class="panel section" data-section="intake-details" data-testid="intake-details" ${openAttr("intake-details", !reviewing && changed)}>
     <summary><h3>Details changed by intake ${badge("warn", `${details.length}`)}</h3>
       <span class="small muted">original | default intake | as planned · nothing is discarded without your choice</span></summary>
     <div class="section-body stack">
@@ -794,11 +871,8 @@ function detailsPanel(p, reviewing) {
 // ----------------------------------------------------------------------- artwork colors
 // Region recolor of the processed flat-color artwork (the target the sheets must reproduce). An
 // artwork edit, not a sheet edit: no sheet changes until the user plans again from the artwork.
-const ART_MODES = [
-  ["select", "Select region", "Click a color region: only that connected region is selected, not every area of its color."],
-  ["box", "Limit box", "Drag a box; the next selection stays inside it (e.g. one leg when both legs are one region)."],
-  ["eyedropper", "Eyedropper", "Click any region to use its exact color as the new color."],
-];
+// The selection is a list of regions ({at_px, box_px?}); the server resolves each to its connected
+// region, toggles Shift+Click and previews/applies all of them as one edit.
 const ART_SOURCES = { palette: "palette color", picker: "color picker", eyedropper: "eyedropper" };
 
 function artworkCheck(c) {
@@ -812,6 +886,43 @@ function artworkCheck(c) {
     <p class="small muted" style="margin:0">${esc(c.note)}${c.archived_as ? ` The previous attempt is kept as <code>${esc(c.archived_as)}</code> (Previous attempts).` : ""}</p></div>`;
 }
 
+const swatches = (hexes) => (hexes || []).map((h) => swatch(h)).join(" ");
+
+// Icons for the Artwork colors panel: 16 px line drawings in the current text color.
+const svg = (body) => `<svg class="icon" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${body}</svg>`;
+const ICON = {
+  select: svg('<path d="M5 3l14 7-6 2-3 6z"/>'),
+  box: svg('<rect x="4" y="4" width="16" height="16" rx="1" stroke-dasharray="3 3"/>'),
+  pipette: svg('<path d="M4 20l1.5-4.5L14 7l3 3-8.5 8.5z"/><path d="M13 6l1-1a2.1 2.1 0 0 1 3 0l2 2a2.1 2.1 0 0 1 0 3l-1 1"/><path d="M12 5l7 7"/>'),
+  close: svg('<path d="M6 6l12 12M18 6L6 18"/>'),
+  fit: svg('<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>'),
+  undo: svg('<path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/>'),
+  check: svg('<path d="M5 12l5 5 9-10"/>'),
+  plan: svg('<path d="M7 4l12 8-12 8z"/>'),
+};
+
+// Secondary explanations live in an "i" that shows its text on hover and on keyboard focus.
+const infoTip = (text) => `<span class="info-tip tip" tabindex="0" role="note" aria-label="${esc(text)}" data-tip="${esc(text)}">i</span>`;
+
+function artworkSelectionCard(sel, s) {
+  if (!sel) {
+    const hint = s.mode === "box" ? "Drag a box on the artwork; then click inside it." : "Click a region in the artwork to select it.";
+    return `<div class="art-empty small muted">${hint}</div>`;
+  }
+  const clear = `<button class="art-clear" data-action="art-cancel" data-testid="art-clear-selection">${ICON.close}<span>Clear selection</span></button>`;
+  if (sel.regions === 1) {
+    return `<div class="subpanel art-selection" data-testid="art-selection">
+      <div class="art-selection-head"><div class="row">${swatch(sel.color, true)} <strong>${esc(sel.color)}</strong> <span class="small muted">${fmt(sel.pixels)} px · ${fmt(sel.area_mm2, 2)} mm²</span></div>${clear}</div>
+      <p class="small" style="margin:0"><span data-testid="art-selection-count">1 region selected</span> · One connected region of ${sel.regions_of_color} with this color${sel.limited_by_box ? `, limited to the box (${fmt(sel.pixels)} of the region's ${fmt(sel.whole_region_pixels)} px)` : ""}.</p></div>`;
+  }
+  const items = sel.items.slice(0, 12).map((i) => `<li>${swatch(i.color)} ${fmt(i.pixels)} px${i.limited_by_box ? " (box)" : ""}</li>`).join("")
+    + (sel.items.length > 12 ? `<li class="muted">… ${sel.items.length - 12} more</li>` : "");
+  return `<div class="subpanel art-selection" data-testid="art-selection">
+    <div class="art-selection-head"><div class="row"><strong data-testid="art-selection-count">${sel.regions} regions selected</strong> ${swatches(sel.colors)} <span class="small muted">${fmt(sel.pixels)} px · ${fmt(sel.area_mm2, 2)} mm²</span></div>${clear}</div>
+    ${sel.colors.length > 1 ? `<p class="small" style="margin:0">${sel.colors.length} different original colors; all take the new color together.</p>` : ""}
+    <ul class="small art-region-list">${items}</ul></div>`;
+}
+
 function artworkPanel() {
   const a = ui.state.artwork;
   if (!a) return "";
@@ -819,98 +930,243 @@ function artworkPanel() {
   const s = ui.art;
   const dis = busy() ? "disabled" : "";
   const edits = a.edits || [];
-  const failed = ui.state.proposal?.status === "NEEDS_USER_DECISION";
   const palette = a.palette || [];
-  const mode = ART_MODES.find(([m]) => m === s.mode) || ART_MODES[0];
   const sel = (s.preview || s.selection)?.selection;
   const image = s.preview ? s.preview.images[s.view === "after" ? "after" : "selection"] : s.selection ? s.selection.images.selection : a.image;
   const canPick = sel && !busy() ? "" : "disabled";
 
   const banners = [
-    a.differs_from_planned ? `<div class="banner warn" data-testid="art-differs"><strong>Artwork edited after the sheets were planned.</strong> The current ${a.stage === "review" ? "reviewed stack" : "proposal"} is validated against the previous artwork only, not this one, so print-kit export is blocked. Choose <strong>Try Again</strong> to plan from the edited artwork (the current attempt is kept) or undo the artwork edits.</div>` : "",
+    a.differs_from_planned ? `<div class="banner warn" data-testid="art-differs"><strong>Artwork edited after the sheets were planned.</strong> Print-kit export is blocked until you plan sheets from this artwork or undo the edits. ${infoTip(`The current ${a.stage === "review" ? "reviewed stack" : "proposal"} is validated against the previous artwork only, not this one. Planning keeps the current attempt under Previous attempts.`)}</div>` : "",
     a.base_changed ? '<div class="banner info small">The reviewed artwork changed (accepted front view) after these artwork edits started; planning uses the edited artwork shown here.</div>' : "",
-    a.planned_from_edited_artwork && !edits.length ? `<p class="small muted" style="margin:0">The current sheets were planned from artwork you edited (${a.planned_from_edited_artwork.region_recolors} region recolor${a.planned_from_edited_artwork.region_recolors === 1 ? "" : "s"}); that log is kept with the proposal.</p>` : "",
+    a.planned_from_edited_artwork && !edits.length ? `<p class="small muted" style="margin:0">The current sheets were planned from artwork you edited (${a.planned_from_edited_artwork.region_recolors} region recolor${a.planned_from_edited_artwork.region_recolors === 1 ? "" : "s"}).</p>` : "",
   ].join("");
 
-  const selection = sel ? `<div class="subpanel stack" style="gap:4px" data-testid="art-selection">
-      <div class="row">${swatch(sel.color, true)} <strong>${esc(sel.color)}</strong> <span class="small">${fmt(sel.pixels)} px · ${fmt(sel.area_mm2, 2)} mm²</span></div>
-      <p class="small muted" style="margin:0">One connected region of ${sel.regions_of_color} with this color${sel.limited_by_box ? `, limited to the box (${fmt(sel.pixels)} of the region's ${fmt(sel.whole_region_pixels)} px)` : ""}. Only these pixels change.</p></div>`
-    : `<p class="small muted" style="margin:0">${esc(mode[2])}</p>`;
+  // Tools: select (click / Shift+Click) and the limit box; the eyedropper is a color source below.
+  const tool = (m, icon, label, tip) => `<button class="tool-btn tip ${s.mode === m ? "active" : ""}" data-action="art-mode" data-mode="${m}" data-testid="art-mode-${m}" aria-pressed="${s.mode === m}" data-tip="${esc(tip)}" ${dis}>${icon}<span>${label}</span></button>`;
+  const tools = `<div class="art-toolbar">
+      <div class="segmented" role="group" aria-label="Selection tool">
+        ${tool("select", ICON.select, "Select", "Click a region to select it. Shift+Click adds or removes regions, of any colors.")}
+        ${tool("box", ICON.box, "Box", "Limit box: drag a box; selections then stay inside it (e.g. one leg when both legs are one region).")}
+      </div>
+      ${s.box ? `<button class="tool-btn" data-action="art-clear-box" data-testid="art-clear-box">${ICON.close}<span>Clear box</span></button>` : ""}
+      ${s.preview ? `<div class="segmented" role="group" aria-label="Artwork view">${[["selection", "Selection"], ["after", "After"]].map(([k, l]) => `<button class="tool-btn ${s.view === k ? "active" : ""}" data-action="art-view" data-view="${k}" aria-pressed="${s.view === k}">${l}</button>`).join("")}</div>` : ""}
+    </div>`;
+  const zoom = zoomBar("art");
+  const hint = s.mode === "eyedropper" ? "Click the artwork to sample a color."
+    : s.box ? `Box: rows ${s.box[0]}–${s.box[2] - 1}, columns ${s.box[1]}–${s.box[3] - 1}.`
+    : "Click to select · Shift+Click to add or remove.";
 
-  const chosen = s.color ? `${swatch(s.color, true)} <strong>${esc(s.color)}</strong> <span class="small muted">${esc(ART_SOURCES[s.source] || "")}${s.sampled ? ` at row ${s.sampled[0]}, column ${s.sampled[1]}` : ""}</span>`
-    : '<span class="small muted">No new color chosen yet.</span>';
-  const colors = `<div class="stack" style="gap:6px">
-      <h4 style="margin:0">New color</h4>
-      <div class="row" role="group" aria-label="Palette colors">${palette.map((c) => `<button class="small ghost" data-action="art-color" data-color="${esc(c.hex)}" title="${esc(c.hex)} · ${fmt(c.area_mm2, 1)} mm² · ${c.regions_4} region(s)" data-testid="art-palette-color" ${canPick}>${swatch(c.hex, true)}</button>`).join("")}</div>
-      <div class="row"><input type="color" id="art-picker" value="${esc((s.color || sel?.color || "#888888").toLowerCase())}" aria-label="Color picker">
-        <button class="small" data-action="art-picker" data-testid="art-use-picker" ${canPick}>Use picker color</button>
-        <button class="small ${s.mode === "eyedropper" ? "active" : ""}" data-action="art-mode" data-mode="eyedropper" data-testid="art-eyedropper" ${canPick} title="${esc(ART_MODES[2][2])}">Eyedropper…</button></div>
-      <div class="row">${chosen}</div></div>`;
+  // New color: palette swatches, any color (the swatch opens the system picker), or sample one.
+  const custom = (s.color || (sel && sel.color !== "mixed" ? sel.color : "") || "#888888").toLowerCase();
+  const colors = `<div class="art-colors">
+      <h4>New color${sel && sel.regions > 1 ? ` for all ${sel.regions} regions` : ""}</h4>
+      <div class="art-color-row" role="group" aria-label="New color">
+        ${palette.map((c) => `<button class="art-swatch tip ${s.color === c.hex ? "chosen" : ""}" data-action="art-color" data-color="${esc(c.hex)}" data-testid="art-palette-color" aria-label="Use ${esc(c.hex)}" aria-pressed="${s.color === c.hex}" data-tip="${esc(c.hex)} · ${fmt(c.area_mm2, 1)} mm² · ${c.regions_4} region(s)" ${canPick}><span class="swatch-fill" style="background:${esc(c.hex)}"></span></button>`).join("")}
+        <span class="art-sep" aria-hidden="true"></span>
+        <label class="art-custom tip ${s.source === "picker" ? "chosen" : ""}" data-tip="Any color: opens the color picker. A color that is not in the palette adds a filament.">
+          <input type="color" id="art-picker" data-testid="art-use-picker" aria-label="Pick any color" value="${esc(custom)}" ${canPick}>
+          <span>Custom</span></label>
+        <button class="icon-btn tip ${s.mode === "eyedropper" ? "active" : ""}" data-action="art-mode" data-mode="eyedropper" data-testid="art-eyedropper" aria-label="Sample color" aria-pressed="${s.mode === "eyedropper"}" data-tip="Sample color: click anywhere in the artwork to use its exact color" ${canPick}>${ICON.pipette}</button>
+      </div>
+      <div class="art-chosen" data-testid="art-chosen">${s.color ? `<span class="swatch big" style="background:${esc(s.color)}"></span><strong>${esc(s.color)}</strong><span class="small muted">${esc(ART_SOURCES[s.source] || "")}${s.sampled ? ` at row ${s.sampled[0]}, column ${s.sampled[1]}` : ""}</span>`
+        : `<span class="small muted">${sel ? "Choose a color." : "Select a region first."}</span>`}</div>
+    </div>`;
 
   const pv = s.preview;
   const ch = pv?.change;
-  const preview = pv ? `<div class="stack" style="gap:6px" data-testid="art-preview">
-      <figure style="margin:0"><img class="img" src="${esc(pv.images.before_after)}" alt="before | after"><figcaption>Before (region outlined) | after — nothing is saved until Apply</figcaption></figure>
+  const preview = pv ? `<div class="art-preview" data-testid="art-preview">
+      <figure style="margin:0"><img class="img" src="${esc(pv.images.before_after)}" alt="before | after"><figcaption>Before | after ${infoTip("The selection is outlined in the before image. Nothing is saved until Apply.")}</figcaption></figure>
       <dl class="kv small">
-        <dt>Change</dt><dd>${swatch(ch.from)} ${esc(ch.from)} → ${swatch(ch.to)} ${esc(ch.to)} · ${fmt(ch.pixels)} px</dd>
-        <dt>Palette</dt><dd data-testid="art-palette-change">${ch.palette_size_before} → ${ch.palette_size_after} colors${ch.colors_removed.length ? ` · removed ${ch.colors_removed.map((h) => swatch(h)).join(" ")}` : ""}${ch.colors_added.length ? ` · added ${ch.colors_added.map((h) => swatch(h)).join(" ")}` : ""}</dd>
+        <dt>Change</dt><dd>${swatches(ch.from_colors)} ${ch.from_colors.length === 1 ? esc(ch.from) : `${ch.from_colors.length} colors`} → ${swatch(ch.to)} ${esc(ch.to)} · ${fmt(ch.pixels)} px${pv.selection.regions > 1 ? ` in ${pv.selection.regions} regions` : ""}</dd>
+        <dt>Palette</dt><dd data-testid="art-palette-change">${ch.palette_size_before} → ${ch.palette_size_after} colors${ch.colors_removed.length ? ` · removed ${swatches(ch.colors_removed)}` : ""}${ch.colors_added.length ? ` · added ${swatches(ch.colors_added)}` : ""}</dd>
         <dt>Regions</dt><dd>${Object.keys(ch.regions_before).map((h) => `${swatch(h)} ${ch.regions_before[h]} → ${ch.regions_after[h]}`).join(" · ")}</dd>
-        <dt>Merge</dt><dd>${ch.merged_with_adjacent_regions ? `joins ${ch.merged_with_adjacent_regions} adjacent ${esc(ch.to)} region(s) into one` : "no adjacent region of the new color"}</dd>
+        <dt>Merge</dt><dd>${ch.merged_with_adjacent_regions ? `joins ${ch.merged_with_adjacent_regions} adjacent ${esc(ch.to)} region(s)` : "none"}</dd>
       </dl>
-      <p class="small muted" style="margin:0">${pv.notes.map(esc).join(" ")}</p>
-      <div class="row"><button class="small ghost" data-action="art-cancel" data-testid="art-cancel">Cancel</button><button class="small primary" data-action="art-apply" data-testid="art-apply" ${dis}>Apply to artwork</button></div></div>`
-    : sel ? '<div class="row"><button class="small ghost" data-action="art-cancel" data-testid="art-cancel">Clear selection</button></div>' : "";
+      <div class="art-actions"><button class="ghost" data-action="art-cancel" data-testid="art-cancel">Cancel</button>
+        <button class="primary" data-action="art-apply" data-testid="art-apply" ${dis}>${ICON.check}<span>Apply to artwork</span></button>
+        ${infoTip(pv.notes.join(" "))}</div></div>` : "";
 
   const v = a.verify;
   const history = `<div class="stack" style="gap:6px">
-      <h4 style="margin:0">Artwork edits ${badge("neutral", String(edits.length))}</h4>
-      ${edits.length ? `<ul class="history small" data-testid="art-history">${edits.slice().reverse().map((e) => `<li><span>#${e.index} ${swatch(e.from)} → ${swatch(e.to)} ${fmt(e.selection.pixels)} px${e.selection.limited_by_box ? " (box)" : ""} · ${esc(ART_SOURCES[e.op.source] || e.op.source)}${e.change.merged_with_adjacent_regions ? " · merged" : ""}</span>
-          <button class="small ghost" data-action="art-undo" data-keep="${e.index}" ${e.index === edits.length ? "disabled" : dis} title="Keep edits 1..${e.index}">Revert here</button></li>`).join("")}</ul>` : '<p class="small muted" style="margin:0">No artwork edits.</p>'}
-      <div class="row"><button class="small" data-action="art-undo" data-testid="art-undo" ${edits.length ? dis : "disabled"}>↶ Undo last</button>
-        <button class="small ghost" data-action="art-undo" data-keep="0" ${edits.length > 1 ? dis : "disabled"}>Revert all</button>
-        <button class="small" data-action="art-verify" data-testid="art-verify" ${edits.length ? dis : "disabled"} title="Reload the saved log and replay it from its base">Verify save/reload</button></div>
-      ${v ? `<p class="small" data-testid="art-verify-result">${v.replay_identical ? `<span class="yes">✓</span> Replaying all ${v.edits} saved edit(s) from the base reproduces the saved artwork exactly.` : `<span class="no">✗</span> ${esc(v.problems.join("; "))}`} <span class="muted">(${esc(v.checked_utc)})</span></p>` : ""}
-      <p class="small muted" style="margin:0">Saved after every edit; reloads after a restart.</p></div>`;
+      <h4 style="margin:0">Artwork edits ${badge("neutral", String(edits.length))} ${infoTip("Saved after every edit and reloaded after a restart. A multi-region recolor is one edit (one undo step).")}</h4>
+      ${edits.length ? `<ul class="history small" data-testid="art-history">${edits.slice().reverse().map((e) => `<li><span>#${e.index} ${swatches(e.from_colors)} → ${swatch(e.to)} ${fmt(e.selection.pixels)} px${(e.selection.regions || 1) > 1 ? ` · ${e.selection.regions} regions` : ""}${e.selection.limited_by_box ? " (box)" : ""} · ${esc(ART_SOURCES[e.op.source] || e.op.source)}${e.change.merged_with_adjacent_regions ? " · merged" : ""}</span>
+          <button class="small ghost tip" data-action="art-undo" data-keep="${e.index}" ${e.index === edits.length ? "disabled" : dis} data-tip="Keep edits 1..${e.index}">Revert here</button></li>`).join("")}</ul>` : '<p class="small muted" style="margin:0">No artwork edits.</p>'}
+      <div class="row"><button class="tool-btn" data-action="art-undo" data-testid="art-undo" ${edits.length ? dis : "disabled"}>${ICON.undo}<span>Undo last</span></button>
+        <button class="tool-btn" data-action="art-undo" data-keep="0" ${edits.length > 1 ? dis : "disabled"}>Revert all</button>
+        <button class="tool-btn tip" data-action="art-verify" data-testid="art-verify" ${edits.length ? dis : "disabled"} data-tip="Reload the saved log and replay it from its base">Verify save/reload</button></div>
+      ${v ? `<p class="small" data-testid="art-verify-result">${v.replay_identical ? `<span class="yes">✓</span> Replaying all ${v.edits} saved edit(s) from the base reproduces the saved artwork exactly.` : `<span class="no">✗</span> ${esc(v.problems.join("; "))}`} <span class="muted">(${esc(v.checked_utc)})</span></p>` : ""}</div>`;
 
-  // After an applied color change the re-planning action is "Try Again"; before any edit (artwork
-  // prepared, not planned) it is the first planning.
-  const tryAgain = a.can_replan && edits.length > 0;
-  const replanNote = `Runs the same automatic proposal (unchanged planner and validators) on the artwork shown here.${a.planned ? " The current attempt (proposal, review, estimate) is archived in this project under Previous attempts." : ""} The palette size and the measured sheet count are shown afterwards; merging colors does not guarantee fewer sheets. Nothing is planned until you click.`;
-  const replanButton = (testid) => `<button class="primary" data-action="art-replan" data-testid="${testid}" ${dis}>${tryAgain ? "Try Again" : "Plan sheets from this artwork"}</button>`;
-  const callout = tryAgain && !sel ? `<div class="banner ok stack" style="gap:6px" data-testid="art-try-again-callout">
-      <strong>${edits.length} color change${edits.length === 1 ? "" : "s"} applied to the artwork.</strong>
-      <span class="small">The sheets are not planned for ${edits.length === 1 ? "it" : "them"} yet. Choose Try Again to plan sheets from the edited artwork, or keep editing first.</span>
+  // Planning from the artwork; also shown where Apply was after a color change.
+  const pending = a.can_replan && edits.length > 0;
+  const replanNote = `Runs the same automatic proposal (unchanged planner and validators) on the artwork shown here.${a.planned ? " The current attempt (proposal, review, estimate) is archived under Previous attempts." : ""} The palette size and the measured sheet count are shown afterwards; merging colors does not guarantee fewer sheets.`;
+  const replanButton = (testid) => `<button class="plan" data-action="art-replan" data-testid="${testid}" ${dis}>${ICON.plan}<span>Plan sheets from this artwork</span></button>`;
+  const callout = pending && !sel ? `<div class="banner ok art-callout" data-testid="art-try-again-callout">
+      <div><strong>${edits.length} color change${edits.length === 1 ? "" : "s"} applied to the artwork.</strong>
+      <span class="small">The sheets are not planned for ${edits.length === 1 ? "it" : "them"} yet. Choose Plan sheets from this artwork to plan ${edits.length === 1 ? "it" : "them"}, or keep editing first.</span></div>
       <div class="row">${replanButton("art-try-again")}</div></div>` : "";
-  const replan = a.can_replan ? `<div class="subpanel stack" data-testid="art-replan">
-      <div class="row">${replanButton("art-replan-button")}</div>
-      <p class="small muted" style="margin:0">${esc(replanNote)}</p></div>` : "";
+  const replan = a.can_replan ? `<div class="subpanel art-replan" data-testid="art-replan">
+      ${replanButton("art-replan-button")}
+      <span class="small muted">Nothing is planned until you click. ${infoTip(replanNote)}</span></div>` : "";
 
-  return `<details class="panel section" data-section="artwork" data-testid="artwork-panel" ${openAttr("artwork", !a.planned || failed || a.differs_from_planned || edits.length > 0)}>
+  return `<details class="panel section art-panel" data-section="artwork" data-testid="artwork-panel" ${openAttr("artwork", true)}>
     <summary><h3>Artwork colors ${badge("neutral", "artwork edit · not a sheet edit")}</h3>
       <span class="small muted">${palette.length ? `${palette.length} colors · ` : ""}${edits.length} edit${edits.length === 1 ? "" : "s"}${a.differs_from_planned ? " · not planned yet" : ""}</span></summary>
     <div class="section-body stack">
-      <p class="small muted" style="margin:0">Recolor regions of the processed flat-color artwork, e.g. unify two skin tones, change a necklace, or change one leg only (Limit box). The uploaded image is never changed and no sheet is edited here: sheets follow only when you plan again.</p>
+      <p class="small muted" style="margin:0">Recolor regions of the flat-color artwork. Sheets change only when you plan again. ${infoTip("The uploaded image is never changed and no sheet is edited here. Examples: unify two skin tones, change a necklace, or change one leg only with the Box tool.")}</p>
       ${banners}
       <div class="grid2">
-        <div class="stack" style="gap:6px">
-          <div class="row"><div class="segmented" role="tablist" aria-label="Artwork tool">${ART_MODES.map(([m, l, h]) => `<button class="small ${s.mode === m ? "active" : ""}" data-action="art-mode" data-mode="${m}" title="${esc(h)}" data-testid="art-mode-${m}" ${dis}>${l}</button>`).join("")}</div>
-            ${s.box ? '<button class="small ghost" data-action="art-clear-box" data-testid="art-clear-box">Clear box</button>' : ""}
-            ${pv ? `<div class="segmented" role="tablist" aria-label="Artwork view">${[["selection", "Selection"], ["after", "After"]].map(([k, l]) => `<button class="small ${s.view === k ? "active" : ""}" data-action="art-view" data-view="${k}">${l}</button>`).join("")}</div>` : ""}</div>
-          <div class="canvas-wrap" id="art-wrap"><img id="art-image" src="${esc(image)}" alt="flat-color artwork" draggable="false"><canvas id="art-overlay" aria-label="Artwork canvas" data-testid="art-canvas"></canvas></div>
-          <span class="small muted coords" id="art-coords">${s.box ? `Selections stay inside the box (rows ${s.box[0]}–${s.box[2] - 1}, columns ${s.box[1]}–${s.box[3] - 1}).` : esc(mode[2])}</span>
+        <div class="stack" style="gap:8px">
+          ${tools}
+          <div class="zoom-viewport art-viewport ${ui.artSpace ? "space" : ""}" id="art-viewport" data-testid="art-viewport" tabindex="0" aria-label="Artwork (mouse wheel zooms; + / - / 0 with focus)">
+            <div class="art-stage" id="art-stage"><img id="art-image" src="${esc(image)}" alt="flat-color artwork" draggable="false"></div>
+            <canvas id="art-overlay" aria-label="Artwork canvas" data-testid="art-canvas"></canvas>
+          </div>
+          ${zoom}
+          <span class="small muted coords" id="art-coords">${esc(hint)}</span>
         </div>
-        <div class="stack">${callout}${selection}${colors}${preview}</div>
+        <div class="stack art-side">${callout}${artworkSelectionCard(sel, s)}${colors}${preview}</div>
       </div>
       <div class="grid2">
-        <div class="stack" style="gap:6px"><h4 style="margin:0">Palette now ${badge("neutral", `${palette.length} colors`)}</h4>
-          ${palette.length ? `<ul class="small" data-testid="art-palette" style="margin:0">${palette.map((c) => `<li>${swatch(c.hex)} <code>${esc(c.hex)}</code> · ${fmt(c.area_mm2, 1)} mm² · ${c.regions_4} region${c.regions_4 === 1 ? "" : "s"}</li>`).join("")}</ul>` : '<p class="small muted" style="margin:0">Shown after the first selection.</p>'}
-          <p class="small muted" style="margin:0">One filament color per sheet; the planner decides how many sheets these colors need.</p></div>
+        <div class="stack" style="gap:6px"><h4 style="margin:0">Palette now ${badge("neutral", `${palette.length} colors`)} ${infoTip("One filament color per sheet; the planner decides how many sheets these colors need.")}</h4>
+          ${palette.length ? `<ul class="small" data-testid="art-palette" style="margin:0">${palette.map((c) => `<li>${swatch(c.hex)} <code>${esc(c.hex)}</code> · ${fmt(c.area_mm2, 1)} mm² · ${c.regions_4} region${c.regions_4 === 1 ? "" : "s"}</li>`).join("")}</ul>` : '<p class="small muted" style="margin:0">Shown after the first selection.</p>'}</div>
         ${history}
       </div>
       ${replan}
     </div>
   </details>`;
 }
+
+// -- zoomable views (Artwork colors, Review & edit): viewport zoom only, never the artwork itself.
+// The stage is sized image pixels x scale and moved inside a fixed viewport; overlays cover the
+// viewport and map through the image's on-screen rectangle, so hit-testing is exact at any zoom.
+// Zoom is stored as a multiple of "fit" (null = fit), so it survives switching between images.
+const VIEWS = {
+  art: { state: () => ui.art, root: "#art-viewport", stage: "#art-stage", image: "#art-image", label: "#art-zoom-label", fitButton: '[data-testid="art-zoom-fit"]', redraw: () => drawArtOverlay() },
+  edit: { state: () => ui.editView, root: "#edit-viewport", stage: "#edit-stage", image: "#edit-image", label: "#edit-zoom-label", fitButton: '[data-testid="edit-zoom-fit"]', redraw: () => drawOverlay() },
+};
+const ZOOM_MAX = 40;  // x the fitted size
+
+function viewGeometry(key) {
+  const v = VIEWS[key];
+  const vp = $(v.root);
+  const img = $(v.image);
+  if (!vp || !img || !img.naturalWidth) return null;
+  const vw = vp.clientWidth;
+  const vh = vp.clientHeight;
+  const fit = Math.min(vw / img.naturalWidth, vh / img.naturalHeight);
+  const state = v.state();
+  return { v, vp, img, vw, vh, fit, state, scale: fit * (state.zoom ?? 1) };
+}
+
+function applyView(key) {
+  const g = viewGeometry(key);
+  if (!g) return;
+  const last = g.state.lastView;  // the viewport can change size (window resize): keep the same centre
+  if (g.state.zoom !== null && last && (last.vw !== g.vw || last.vh !== g.vh)) {
+    const cx = (last.vw / 2 - g.state.pan[0]) / last.scale;
+    const cy = (last.vh / 2 - g.state.pan[1]) / last.scale;
+    g.state.pan = [g.vw / 2 - cx * g.scale, g.vh / 2 - cy * g.scale];
+  }
+  g.state.lastView = { vw: g.vw, vh: g.vh, scale: g.scale };
+  const w = g.img.naturalWidth * g.scale;
+  const h = g.img.naturalHeight * g.scale;
+  const clamp = (p, size, room) => (size <= room ? (room - size) / 2 : Math.min(0, Math.max(room - size, p)));
+  g.state.pan = [clamp(g.state.zoom === null ? 0 : g.state.pan[0], w, g.vw), clamp(g.state.zoom === null ? 0 : g.state.pan[1], h, g.vh)];
+  const stage = $(g.v.stage);
+  stage.style.width = `${w}px`;
+  stage.style.height = `${h}px`;
+  stage.style.transform = `translate(${g.state.pan[0]}px, ${g.state.pan[1]}px)`;
+  const label = $(g.v.label);
+  if (label) label.textContent = `${Math.round(g.scale * 100)}%`;
+  $(g.v.fitButton)?.classList.toggle("active", g.state.zoom === null);
+  g.v.redraw();
+}
+
+// Zoom by a factor (or "fit"), keeping the image point under the screen point (cx, cy) still
+// (default: the viewport centre).  The correction is measured on the rendered image, so sub-pixel
+// offsets cannot accumulate over many wheel steps.
+function zoomView(key, how, cx, cy) {
+  const g = viewGeometry(key);
+  if (!g) return;
+  const state = g.state;
+  if (how === "fit") { state.zoom = null; applyView(key); return; }
+  const zoom = Math.min(ZOOM_MAX, Math.max(1, (state.zoom ?? 1) * how));
+  if (zoom <= 1 + 1e-6) { state.zoom = null; applyView(key); return; }
+  const vr = g.vp.getBoundingClientRect();
+  const x = cx ?? vr.left + vr.width / 2;
+  const y = cy ?? vr.top + vr.height / 2;
+  const before = g.img.getBoundingClientRect();
+  const fx = (x - before.left) / before.width;
+  const fy = (y - before.top) / before.height;
+  if (state.zoom === null) state.pan = [before.left - vr.left - g.vp.clientLeft, before.top - vr.top - g.vp.clientTop];
+  const ratio = zoom / (state.zoom ?? 1);
+  state.zoom = zoom;
+  state.pan = [x - vr.left - g.vp.clientLeft - (x - before.left) * ratio, y - vr.top - g.vp.clientTop - (y - before.top) * ratio];
+  applyView(key);
+  const after = g.img.getBoundingClientRect();
+  const dx = x - (after.left + fx * after.width);
+  const dy = y - (after.top + fy * after.height);
+  if (Math.abs(dx) > 0.01 || Math.abs(dy) > 0.01) {
+    state.pan = [state.pan[0] + dx, state.pan[1] + dy];
+    applyView(key);
+  }
+}
+
+// Wheel zoom toward the cursor (no modifier), middle-drag or Space+drag panning, and keyboard zoom
+// (+ / - / 0, arrows pan) when the viewport has focus.  Registered before a view's own tool
+// handlers: a pan consumes the pointer events, so it never selects, samples or draws.
+function bindViewport(key, canvas) {
+  const vp = $(VIEWS[key].root);
+  const state = VIEWS[key].state();
+  canvas.addEventListener("wheel", (e) => {
+    e.preventDefault();  // the page does not scroll while the cursor is over the artwork
+    const delta = Math.max(-300, Math.min(300, e.deltaY * (e.deltaMode === 1 ? 16 : 1)));
+    zoomView(key, Math.exp(-delta * 0.0022), e.clientX, e.clientY);
+  }, { passive: false });
+  canvas.addEventListener("pointerdown", (e) => {
+    if (!(e.button === 1 || (e.button === 0 && ui.artSpace))) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    canvas.setPointerCapture(e.pointerId);
+    state.panning = { x: e.clientX, y: e.clientY, pan: [...state.pan] };
+    vp.classList.add("panning");
+  });
+  canvas.addEventListener("pointermove", (e) => {
+    if (!state.panning) return;
+    e.stopImmediatePropagation();
+    const p = state.panning;
+    if (state.zoom !== null) state.pan = [p.pan[0] + e.clientX - p.x, p.pan[1] + e.clientY - p.y];
+    applyView(key);
+  });
+  canvas.addEventListener("pointerup", (e) => {
+    if (!state.panning) return;
+    e.stopImmediatePropagation();
+    state.panning = null;
+    vp.classList.remove("panning");
+  });
+  canvas.addEventListener("auxclick", (e) => e.preventDefault());
+  vp.addEventListener("keydown", (e) => {
+    const step = { "+": 1.25, "=": 1.25, "-": 0.8, _: 0.8 }[e.key];
+    const move = { ArrowLeft: [60, 0], ArrowRight: [-60, 0], ArrowUp: [0, 60], ArrowDown: [0, -60] }[e.key];
+    if (step) zoomView(key, step);
+    else if (e.key === "0") zoomView(key, "fit");
+    else if (move && state.zoom !== null) { state.pan = [state.pan[0] + move[0], state.pan[1] + move[1]]; applyView(key); }
+    else return;
+    e.preventDefault();
+  });
+}
+
+// Compact zoom readout: percentage, Fit, and the help text in a tooltip.
+function zoomBar(key) {
+  return `<div class="zoom-bar" role="group" aria-label="Zoom">
+      <span class="zoom-label" id="${key}-zoom-label" data-testid="${key}-zoom-label" aria-live="polite">fit</span>
+      <button class="tool-btn tip" data-action="zoom-fit" data-view-key="${key}" data-testid="${key}-zoom-fit" data-tip="Fit to view: show the whole image (reset zoom and position)">${ICON.fit}<span>Fit</span></button>
+      ${infoTip("Mouse wheel over the image zooms toward the cursor. Space + drag, or drag with the middle mouse button, moves the view. With the image focused: + and - zoom, 0 fits, arrows move.")}
+    </div>`;
+}
+
+const applyArtView = () => applyView("art");
+const zoomArt = (how, vx, vy) => zoomView("art", how, vx, vy);
 
 function artPx(event) {
   const img = $("#art-image");
@@ -929,40 +1185,47 @@ function drawArtOverlay() {
   const img = $("#art-image");
   const canvas = $("#art-overlay");
   if (!img || !canvas || !img.naturalWidth) return;
-  const rect = img.getBoundingClientRect();
+  const c = canvas.getBoundingClientRect();
+  const r = img.getBoundingClientRect();
   const dpr = window.devicePixelRatio || 1;
-  const w = Math.max(1, Math.round(rect.width * dpr));
-  const h = Math.max(1, Math.round(rect.height * dpr));
+  const w = Math.max(1, Math.round(c.width * dpr));
+  const h = Math.max(1, Math.round(c.height * dpr));
   if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
   const ctx = canvas.getContext("2d");
   ctx.clearRect(0, 0, w, h);
-  const sx = w / img.naturalWidth;
-  const sy = h / img.naturalHeight;
+  const sx = (r.width / img.naturalWidth) * dpr;
+  const sy = (r.height / img.naturalHeight) * dpr;
+  const ox = (r.left - c.left) * dpr;
+  const oy = (r.top - c.top) * dpr;
   const box = ui.art.drag ? artBox(ui.art.drag.from, ui.art.drag.to) : ui.art.box;
   ctx.lineWidth = 2 * dpr;
   if (box) {
     ctx.strokeStyle = "#00a0ff";
     ctx.setLineDash([6 * dpr, 4 * dpr]);
-    ctx.strokeRect(box[1] * sx, box[0] * sy, (box[3] - box[1]) * sx, (box[2] - box[0]) * sy);
+    ctx.strokeRect(ox + box[1] * sx, oy + box[0] * sy, (box[3] - box[1]) * sx, (box[2] - box[0]) * sy);
     ctx.setLineDash([]);
   }
-  for (const [point, color] of [[ui.art.at, "#ff2d55"], [ui.art.sampled, "#00a86b"]]) {
+  const marks = [...ui.art.regions.map((reg) => [reg.at_px, "#ff2d55"]), [ui.art.sampled, "#00a86b"]];
+  for (const [point, color] of marks) {
     if (!point) continue;
     ctx.strokeStyle = color;
-    ctx.beginPath(); ctx.arc((point[1] + 0.5) * sx, (point[0] + 0.5) * sy, 7 * dpr, 0, Math.PI * 2); ctx.stroke();
+    ctx.beginPath(); ctx.arc(ox + (point[1] + 0.5) * sx, oy + (point[0] + 0.5) * sy, 6 * dpr, 0, Math.PI * 2); ctx.stroke();
   }
 }
 
 function bindArtwork() {
   const canvas = $("#art-overlay");
   if (!canvas) return;
-  $("#art-image")?.addEventListener("load", drawArtOverlay);
-  drawArtOverlay();
+  bindViewport("art", canvas);
+  $("#art-image")?.addEventListener("load", applyArtView);
+  applyArtView();
   canvas.addEventListener("pointerdown", (e) => {
-    if (busy() || ui.art.mode !== "box") return;
-    canvas.setPointerCapture(e.pointerId);
-    const point = artPx(e);
-    ui.art.drag = { from: point, to: point };
+    if (busy() || e.button !== 0) return;
+    if (ui.art.mode === "box") {
+      canvas.setPointerCapture(e.pointerId);
+      const point = artPx(e);
+      ui.art.drag = { from: point, to: point };
+    }
   });
   canvas.addEventListener("pointermove", (e) => {
     const point = artPx(e);
@@ -971,7 +1234,7 @@ function bindArtwork() {
     if (ui.art.drag) { ui.art.drag.to = point; drawArtOverlay(); }
   });
   canvas.addEventListener("pointerup", async (e) => {
-    if (busy()) return;
+    if (busy() || e.button !== 0) return;
     const point = artPx(e);
     if (ui.art.drag) {
       const box = artBox(ui.art.drag.from, point);
@@ -982,33 +1245,70 @@ function bindArtwork() {
       return;
     }
     if (ui.art.mode === "eyedropper") await artworkSample(point);
-    else await artworkSelect(point);
+    else await artworkSelect(point, e.shiftKey);
   });
+}
+
+// Space held (not while typing) turns a left drag on the artwork into panning.
+function onArtKey(event) {
+  if (event.code !== "Space" || !$(".zoom-viewport")) return;
+  if (event.target.closest?.("input, textarea, select, button, summary")) return;
+  const down = event.type === "keydown";
+  if (down) event.preventDefault();  // no page scroll while panning
+  if (ui.artSpace === down) return;
+  ui.artSpace = down;
+  document.querySelectorAll(".zoom-viewport").forEach((vp) => vp.classList.toggle("space", down));
+}
+
+// Keyboard focus inside the Artwork colors panel survives a re-render (e.g. after choosing a color),
+// so keyboard users continue where they were instead of at the top of the page.
+const ART_FOCUS_ATTRS = ["data-testid", "data-action", "data-mode", "data-color", "data-zoom", "data-view", "data-keep"];
+function artFocusKey() {
+  const el = document.activeElement;
+  if (!el || !el.closest?.('[data-testid="artwork-panel"]')) return null;
+  if (el.id) return `#${el.id}`;
+  const parts = ART_FOCUS_ATTRS.filter((a) => el.hasAttribute(a)).map((a) => `[${a}="${CSS.escape(el.getAttribute(a))}"]`);
+  return parts.length ? `[data-testid="artwork-panel"] ${el.tagName.toLowerCase()}${parts.join("")}` : null;
+}
+function restoreArtFocus(key) {
+  if (!key) return;
+  const el = document.querySelector(key);
+  // A control that is now disabled cannot take focus; fall back to the panel's next useful action.
+  const target = el && !el.disabled ? el : document.querySelector('[data-testid="art-try-again"], [data-testid="art-apply"], [data-testid="art-clear-selection"]');
+  target?.focus({ preventScroll: true });
 }
 
 function artworkCall(action, body) {
   return api("POST", `/api/projects/${encodeURIComponent(ui.name)}/artwork/${action}`, body);
 }
 
+// The view (zoom, pan), tool and limit box survive a new selection, Apply, Undo and Cancel.
+function keepArtView(extra = {}) {
+  return { ...freshArt(), mode: ui.art.mode === "eyedropper" ? "select" : ui.art.mode, box: ui.art.box,
+           zoom: ui.art.zoom, pan: ui.art.pan, ...extra };
+}
+
 async function artworkPreview() {
   const s = ui.art;
-  const body = { at_px: s.at, box_px: s.box, color: s.color, source: s.source };
+  const body = { regions: s.regions, color: s.color, source: s.source };
   if (s.source === "eyedropper") body.sampled_at_px = s.sampled;
   s.preview = await artworkCall("preview", body);
   s.view = "after";
 }
 
-async function artworkSelect(at) {
+// Click: select the region at the point (replacing the selection). Shift+Click: add the region, or
+// remove it when it is already selected. The server resolves regions and returns the new list.
+async function artworkSelect(at, additive = false) {
   ui.error = null;
-  ui.art.at = at;
-  ui.art.preview = null;
+  const s = ui.art;
   try {
-    ui.art.selection = await artworkCall("preview", { at_px: at, box_px: ui.art.box });
-    ui.art.view = "selection";
-    if (ui.art.color && ui.art.color !== ui.art.selection.selection.color) await artworkPreview();
+    const result = await artworkCall("preview", { regions: additive ? s.regions : [], toggle: { at_px: at, box_px: s.box } });
+    s.regions = result.regions;
+    s.preview = null;
+    s.selection = result.selection ? result : null;
+    s.view = "selection";
+    if (s.selection && s.color && !(result.selection.colors.length === 1 && result.selection.colors[0] === s.color)) await artworkPreview();
   } catch (err) {
-    ui.art.selection = null;
-    ui.art.at = null;
     showError(err, "Artwork selection");
     return;
   }
@@ -1018,7 +1318,7 @@ async function artworkSelect(at) {
 async function artworkChoose(color, source, sampled = null) {
   ui.error = null;
   Object.assign(ui.art, { color, source, sampled });
-  if (!ui.art.at) { render(); return; }
+  if (!ui.art.regions.length) { render(); return; }
   try {
     await artworkPreview();
   } catch (err) {
@@ -1044,7 +1344,7 @@ async function artworkApply() {
   if (!pv || busy()) return;
   try {
     await artworkCall("apply", { op: pv.op, preview_id: pv.preview_id });
-    ui.art = { ...freshArt(), box: ui.art.box };
+    ui.art = keepArtView();
     await loadState();
   } catch (err) {
     showError(err, "Apply artwork edit");
@@ -1058,7 +1358,7 @@ async function artworkPost(action, body) {
   if (busy()) return;
   try {
     await artworkCall(action, body);
-    if (action !== "verify") ui.art = { ...freshArt(), box: ui.art.box };
+    if (action !== "verify") ui.art = keepArtView();
     await loadState();
   } catch (err) {
     showError(err, `Artwork ${action}`);
@@ -1096,6 +1396,7 @@ function reviewView() {
 function reviewBar() {
   const d = ui.state.draft;
   const ok = d.status.printable;
+  const visibleChange = !ok && d.validation.failures.some((f) => /reconstruction differs/.test(f));
   const dis = busy() ? "disabled" : "";
   const v = ui.state.verify;
   const verified = v ? (v.replay_identical
@@ -1104,16 +1405,16 @@ function reviewBar() {
   return `<div class="review-bar" data-testid="review-bar">
     <div class="review-bar-status">
       ${badge(ok ? "ok" : "bad", ok ? "Valid draft" : "Invalid draft")}
-      <span class="small muted">${d.sheets.length} layers · ${fmt(d.total_height_mm)} mm stack · ${d.edits.length} edit${d.edits.length === 1 ? "" : "s"} · saved automatically</span>
+      <span class="small muted">${d.sheets.length} layers · ${fmt(d.total_height_mm)} mm stack · ${d.edits.length} edit${d.edits.length === 1 ? "" : "s"} · saved</span>
     </div>
     <div class="review-bar-actions">
-      <button class="small" data-action="undo" ${d.edits.length ? dis : "disabled"} title="Undo the last edit">↶ Undo last edit</button>
-      <button class="small" data-action="verify" ${dis} title="Replay the saved edit log from the base and compare">Verify save/reload</button>
-      <button class="small" data-action="propose-op" data-op='${esc(JSON.stringify({ op: "accept_artwork" }))}' ${dis}
-        title="Only for an intended visible change: the current front view becomes the reviewed artwork">Accept front view as artwork…</button>
+      <button class="tool-btn tip" data-action="undo" ${d.edits.length ? dis : "disabled"} data-tip="Undo the last layer edit">${ICON.undo}<span>Undo last edit</span></button>
+      <button class="tool-btn ghost tip" data-action="verify" ${dis} data-tip="Replay the saved edit log from the base and compare">Verify save/reload</button>
+      <button class="tool-btn ${visibleChange ? "attention" : "ghost"} tip" data-action="propose-op" data-op='${esc(JSON.stringify({ op: "accept_artwork" }))}' ${dis}
+        data-tip="Only for an intended visible change: the current front view becomes the reviewed artwork">Accept front view as artwork…</button>
       <span class="divider" aria-hidden="true"></span>
-      <button class="small" data-action="tab" data-tab="printability">Printability →</button>
-      <button class="small primary" data-action="tab" data-tab="kit" ${ok && !ui.state.artwork?.differs_from_planned ? "" : "disabled"} title="${ui.state.artwork?.differs_from_planned ? "The artwork was edited after these sheets were planned" : ok ? "Export STEP/STL for every layer" : "Invalid drafts cannot be exported"}">Build print kit →</button>
+      <button class="tool-btn ghost" data-action="tab" data-tab="printability">Printability →</button>
+      <button class="primary" data-action="tab" data-tab="kit" ${ok && !ui.state.artwork?.differs_from_planned ? "" : "disabled"} title="${ui.state.artwork?.differs_from_planned ? "The artwork was edited after these sheets were planned" : ok ? "Export STEP/STL for every layer" : "Invalid drafts cannot be exported"}">Build print kit →</button>
     </div>
     ${verified ? `<div class="review-bar-note">${verified} <span class="muted small">(${esc(v.checked_utc)})</span></div>` : ""}
   </div>`;
@@ -1176,12 +1477,13 @@ function canvasPanel(sheet) {
       <div class="segmented" role="tablist" aria-label="View">${views.map(([v, l]) => `<button class="small ${ui.view === v ? "active" : ""}" data-action="view" data-view="${v}" role="tab" aria-selected="${ui.view === v}">${l}</button>`).join("")}</div>
       <span class="small muted">${esc(caption)}</span>
     </div>
-    <div class="canvas-wrap" id="canvas-wrap">
-      <img id="edit-image" src="${esc(viewImage(sheet))}" alt="${esc(caption)}" draggable="false">
+    <div class="zoom-viewport edit-viewport ${ui.artSpace ? "space" : ""}" id="edit-viewport" data-testid="edit-viewport" tabindex="0" aria-label="Edit canvas (mouse wheel zooms; + / - / 0 with focus)">
+      <div class="zoom-stage" id="edit-stage"><img id="edit-image" src="${esc(viewImage(sheet))}" alt="${esc(caption)}" draggable="false"></div>
       <canvas id="overlay" aria-label="Edit canvas"></canvas>
     </div>
     <div class="spread small stage-foot">
-      <span class="coords muted" id="coords">${ui.hover ? `x ${ui.hover[0].toFixed(2)} mm · y ${ui.hover[1].toFixed(2)} mm` : "Coordinates in mm from the bottom-left sheet corner"}</span>
+      <span class="coords muted" id="coords">${ui.hover ? `x ${ui.hover[0].toFixed(2)} mm · y ${ui.hover[1].toFixed(2)} mm` : "x, y in mm from the bottom-left corner"}</span>
+      ${zoomBar("edit")}
       ${ui.view.startsWith("changes") ? '<span class="legend"><span><i style="background:#ff0000"></i>visible change</span><span><i style="background:#285aff"></i>hidden change</span></span>' : ui.view === "sheet" ? '<span class="legend"><span><i style="background:#ebebeb;border:1px solid #bbb"></i>cutout</span></span>' : ""}
     </div>
     <div class="tools">
@@ -1422,8 +1724,9 @@ function overlayGeometry() {
   const canvas = $("#overlay");
   if (!img || !canvas) return null;
   const rect = img.getBoundingClientRect();
+  const crect = canvas.getBoundingClientRect();
   const size = ui.state.draft.validation.outer_sheet_mm;
-  return { img, canvas, rect, size };
+  return { img, canvas, rect, crect, size, dpr: window.devicePixelRatio || 1 };
 }
 
 function toMm(event) {
@@ -1433,20 +1736,22 @@ function toMm(event) {
   return [r3(Math.min(Math.max(x, 0), g.size)), r3(Math.min(Math.max(y, 0), g.size))];
 }
 
+// mm on the sheet -> overlay canvas pixels, through the image's on-screen rectangle (any zoom/pan).
 function toPx(point, g) {
-  return [(point[0] / g.size) * g.canvas.width, (1 - point[1] / g.size) * g.canvas.height];
+  return [(g.rect.left - g.crect.left + (point[0] / g.size) * g.rect.width) * g.dpr,
+          (g.rect.top - g.crect.top + (1 - point[1] / g.size) * g.rect.height) * g.dpr];
 }
 
 function drawOverlay() {
   const g = overlayGeometry();
   if (!g) return;
-  const dpr = window.devicePixelRatio || 1;
-  const w = Math.max(1, Math.round(g.rect.width * dpr));
-  const h = Math.max(1, Math.round(g.rect.height * dpr));
+  const dpr = g.dpr;
+  const w = Math.max(1, Math.round(g.crect.width * dpr));
+  const h = Math.max(1, Math.round(g.crect.height * dpr));
   if (g.canvas.width !== w || g.canvas.height !== h) { g.canvas.width = w; g.canvas.height = h; }
   const ctx = g.canvas.getContext("2d");
   ctx.clearRect(0, 0, w, h);
-  const mmToPx = w / g.size;
+  const mmToPx = (g.rect.width * dpr) / g.size;
   ctx.lineWidth = 2 * dpr;
   const shape = ui.drag ? shapeFromDrag(ui.drag) : ui.pending;
   if (shape) drawShape(ctx, shape, g, mmToPx);
@@ -1509,6 +1814,9 @@ function shapeFromDrag({ from, to }) {
 function bindCanvas() {
   const canvas = $("#overlay");
   if (!canvas) return;
+  bindViewport("edit", canvas);
+  $("#edit-image")?.addEventListener("load", () => applyView("edit"));
+  applyView("edit");
   canvas.addEventListener("pointermove", (e) => {
     ui.hover = toMm(e);
     const c = $("#coords");
@@ -1544,7 +1852,6 @@ function bindCanvas() {
     render();
   });
   canvas.addEventListener("pointerleave", () => { ui.hover = null; });
-  $("#edit-image")?.addEventListener("load", drawOverlay);
 }
 
 // ----------------------------------------------------------------------- printability
@@ -1582,9 +1889,11 @@ function printabilityView() {
   const findings = est ? est.features.filter((f) => f.severity !== "INFO") : [];
   const info = est ? est.features.filter((f) => f.severity === "INFO") : [];
   return `<div class="panel stack">
-    <div class="spread"><h2>FDM printability estimate</h2>${badge("outline", "estimate · not a slicer · not a print")}</div>
-    <p class="muted">Measures every opening, slot, gap and thin material of the current draft's exact export geometry against the printer parameters below, plus build volume and layer quantization. Geometry is never changed: problems are reported for you to decide.</p>
-    ${processForm("est")}
+    <div class="spread"><h2>Check printability</h2>${badge("outline", "estimate · not a slicer · not a print")}</div>
+    <p class="muted" style="margin:0">Checks openings, slots and thin material against your printer. ${infoTip("Measures every opening, slot, gap and thin material of the current draft's exact export geometry against the printer parameters, plus build volume and layer quantization. Geometry is never changed: problems are reported for you to decide.")}</p>
+    <details class="section subtle" data-section="est-process" ${openAttr("est-process")}>
+      <summary><h4 style="margin:0">Printer &amp; process</h4><span class="small muted">${esc(ui.process.name)}${String(ui.process.source).startsWith("ASSUMPTION") ? " · generic defaults" : ""}</span></summary>
+      <div class="section-body">${processForm("est")}</div></details>
     <div class="row"><button class="primary" data-action="run-printability" ${busy() ? "disabled" : ""}>Run estimate on the current draft</button>
       ${valid ? "" : '<span class="small muted">The draft is invalid; the estimate still runs, but the kit export will refuse it.</span>'}</div>
   </div>
@@ -1595,8 +1904,9 @@ function printabilityView() {
     ${findings.length ? `<p class="small"><a href="#" data-action="tab" data-tab="proposal" data-testid="to-resize">Check whether a larger sheet clears these (Physical size) →</a></p>` : ""}
     ${findingsTable(findings)}
     ${info.length ? `<details><summary>${info.length} informational item(s)</summary>${infoList(info)}</details>` : ""}
-    <h4>Maps <span class="legend"><span><i style="background:#ff8c00"></i>risk</span><span><i style="background:#ff0000"></i>unsupported</span></span></h4>
-    <div class="gallery">${est.map_urls.map((u) => `<figure><img class="img" src="${esc(u)}" alt="map"><figcaption>${esc(u.split("/").pop().split("?")[0])}</figcaption></figure>`).join("")}</div>
+    <details class="section subtle" data-section="est-maps" ${openAttr("est-maps", findings.length > 0)}>
+      <summary><h4 style="margin:0">Layer maps</h4><span class="small muted">${est.map_urls.length} map${est.map_urls.length === 1 ? "" : "s"} · <span class="legend"><span><i style="background:#ff8c00"></i>risk</span><span><i style="background:#ff0000"></i>unsupported</span></span></span></summary>
+      <div class="section-body"><div class="gallery compact">${est.map_urls.map((u) => `<figure><img class="img" src="${esc(u)}" alt="map" loading="lazy"><figcaption>${esc(u.split("/").pop().split("?")[0])}</figcaption></figure>`).join("")}</div></div></details>
     <p class="small muted">Physical result: ${badge("outline", "NOT VERIFIED")} — only your test print can confirm these thresholds.</p>
   </div>` : ""}`;
 }
@@ -1640,8 +1950,10 @@ function kitBuildPanel(latest) {
     <div class="spread"><h3 style="margin:0">${latest ? "Build a new print kit" : "Build the print kit"}</h3>
       <span class="small muted">${latest ? (latest.stale ? "the draft changed after the latest kit" : "printer/process settings, optional Bambu Studio project") : "export STEP/STL for every sheet"}</span></div>
     <div class="stack" style="margin-top:12px">
-      <p class="muted small">Exports one STEP and one STL per sheet with the approved CAD pipeline, reopens every file, compares artwork → reviewed stack → exported geometry → reopened CAD, runs the FDM estimate and writes a guide and checksums. No frame, housing or glue is added; the rim stays optional. A new kit never replaces an earlier one.</p>
-      ${processForm("kit")}
+      <p class="muted small" style="margin:0">One STEP and one STL per sheet, checked by reopening every file. ${infoTip("Exports with the approved CAD pipeline, reopens every file, compares artwork, reviewed stack, exported geometry and reopened CAD, runs the FDM estimate and writes a guide and checksums. No frame, housing or glue is added; the rim stays optional. A new kit never replaces an earlier one.")}</p>
+      <details class="section subtle" data-section="kit-process" ${openAttr("kit-process")}>
+        <summary><h4 style="margin:0">Printer &amp; process</h4><span class="small muted">${esc(ui.process.name)}${String(ui.process.source).startsWith("ASSUMPTION") ? " · generic defaults" : ""}</span></summary>
+        <div class="section-body">${processForm("kit")}</div></details>
       ${bambuOption()}
       <div class="row"><button class="${needed ? "primary" : ""}" data-action="build-kit" ${valid && !busy() ? "" : "disabled"}>${latest ? "Build new print kit" : "Build print kit"}</button>
         ${ui.state.artwork?.differs_from_planned ? '<span class="small no">The artwork was edited after these sheets were planned; plan from the edited artwork or undo the artwork edits (Review &amp; edit → Artwork colors).</span>'
@@ -1912,7 +2224,13 @@ async function onClick(event) {
   const project = `/api/projects/${encodeURIComponent(ui.name)}`;
   const sheet = ui.sheet;
   switch (a) {
-    case "tab": event.preventDefault(); setTab(el.dataset.tab); render(); break;
+    case "tab":
+      event.preventDefault();
+      setTab(el.dataset.tab);
+      if (el.dataset.focus === "artwork") ui.sections.artwork = true;
+      render();
+      if (el.dataset.focus === "artwork") $('[data-testid="artwork-panel"]')?.scrollIntoView({ behavior: "smooth", block: "start" });
+      break;
     case "dismiss-error": ui.error = null; render(); break;
     case "create": createProject(); break;
     case "propose": submit(`${project}/propose`, {}); break;
@@ -1948,7 +2266,7 @@ async function onClick(event) {
     case "propose-op": ui.pending = JSON.parse(el.dataset.op); if (ui.pending.sheet) ui.sheet = ui.pending.sheet; ui.view = "sheet"; setTab("review"); render(); break;
     case "locate":
       ui.sheet = el.dataset.sheet; ui.marker = [Number(el.dataset.x), Number(el.dataset.y)]; ui.pending = null; ui.view = "sheet"; ui.tool = "inspect";
-      setTab("review"); render(); $("#canvas-wrap")?.scrollIntoView({ behavior: "smooth", block: "center" }); break;
+      setTab("review"); render(); $("#edit-viewport")?.scrollIntoView({ behavior: "smooth", block: "center" }); break;
     case "move": editOp({ op: "move", sheet, to: Number(el.dataset.to) }); break;
     case "recolor": editOp({ op: "recolor", sheet, color: $("#p-color").value.toUpperCase() }); break;
     case "thickness": editOp({ op: "thickness", sheet, mm: Number($("#p-thick").value) }); break;
@@ -1991,11 +2309,11 @@ async function onClick(event) {
       break;
     case "dismiss-kit-notice": ui.kitNotice = null; render(); break;
     case "art-mode": ui.art.mode = el.dataset.mode; render(); break;
-    case "art-clear-box": ui.art.box = null; if (ui.art.at) await artworkSelect(ui.art.at); else render(); break;
+    case "art-clear-box": ui.art.box = null; render(); break;
+    case "zoom-fit": zoomView(el.dataset.viewKey, "fit"); break;
     case "art-color": await artworkChoose(el.dataset.color, "palette"); break;
-    case "art-picker": await artworkChoose($("#art-picker").value.toUpperCase(), "picker"); break;
     case "art-view": ui.art.view = el.dataset.view; render(); break;
-    case "art-cancel": ui.art = { ...freshArt(), mode: ui.art.mode, box: ui.art.box }; render(); break;
+    case "art-cancel": ui.art = keepArtView(); render(); break;
     case "art-apply": await artworkApply(); break;
     case "art-undo": await artworkPost("undo", el.dataset.keep === undefined ? {} : { keep: Number(el.dataset.keep) }); break;
     case "art-verify": await artworkPost("verify", {}); break;
@@ -2009,6 +2327,8 @@ function onChange(event) {
   const el = event.target;
   if (el.id === "project-select") {
     location.hash = el.value ? `#/${encodeURIComponent(el.value)}` : "#/";
+  } else if (el.id === "art-picker") {
+    artworkChoose(el.value.toUpperCase(), "picker");
   } else if (el.id === "f-plan-later") {
     ui.planLater = el.checked;  // no re-render: that would reset the other import fields
     const button = $('[data-action="create"]');
@@ -2070,7 +2390,9 @@ async function main() {
     if (details?.dataset.section) ui.sections[details.dataset.section] = !details.open;
   });
   window.addEventListener("hashchange", route);
-  window.addEventListener("resize", () => { if (ui.tab === "review") drawOverlay(); drawArtOverlay(); });
+  window.addEventListener("resize", () => { applyView("edit"); applyArtView(); });
+  document.addEventListener("keydown", onArtKey);
+  document.addEventListener("keyup", onArtKey);
   try {
     ui.info = await api("GET", "/api/info");
     ui.process = { ...ui.info.process_presets[0] };

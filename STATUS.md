@@ -890,3 +890,51 @@ follow the light-blue body). Not user approved; no CAD exported.
   dist\LayerForge\LayerForge.exe and dist\LayerForge-0.1.0-win64.zip (2026-10-30 13:05, SHA-256
   e1ae1f70d088c9ed670c3863622e8cce9018b6cb08fb0ebe80c22c4ac8c7777b; static files byte-identical to src).
   Packaged tests: 6 PASS (5 existing + new artwork browser drive against the frozen exe).
+- 2026-10-30 Artwork colors: zoom/pan and multi-region batch recolor. State: READY_FOR_USER_TEST. Not committed.
+  Zoom -, +, Fit (reset), 100 %, Ctrl+wheel around the cursor, visible percentage; pan with Space + drag or
+  middle drag. Click selects one connected region; Shift+Click adds/removes regions (any colors; limit box
+  kept); count, colors and Clear selection shown; one color (palette, picker, eyedropper) for all; combined
+  before/after preview; Apply recolors all selected regions at once as ONE edit (one undo step); Try Again
+  shown after Apply, never automatic. Planner, validators and project workflow unchanged.
+  Tests (sequential): test_artwork_recolor 16 PASS (3 new core: toggle/mixed colors/dedupe, only-selected-
+  pixels incl. limit box, one undoable logged edit with replay; 1 new API: Shift+Click toggling, mixed colors,
+  limit box, batch apply = union mask exactly, undo, reload on a second server, Try Again; browser drive
+  extended: zoom buttons/Fit/Ctrl+wheel with the pixel under the cursor kept (< 1 artwork px), zoomed
+  selection and eyedropper exact, Space-drag and middle-drag pan then exact clicks, Shift+Click add/remove,
+  batch preview/apply/undo), test_l4_app 11 PASS (incl. browser workflow), upscale + resize 16 PASS:
+  43 PASS / 0 FAIL / 0 SKIP. The Windows exe/zip in dist\ were NOT rebuilt (they predate this change).
+  Rebuilt afterwards: dist\LayerForge\LayerForge.exe and dist\LayerForge-0.1.0-win64.zip (2026-10-30 15:49,
+  SHA-256 3536bbad0fab650d29d2a366f2d33be7f5dae36c4f58d0f876ea27e03f6721f5; static files byte-identical to
+  src). Packaged tests 6 PASS / 0 FAIL / 0 SKIP (incl. the artwork browser drive with zoom, pan, Shift+Click
+  and batch recolor against the frozen exe).
+- 2026-10-30 user correction: planning button named "Plan sheets from this artwork" again (Try Again reverted
+  in UI, server message, README, Hebrew guide HTML + screenshot; PDF not regenerated per user). Artwork
+  colors section (incl. New color) open by default. Tests: test_artwork_recolor 16 PASS, test_l4_app 11 PASS,
+  browser drive re-run after a wording fix 1 PASS. dist\ exe/zip NOT rebuilt after this change.
+  Rebuilt afterwards: dist\LayerForge\LayerForge.exe and dist\LayerForge-0.1.0-win64.zip (2026-10-30 17:16,
+  SHA-256 f6d1cc71b95279fea14e2c32d9f7232f1037d3bcee0efdc032979d86562eb349; static files byte-identical to
+  src, no "Try Again" left). Packaged tests 6 PASS / 0 FAIL / 0 SKIP.
+- 2026-10-30 Artwork colors panel polish (UI only; backend, planner, validators unchanged). State:
+  READY_FOR_USER_TEST. Not committed. Verified in headless Edge against the local app server (same UI code
+  as the desktop app), light and dark: before/after screenshots of 4 states; keyboard: Tab order through
+  tools, zoom, info, Clear selection, swatches, Custom, Sample color, Cancel, Apply; Space toggles tools;
+  Enter picks a swatch (focus kept) and applies (focus moves to Plan sheets from this artwork); undo by
+  keyboard; tooltips show on keyboard focus and on hover. Tests: test_artwork_recolor 16 PASS; test_l4_app
+  10 PASS + 1 transient FAIL (WinError 10053 connection abort in the API-only delete-project test) that
+  passed 2/2 on re-run. dist\ exe/zip NOT rebuilt after this change.
+  Rebuilt afterwards: dist\LayerForge\LayerForge.exe and dist\LayerForge-0.1.0-win64.zip (2026-10-30 21:25,
+  SHA-256 ebe437eb3175e34b67809c55da69060917349b6b45e84cd54e074a4c3b1c7abd; static files byte-identical to
+  src). Packaged tests 6 PASS / 0 FAIL / 0 SKIP.
+- 2026-10-31 application-wide UX cleanup + wheel zoom in Artwork colors and Review & edit (UI only).
+  State: READY_FOR_USER_TEST. Not committed. Before/after screenshots of Import, prepared artwork, Proposal,
+  Review & edit, Printability, Print kit at 1280x800, 1440x900 (full page) and 1920x1080. Full-page height at
+  1440: proposal 3083 -> 900 px, prepared 3306 -> 1789, printability 1587 -> 900. Tests: test_artwork_recolor
+  browser drive PASS (new: plain-wheel zoom toward the cursor, no page scroll over the image and normal page
+  scroll outside, wheel-down zoom out, Fit, keyboard + / 0, review canvas zoom with a Fill-cutout click at
+  ~5x landing within 0.15 mm, middle-drag pan creates no edit); test_l4_app 11 PASS (incl. browser workflow).
+  Keyboard check: logical Tab order, focus rings, tooltips on focus, Enter on a workflow step switches screens.
+  dist\ exe/zip NOT rebuilt.
+  Rebuilt afterwards: dist\LayerForge\LayerForge.exe and dist\LayerForge-0.1.0-win64.zip (2026-10-31 13:12,
+  SHA-256 fce0d4cce6fb1f220e9932effe0cacdfcd93d3ab6f1f4ddc3c0433786718365c; static files byte-identical to
+  src). Packaged tests 6 PASS / 0 FAIL / 0 SKIP (incl. the main browser workflow and the artwork/zoom drive
+  against the frozen exe).
