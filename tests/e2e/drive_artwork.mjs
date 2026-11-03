@@ -1,4 +1,4 @@
-// Drives the Artwork colors panel of the real LayerForge app in a headless Chromium browser
+// Drives the Artwork editor of the real LayerForge app in a headless Chromium browser
 // (Edge or Chrome) through the DevTools protocol: real clicks and pointer drags on the artwork.
 // No npm packages: Node >= 22 (built-in WebSocket).  Same bootstrap as drive_app.mjs.
 //
@@ -35,12 +35,17 @@ await new Promise((ok) => ws.addEventListener("open", ok, { once: true }));
 let nextId = 1;
 const waiting = new Map();
 const consoleErrors = [];
+const dialogs = [];
+let dialogAccept = true;
 ws.addEventListener("message", (event) => {
   const msg = JSON.parse(event.data);
   if (msg.id && waiting.has(msg.id)) {
     const { ok, fail } = waiting.get(msg.id);
     waiting.delete(msg.id);
     msg.error ? fail(new Error(JSON.stringify(msg.error))) : ok(msg.result);
+  } else if (msg.method === "Page.javascriptDialogOpening") {  // confirm() / beforeunload: recorded, then answered
+    dialogs.push({ type: msg.params.type, message: msg.params.message });
+    send("Page.handleJavaScriptDialog", { accept: dialogAccept });
   } else if (msg.method === "Runtime.exceptionThrown") {
     consoleErrors.push(msg.params.exceptionDetails.exception?.description || msg.params.exceptionDetails.text);
   } else if (msg.method === "Runtime.consoleAPICalled" && msg.params.type === "error") {
@@ -93,7 +98,7 @@ const bodyHas = (s) => `document.body.innerText.includes(${JSON.stringify(s)})`;
 const idle = `!document.querySelector('[data-testid="job-banner"]')`;
 async function clickSel(selector) {
   const ok = await evaluate(`(() => { const el = document.querySelector(${JSON.stringify(selector)}); if (!el || el.disabled) return false; el.scrollIntoView({block: "center"}); el.click(); return true; })()`);
-  if (!ok) throw new Error(`cannot click ${selector}`);
+  if (!ok) throw new Error(`cannot click ${selector}: ${await evaluate(`document.querySelector(${JSON.stringify(selector)})?.outerHTML ?? "not found"`)}`);
 }
 // Screen point of an artwork pixel centre, through the image's on-screen rectangle (any zoom/pan).
 async function artPoint([row, col], scroll = true) {
@@ -174,55 +179,83 @@ try {
   await shotEl("art_selected", '[data-testid="artwork-panel"] .grid2');
   step("porthole selected", { selection: results.selection.split("\n")[0] });
 
-  // 3. Palette color -> before/after preview; Cancel keeps the artwork.
+  // 3. Select mode: choosing a color recolors the selection at once, as an unsaved change (no Apply).
+  const unsavedIs = (n) => (n ? `(document.querySelector('[data-testid="art-unsaved"]')?.innerText || "").startsWith("${n} unsaved change")`
+    : `document.querySelector('[data-testid="art-unsaved"]')?.innerText === "All changes saved"`);
+  const unsavedText = () => text('[data-testid="art-unsaved"]');
+  const artState = () => evaluate(`fetch("/api/projects/" + location.hash.split("/")[1]).then((r) => r.json()).then((s) => s.artwork)`);
+  results.no_apply_button = (await count('[data-testid="art-apply"]')) === 0;
+  results.save_disabled_at_start = await evaluate(`document.querySelector('[data-testid="art-save"]').disabled`);
   await clickSel(`[data-testid="art-palette-color"][data-color="${SUN_HEX}"]`);
-  await waitFor(`document.querySelector('[data-testid="art-preview"]')`, "preview");
-  results.preview_palette = await text('[data-testid="art-palette-change"]');
-  results.preview_text = await text('[data-testid="art-preview"]');
-  await shot("a2_preview");
-  await shotEl("art_preview", '[data-testid="artwork-panel"] .grid2');
-  await clickSel('[data-testid="art-cancel"]');
-  await waitFor(`!document.querySelector('[data-testid="art-preview"]')`, "preview cancelled");
-  results.history_after_cancel = await history();
+  await waitFor(unsavedIs(1), "first unsaved change");
+  await waitFor(`document.querySelector("#art-image").src.includes("/artwork/session/current.png")`, "working image shown");
+  results.first = {
+    unsaved: await unsavedText(), last: await text('[data-testid="art-last"]'), history: await text('[data-testid="art-history"]'),
+    plan_disabled: await evaluate(`document.querySelector('[data-testid="art-replan-button"]')?.disabled ?? null`),
+    callout: await count('[data-testid="art-try-again-callout"]'), saved_edits: (await artState()).edits.length,
+    summary: await text('[data-testid="artwork-panel"] summary'),
+  };
+  await shot("s1_unsaved_change");
+  await shotEl("art_savebar", '[data-testid="art-savebar"]');
+  await clickSel('[data-testid="art-session-undo"]');
+  await waitFor(unsavedIs(0), "undone");
+  results.first.redo_enabled = await evaluate(`!document.querySelector('[data-testid="art-session-redo"]').disabled`);
+  await clickSel('[data-testid="art-session-redo"]');
+  await waitFor(unsavedIs(1), "redone");
+  step("instant recolor, undo, redo", { unsaved: results.first.unsaved });
 
-  // 4. Apply a palette recolor to one porthole.
-  await artClick(PORTHOLES[0]);
-  await waitFor(`document.querySelector('[data-testid="art-selection"]')`, "selection again");
-  await clickSel(`[data-testid="art-palette-color"][data-color="${SUN_HEX}"]`);
-  await waitFor(`document.querySelector('[data-testid="art-apply"]')`, "apply button");
-  await clickSel('[data-testid="art-apply"]');
-  await waitFor(`document.querySelectorAll('[data-testid="art-history"] li').length === 1`, "first edit");
-  // Right after Apply, the planning action is shown where the Apply button was.
-  await waitFor(`document.querySelector('[data-testid="art-try-again"]')`, "planning action after apply");
-  results.try_again = await text('[data-testid="art-try-again-callout"]');
-  results.try_again_in_view = await evaluate(`(() => { const b = document.querySelector('[data-testid="art-try-again"]').getBoundingClientRect(); return b.top >= 0 && b.bottom <= innerHeight; })()`);
-  await shot("a2b_try_again");
-  await shotEl("art_try_again", '[data-testid="art-try-again-callout"]');
-  step("palette recolor applied");
-
-  // 5. Eyedropper: pick the sun's color for the second porthole.
+  // 4. Eyedropper: the second porthole takes the sun's exact color, also at once (2 unsaved changes).
   await artClick(PORTHOLES[1]);
   await waitFor(`document.querySelector('[data-testid="art-selection"]')`, "second porthole");
   await clickSel('[data-testid="art-eyedropper"]');
   await artClick(SUN);
-  await waitFor(`document.querySelector('[data-testid="art-preview"]')`, "eyedropper preview");
-  results.eyedropper_preview = await text('[data-testid="art-preview"]');
-  await clickSel('[data-testid="art-apply"]');
-  await waitFor(`document.querySelectorAll('[data-testid="art-history"] li').length === 2`, "second edit");
-  results.history_text = await text('[data-testid="art-history"]');
-  await shot("a3_two_edits");
-  await shotEl("art_history", '[data-testid="art-history"]');
+  await waitFor(unsavedIs(2), "eyedropper recolor");
+  results.history_unsaved = await text('[data-testid="art-history"]');
 
-  // 6. Undo, verify, reload.
+  // 5. Save Changes: both are saved together; then the planning action appears.
+  await clickSel('[data-testid="art-save"]');
+  await waitFor(`${unsavedIs(0)} && document.querySelectorAll('[data-testid="art-history"] li').length === 2`, "saved together");
+  await waitFor(`document.querySelector('[data-testid="art-try-again"]')`, "planning action after save");
+  results.saved_last = await text('[data-testid="art-last"]');
+  results.history_text = await text('[data-testid="art-history"]');
+  results.saved_batches = [...new Set((await artState()).edits.map((e) => e.batch))];
+  results.try_again = await text('[data-testid="art-try-again-callout"]');
+  results.try_again_in_view = await evaluate(`(() => { const b = document.querySelector('[data-testid="art-try-again"]').getBoundingClientRect(); return b.top >= 0 && b.bottom <= innerHeight; })()`);
+  await shot("s2_saved");
+  await shotEl("art_try_again", '[data-testid="art-try-again-callout"]');
+  step("saved together", { history: results.history_text.split(String.fromCharCode(10)).length });
+
+  // 6. Saved history: undo the last saved edit, verify. Then one unsaved change: leaving the project
+  // asks first (dismissed: stays), a reload asks too and the change is recovered; Discard asks to confirm.
   await clickSel('[data-testid="art-undo"]');
-  await waitFor(`document.querySelectorAll('[data-testid="art-history"] li').length === 1`, "undo");
+  await waitFor(`document.querySelectorAll('[data-testid="art-history"] li').length === 1`, "undo saved");
   await clickSel('[data-testid="art-verify"]');
   await waitFor(`document.querySelector('[data-testid="art-verify-result"]')`, "verify");
   results.verify = await text('[data-testid="art-verify-result"]');
+  await artClick(PORTHOLES[1]);
+  await waitFor(`document.querySelector('[data-testid="art-selection"]')`, "porthole for the recovery check");
+  await clickSel('[data-testid="art-palette-color"][data-color="#774627"]');
+  await waitFor(unsavedIs(1), "unsaved before leaving");
+  dialogAccept = false;
+  await evaluate(`location.hash = "#/"`);
+  for (let i = 0; i < 50 && !dialogs.length; i++) await sleep(100);
+  await sleep(400);
+  results.leave = { dialog: dialogs[0] || null, hash: await evaluate("location.hash"), unsaved: await unsavedText(),
+                    panel: await count('[data-testid="artwork-panel"]') };
+  dialogAccept = true;
+  await evaluate("window.__beforeReload = true");
   await send("Page.reload");
-  await waitFor(`document.querySelector('[data-testid="artwork-panel"]') && ${idle}`, "reloaded");
+  await waitFor(`!window.__beforeReload && document.querySelector('[data-testid="artwork-panel"]') && ${idle} && ${unsavedIs(1)}`, "reloaded with the unsaved change");
+  results.recovery = { unsaved: await unsavedText(), recovered: await text('[data-testid="art-recovered"]'),
+                       dialogs: dialogs.map((d) => d.type) };
+  await clickSel('[data-testid="art-discard"]');
+  await waitFor(`document.querySelector('[data-testid="art-discard-confirm"]')`, "discard confirmation");
+  results.discard_confirm = await text('[data-testid="art-savebar"]');
+  await shotEl("art_discard", '[data-testid="art-savebar"]');
+  await clickSel('[data-testid="art-discard-confirm"]');
+  await waitFor(unsavedIs(0), "discarded");
   results.history_after_reload = await history();
-  step("undo, verify, reload", { verify: results.verify });
+  step("undo, verify, leave warning, recovery, discard", { verify: results.verify, recovery: results.recovery });
 
   // 7. Limit box: drag a box over the left sea, then select inside it.
   await clickSel('[data-testid="art-mode-box"]');
@@ -285,14 +318,20 @@ try {
   await waitFor(`document.querySelector('[data-testid="art-selection"]')`, "zoomed selection");
   results.zoomed_selection = await text('[data-testid="art-selection"]');
   await clickSel('[data-testid="art-eyedropper"]');
-  await artClick([352, 230]);  // hull between two portholes, a few pixels from each
-  await waitFor(`document.querySelector('[data-testid="art-preview"]')`, "zoomed eyedropper");
-  results.zoomed_eyedropper = await text('[data-testid="art-preview"]');
+  await artClick([352, 230]);  // hull between two portholes, a few pixels from each: recolors the porthole at once
+  await waitFor(unsavedIs(1), "zoomed eyedropper");
+  results.zoomed_eyedropper = await text('[data-testid="art-chosen"]');
   await shot("a6_zoomed");
   await shotEl("art_zoomed", '[data-testid="artwork-panel"] .grid2');
-  await clickSel('[data-testid="art-cancel"]');
+  await evaluate(`document.querySelector("#art-viewport").focus()`);
+  await send("Input.dispatchKeyEvent", { type: "keyDown", key: "z", code: "KeyZ", windowsVirtualKeyCode: 90, modifiers: MODIFIERS.ctrl });
+  await send("Input.dispatchKeyEvent", { type: "keyUp", key: "z", code: "KeyZ", windowsVirtualKeyCode: 90, modifiers: MODIFIERS.ctrl });
+  await waitFor(unsavedIs(0), "Ctrl+Z undo");
+  results.ctrl_z = await unsavedText();
 
   // 7c. Pan with Space + drag and with the middle button; clicks stay exact after panning.
+  await evaluate(`document.querySelector("#art-viewport").scrollIntoView({block: "center"})`);
+  await sleep(150);
   const vp = await viewportRect();
   const centre = { x: vp.x + vp.w / 2, y: vp.y + vp.h / 2 };
   await evaluate("document.activeElement && document.activeElement.blur && document.activeElement.blur()");
@@ -304,14 +343,15 @@ try {
   await screenDrag(centre, { x: centre.x - 30, y: centre.y - 20 }, "middle");
   const t2 = await stageTransform();
   results.pan = { before: t0, space_drag: t1, middle_drag: t2, history: await history() };
-  await artClick(PORTHOLES[1]);  // after panning: still the same porthole
+  await artClick(PORTHOLES[1]);  // after panning: still the same porthole (a click in Select mode only selects)
   await waitFor(`document.querySelector('[data-testid="art-selection"]')`, "panned selection");
   results.panned_selection = await text('[data-testid="art-selection"]');
   await artClick(PORTHOLES[1], MODIFIERS.shift);  // Shift+Click a selected region: removed
   await waitFor(`!document.querySelector('[data-testid="art-selection"]')`, "deselected");
+  results.pan.unsaved_after = await unsavedText();
   step("zoom and pan", { zoom: results.zoom, pan: results.pan });
 
-  // 7d. Multi-region selection (Shift+Click, mixed colors) and one batch recolor.
+  // 7d. Multi-region selection (Shift+Click, mixed colors) recolored at once as one change.
   await clickSel('[data-testid="art-zoom-fit"]');
   await artClick(PORTHOLES[1]);
   await waitFor(`document.querySelector('[data-testid="art-selection-count"]')`, "first region");
@@ -324,18 +364,114 @@ try {
   await waitFor(`document.querySelector('[data-testid="art-selection-count"]')?.innerText.startsWith("2 regions")`, "removed one");
   results.multi.after_remove = await selectionCount();
   await clickSel('[data-testid="art-palette-color"][data-color="#774627"]');
-  await waitFor(`document.querySelector('[data-testid="art-preview"]')`, "batch preview");
-  results.multi.preview = await text('[data-testid="art-preview"]');
-  await shot("a7_multi_preview");
-  await shotEl("art_multi", '[data-testid="artwork-panel"] .grid2');
-  await clickSel('[data-testid="art-apply"]');
-  await waitFor(`document.querySelectorAll('[data-testid="art-history"] li').length === 2`, "batch applied");
+  await waitFor(unsavedIs(1), "batch recolor");
   results.multi.history = await text('[data-testid="art-history"]');
-  results.multi.try_again = await evaluate(`Boolean(document.querySelector('[data-testid="art-try-again"]'))`);
-  await clickSel('[data-testid="art-undo"]');  // the whole batch is one undo step
-  await waitFor(`document.querySelectorAll('[data-testid="art-history"] li').length === 1`, "batch undone");
+  results.multi.callout_while_unsaved = await count('[data-testid="art-try-again-callout"]');
+  await shot("a7_multi");
+  await shotEl("art_multi", '[data-testid="artwork-panel"] .grid2');
+  await clickSel('[data-testid="art-session-undo"]');  // the whole batch is one undo step
+  await waitFor(unsavedIs(0), "batch undone");
   results.multi.after_undo = await history();
+  results.multi.try_again = await evaluate(`Boolean(document.querySelector('[data-testid="art-try-again"]'))`);
   step("multi-region batch", { after_remove: results.multi.after_remove });
+
+  // 7e. Several edits in a row, each shown at once and building on the previous ones, saved together:
+  // Fill a porthole; a Line (end point dragged, angle typed, Enter = Done); a Curve across the sail bent
+  // by a control point (finished by switching tool); Fill of the sail part the unsaved curve cut off;
+  // a Brush stroke inside the sun; a curved Close gap (Done). Undo / redo single changes, then Save.
+  const paint = {};
+  const shapePoints = () => text('[data-testid="art-shape-points"]');
+  const strokeInfo = () => waitFor(`document.querySelector('[data-testid="art-stroke-info"]')`, "shape preview");
+  const setArtField = (id, value) => evaluate(`(() => { const i = document.querySelector("#${id}"); i.value = "${value}"; i.dispatchEvent(new Event("change", {bubbles: true})); })()`);
+  const lastOp = async () => { const a = await artState(); return a.unsaved.ops[a.unsaved.ops.length - 1]; };
+  await clickSel('[data-testid="art-mode-fill"]');
+  paint.fill_empty = await text('[data-testid="art-empty"]');
+  await clickSel('[data-testid="art-palette-color"][data-color="#774627"]');  // a color before any selection
+  await artClick(PORTHOLES[0]);
+  await waitFor(unsavedIs(1), "fill");
+  paint.fill_last = await text('[data-testid="art-last"]');
+  await clickSel('[data-testid="art-mode-line"]');
+  await evaluate(`(() => { const i = document.querySelector("#art-width"); i.value = "1.0"; i.dispatchEvent(new Event("change", {bubbles: true})); })()`);
+  await waitFor(`document.querySelector('[data-testid="art-width-warn"]')`, "thin-line warning");
+  paint.width_warn = await text('[data-testid="art-width-warn"]');
+  await artDrag([60, 40], [60, 200]);
+  await strokeInfo();
+  paint.line_preview = await text('[data-testid="art-stroke-info"]');
+  paint.line_points = await shapePoints();
+  paint.unsaved_while_pending = await unsavedText();  // a pending shape is not an edit yet
+  await artDrag([60, 200], [80, 200]);  // drag the end point: previewed again
+  await waitFor(`document.querySelector('[data-testid="art-shape-points"]')?.innerText.includes("(80, 200)")`, "end point moved");
+  paint.line_moved = await shapePoints();
+  await setArtField("art-angle", "0");  // horizontal again, same start and length
+  await waitFor(`(document.querySelector('[data-testid="art-shape-points"]')?.innerText || "").split("→")[1]?.trim().startsWith("(60,")`, "angle applied");
+  paint.line_angle = await shapePoints();
+  await waitFor(`document.querySelector("#art-image").src.includes("/artwork/preview/after.png") && document.querySelector("#art-image").complete`, "line preview shown");
+  await shot("a8_line_pending");
+  await evaluate(`document.querySelector("#art-viewport").focus()`);
+  await send("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
+  await send("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
+  await waitFor(`${unsavedIs(2)} && !document.querySelector('[data-testid="art-shape"]')`, "line done with Enter");
+  await clickSel('[data-testid="art-mode-curve"]');
+  await artDrag([250, 240], [250, 345]);  // across the mast and the sail
+  await strokeInfo();
+  paint.curve_handles = await count('[data-testid="art-shape"]');
+  const curveImage = await evaluate(`document.querySelector("#art-image").src`);
+  await artDrag([229, 275], [285, 275]);  // drag control point 1 down: the curve bends, previewed again
+  await waitFor(`document.querySelector("#art-image")?.src !== ${JSON.stringify(curveImage)} && document.querySelector("#art-image").src.includes("/artwork/preview/after.png") && document.querySelector("#art-image").complete && document.querySelector('[data-testid="art-stroke-info"]')`, "curve re-previewed");
+  paint.curve_preview = await text('[data-testid="art-stroke-info"]');
+  await shot("a10_curve_pending");
+  await clickSel('[data-testid="art-mode-fill"]');  // a tool change finishes the pending curve
+  await waitFor(unsavedIs(3), "curve done by tool change");
+  await clickSel('[data-testid="art-palette-color"][data-color="#1C478D"]');
+  await artClick([180, 266]);  // the upper sail, cut off by the unsaved curve
+  await waitFor(unsavedIs(4), "fill on the unsaved curve's region");
+  paint.fill_split = (await lastOp()).change;
+  await clickSel('[data-testid="art-mode-brush"]');
+  paint.brush_empty = await text('[data-testid="art-empty"]');
+  await artClick(SUN);  // in Brush mode a click selects where to paint, it does not recolor
+  await waitFor(`document.querySelector('[data-testid="art-brush-note"]')`, "brush selection");
+  paint.brush_click_unsaved = await unsavedText();
+  await artDrag([SUN[0], SUN[1] - 80], [SUN[0], SUN[1] + 80]);
+  await waitFor(unsavedIs(5), "brush stroke");
+  await waitFor(`document.querySelector('[data-testid="art-brush-note"]')`, "selection kept for the next stroke");
+  paint.brush_note = await text('[data-testid="art-brush-note"]');
+  paint.brush_op = (await lastOp()).op;
+  await shot("a9_brush");
+  await clickSel('[data-testid="art-mode-gap"]');
+  await clickSel('[data-testid="art-palette-color"][data-color="#AAD7F4"]');
+  await artClick([PORTHOLES[1][0], PORTHOLES[1][1] + 3]);
+  paint.gap_first = await text("#art-coords");
+  await artClick(PORTHOLES[2]);
+  await strokeInfo();
+  paint.gap_info = await text('[data-testid="art-stroke-info"]');
+  await clickSel('[data-testid="art-gap-cubic"]');  // a curved connection between the same snapped ends
+  await waitFor(`document.querySelector('[data-testid="art-stroke-info"]')?.innerText.includes("curved")`, "curved gap");
+  paint.gap_curved = await text('[data-testid="art-stroke-info"]');
+  await clickSel('[data-testid="art-done"]');
+  await waitFor(unsavedIs(6), "gap done");
+  paint.unsaved_history = await text('[data-testid="art-history"]');
+  await shot("s3_six_unsaved");
+  await shotEl("art_unsaved_history", '[data-testid="artwork-panel"]');
+  await clickSel('[data-testid="art-session-undo"]');
+  await waitFor(unsavedIs(5), "undo 1");
+  await clickSel('[data-testid="art-session-undo"]');
+  await waitFor(unsavedIs(4), "undo 2");
+  paint.after_undo = { unsaved: await unsavedText(), redo: (await artState()).unsaved.redo };
+  await clickSel('[data-testid="art-session-redo"]');
+  await waitFor(unsavedIs(5), "redo 1");
+  await clickSel('[data-testid="art-session-redo"]');
+  await waitFor(unsavedIs(6), "redo 2");
+  paint.saved_before = (await artState()).edits.length;
+  await clickSel('[data-testid="art-save"]');
+  await waitFor(`${unsavedIs(0)} && document.querySelectorAll('[data-testid="art-history"] li').length === 7`, "six saved together");
+  paint.history = await text('[data-testid="art-history"]');
+  paint.batches = (await artState()).edits.map((e) => e.batch);
+  await shot("s4_saved_batch");
+  await clickSel('[data-testid="art-history"] [data-action="art-undo"][data-keep="1"]');
+  await waitFor(`document.querySelectorAll('[data-testid="art-history"] li').length === 1`, "paint reverted");
+  paint.after_revert = await history();
+  results.paint = paint;
+  step("paint tools", { history: paint.history.split(String.fromCharCode(10)).length });
 
   // 8. Explicit planning from the edited artwork; palette and measured sheet count shown.
   results.replan_label = await text('[data-testid="art-replan-button"]');
@@ -397,6 +533,59 @@ try {
   rz.after_fit = await text('[data-testid="edit-zoom-label"]');
   results.review_zoom = rz;
   step("review canvas zoom", rz);
+
+  // 10. Line / Curve connectors replace the rigid Bridge: draw, drag the handles, set width and angle,
+  // see the dry-run check, apply (a visible change on the front sheet needs approval), undo; curve handles.
+  const pendingOp = () => evaluate(`JSON.parse(document.querySelector('[data-testid="pending-edit"] pre').textContent)`);
+  const setField = (sel, value) => evaluate(`(() => { const el = document.querySelector(${JSON.stringify(sel)}); el.value = ${JSON.stringify(String(value))}; el.dispatchEvent(new Event("input", {bubbles: true})); el.dispatchEvent(new Event("change", {bubbles: true})); })()`);
+  const editDrag = async (from, to) => {
+    const a = await editPoint(from), b = await editPoint(to, false);
+    await mouse("mouseMoved", a, 0);
+    await mouse("mousePressed", a);
+    for (let i = 1; i <= 6; i++) await mouse("mouseMoved", { x: a.x + ((b.x - a.x) * i) / 6, y: a.y + ((b.y - a.y) * i) / 6 });
+    await mouse("mouseReleased", b, 0);
+    await sleep(200);
+  };
+  const conn = { bridge_buttons: await count('[data-tool="bridge"]'), line_buttons: await count('[data-tool="line"]'), curve_buttons: await count('[data-tool="curve"]') };
+  await clickSel('[data-tool="line"]');
+  await waitFor(`document.querySelector("#edit-image")?.complete && document.querySelector("#edit-image").naturalWidth > 0`, "line tool view");
+  await editDrag([40, 150], [100, 170]);
+  await waitFor(`document.querySelector('[data-testid="stroke-width"]')`, "line editor");
+  conn.created = (await text('[data-testid="pending-edit"]')).split(String.fromCharCode(10))[0];
+  await editDrag([100, 170], [110, 135]);  // drag the end handle: the connector stays editable
+  conn.after_handle = (await pendingOp()).shape.points_mm;
+  await setField('[data-testid="stroke-width"]', 2.5);
+  await setField('[data-testid="stroke-angle"]', 0);
+  await setField('[data-testid="stroke-length"]', 50);
+  conn.after_fields = (await pendingOp()).shape;
+  await waitFor(`document.querySelector('[data-testid="stroke-check"] .badge')`, "connector check", 60000);
+  conn.check = await text('[data-testid="stroke-check"]');
+  await shot("a9_line_editor");
+  await shotEl("line_editor", ".stage");
+  await clickSel('[data-testid="stroke-apply"]');
+  await waitFor(`document.querySelector('[data-testid="change-panel"]') && ${idle}`, "line applied", 120000);
+  conn.applied_change = await text('[data-testid="change-panel"] h3');
+  conn.applied_validation = await text('[data-testid="validation-panel"] h3');
+  await clickSel('[data-action="undo"]');
+  // The review bar (not the Artwork colors summary, which also says "0 edits") and the validation state.
+  await waitFor(`document.querySelector('[data-testid="review-bar"]')?.innerText.includes("· 0 edits") && document.querySelector('[data-testid="validation-panel"] h3')?.innerText.includes("REVIEWED_VALID") && ${idle}`, "line undone", 120000);
+  conn.after_undo = await text('[data-testid="validation-panel"] h3');
+  await clickSel('[data-tool="curve"]');
+  await editDrag([40, 150], [100, 150]);
+  await waitFor(`document.querySelector('[data-testid="stroke-arc-length"]')`, "curve editor");
+  conn.arc_straight = parseFloat(await text('[data-testid="stroke-arc-length"]'));
+  await editDrag([60, 150], [60, 185]);  // bend with the first curve handle
+  conn.arc_bent = parseFloat(await text('[data-testid="stroke-arc-length"]'));
+  conn.curve_points = (await pendingOp()).shape.points_mm;
+  await shot("a10_curve_editor");
+  await shotEl("curve_editor", ".stage");
+  await clickSel('[data-testid="stroke-straighten"]');
+  await sleep(150);
+  conn.arc_straightened = parseFloat(await text('[data-testid="stroke-arc-length"]'));
+  await clickSel('[data-action="cancel-pending"]');
+  conn.pending_after_cancel = await count('[data-testid="pending-edit"]');
+  results.connector = conn;
+  step("line / curve connectors", { check: conn.check.split(String.fromCharCode(10))[0], arcs: [conn.arc_straight, conn.arc_bent, conn.arc_straightened] });
 
   results.console_errors = consoleErrors;
   results.ok = true;

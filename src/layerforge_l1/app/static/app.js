@@ -37,17 +37,30 @@ const ui = {
   resizeApproved: {},  // resize preview id -> {size, changes} approvals
   confirmProject: null, // project name whose inline delete confirmation is shown
   projectNotice: null,  // result of the last project deletion (shown on the project list)
+  strokeCap: "round",   // Line / Curve connector ends
+  strokeDrag: null,     // {handle: index | "move", start, orig} while editing a pending connector
+  strokeCheck: null,    // {key, result | error | pending}: dry run of the pending connector
   planLater: false,     // import: stop after intake so artwork colors can be edited before planning
   art: freshArt(),      // artwork recolor panel (flat-color target, not a sheet)
+  insp: freshInsp(),    // issue inspector: selection, filters, view and zoom
+  issues: null,         // /issues of the current state (null: to be loaded)
+  issuesLoading: false,
+  issuesDirty: true,    // the shown issues may be older than the state: reload (keeping them shown meanwhile)
   artSpace: false,      // Space held: a left drag on a zoomable image pans
   editView: { zoom: null, pan: [0, 0], panning: null },  // Review & edit canvas zoom (viewport only)
 };
 
-// Artwork recolor: one selected region, a chosen color and the server's preview of the change.
+// Artwork editor: selected regions, a chosen color, the pending Line / Curve / Close gap (with the
+// server's preview of its pixels) and the last result. Every completed edit goes straight into the
+// unsaved working session on the server; Save Changes saves them all at once.
 function freshArt() {
   return { mode: "select", box: null, drag: null, regions: [], selection: null, preview: null, color: null, source: null,
-           sampled: null, view: "selection", zoom: null, pan: [0, 0], panning: null };
+           sampled: null, zoom: null, pan: [0, 0], panning: null,
+           width: 1.2, stroke: null, gap: null, draw: null, handle: null, prevMode: null,
+           last: null, confirmDiscard: false, recovered: false, focus: null };
 }
+
+const unsavedArt = () => ui.state?.artwork?.unsaved?.count || 0;
 
 const TABS = [
   ["proposal", "Import & proposal"],
@@ -66,8 +79,10 @@ const TOOLS = [
   ["add_rect", "Add rectangle", "Drag a rectangle to add material."],
   ["subtract_rect", "Cut rectangle", "Drag a rectangle to cut a hole."],
   ["subtract_bar", "Cut slot", "Drag a line; cuts a slot of the given width (e.g. to widen a narrow slit)."],
-  ["bridge", "Bridge", "Drag a line; adds a bar of the given width (e.g. to connect an island)."],
+  ["line", "Line", "Drag to draw a straight connector, then drag its ends or type angle, length and width before Apply."],
+  ["curve", "Curve", "Drag to draw a connector, then bend it with the two square handles and set its width before Apply."],
 ];
+const STROKE_TOOLS = ["line", "curve"];
 
 const PROCESS_FIELDS = [
   ["nozzle_diameter_mm", "Nozzle Ø (mm)"],
@@ -137,6 +152,7 @@ async function loadProjects() {
 async function loadState() {
   if (!ui.name) return;
   ui.state = await api("GET", `/api/projects/${encodeURIComponent(ui.name)}`);
+  ui.issuesDirty = true;  // diagnostics are read again for the new state (never edited locally)
   const sheets = ui.state.draft?.sheets || [];
   if (!sheets.some((s) => s.id === ui.sheet)) ui.sheet = sheets.length ? sheets[sheets.length - 1].id : null;
   const job = ui.state.job;
@@ -190,13 +206,18 @@ function pollJob(job, label) {
 }
 
 function afterJob(job) {
-  if (job.status !== "done") return;
+  if (job.status !== "done") { ui.inspPendingEdit = null; return; }
   if (job.kind === "propose" || job.kind === "upscale_preview") ui.tab = "proposal";
   if (job.kind === "upscale_retry") { ui.tab = "proposal"; ui.upscaleApproved = {}; }
   if (job.kind === "resize_analysis") { setTab("proposal"); ui.resizeSize = null; }
   if (job.kind === "resize_preview" || job.kind === "resize_search") setTab("proposal");
   if (job.kind === "resize_retry") { setTab("proposal"); ui.resizeApproved = {}; ui.resizeSize = null; }
-  if (job.kind === "start_review") setTab("review");
+  if (job.kind === "start_review") {
+    setTab("review");
+    const pending = ui.inspPendingEdit;  // Edit layer from a candidate's issue: open the editor there
+    ui.inspPendingEdit = null;
+    if (pending && ui.state.draft) setTimeout(() => inspEditLayer(pending), 0);
+  }
   if (job.kind === "artwork_replan") { setTab("proposal"); ui.art = freshArt(); }
   if (job.kind === "kit") { setTab("kit"); ui.kitBuildOpen = false; }
   if (job.kind === "printability") setTab("printability");
@@ -227,8 +248,18 @@ function setTab(tab) {
   if (ui.name) history.replaceState(null, "", `#/${encodeURIComponent(ui.name)}/${tab}`);
 }
 
+function leaveArtworkOk() {
+  const n = unsavedArt();
+  return !n || confirm(`${n} unsaved artwork change${n === 1 ? "" : "s"} in ${ui.name}. They are kept with the project and shown again when you come back. Leave this project anyway?`);
+}
+
 async function route() {
   const [, name, tab] = location.hash.replace(/^#/, "").split("/").map(decodeURIComponent);
+  if ((name || null) !== ui.name && ui.name && !leaveArtworkOk()) {
+    history.replaceState(null, "", `#/${encodeURIComponent(ui.name)}/${ui.tab}`);  // stay
+    renderProjectSelect();
+    return;
+  }
   ui.error = null;
   if (name && name !== ui.name) {
     ui.name = name;
@@ -238,9 +269,12 @@ async function route() {
     ui.sheet = null;
     ui.job = null;
     ui.art = freshArt();
+    ui.insp = freshInsp();
+    ui.issues = null;
     ui.editView = { zoom: null, pan: [0, 0], panning: null };
     try {
       await loadState();
+      ui.art.recovered = unsavedArt() > 0;  // unsaved changes from an earlier visit, kept on disk
     } catch (err) {
       ui.name = null;
       showError(err, "Cannot open project");
@@ -291,6 +325,7 @@ function render() {
     drawOverlay();
   }
   bindArtwork();
+  bindInspector();
   restoreArtFocus(focusKey);
 }
 
@@ -308,7 +343,8 @@ function workflowSteps() {
   const plan = !p ? ["todo", busy() ? "Running…" : "Not run"]
     : p.status === "PROPOSAL_READY_FOR_REVIEW" ? ["done", selected ? `${selected.sheet_count} sheets` : "Ready"]
     : p.status === "ARTWORK_READY_NOT_PLANNED" ? ["todo", "Not planned yet"] : ["warn", "Needs decision"];
-  const art = a?.differs_from_planned || (edits && !a.planned) ? ["warn", `${edits} change${edits === 1 ? "" : "s"} not planned`]
+  const art = unsavedArt() ? ["warn", `${unsavedArt()} unsaved`]
+    : a?.differs_from_planned || (edits && !a.planned) ? ["warn", `${edits} change${edits === 1 ? "" : "s"} not planned`]
     : edits ? ["todo", `${edits} change${edits === 1 ? "" : "s"}`] : ["todo", "Optional"];
   const review = !d ? ["todo", "Not started"] : d.status.printable ? ["done", `${d.sheets.length} layers`] : ["bad", "Invalid draft"];
   const est = s.printability;
@@ -413,7 +449,9 @@ function statusStrip() {
   } else {
     geo = ["bad", "Invalid draft", `${draft.validation.failures.length} validation failure(s); not exportable until fixed.`];
   }
-  if (s.artwork?.differs_from_planned) {
+  if (unsavedArt()) {
+    geo = ["warn", "Unsaved artwork changes", `${unsavedArt()} artwork change(s) are not saved yet. Save or discard them in the Artwork editor; export is blocked until then.`];
+  } else if (s.artwork?.differs_from_planned) {
     geo = ["warn", "Artwork edited — sheets not re-planned", `The sheets are validated against the previous artwork only (${s.artwork.edits.length} artwork edit(s) since). Plan from the edited artwork or undo the artwork edits; export is blocked until then.`];
   }
   let fdm = ["neutral", "Not estimated", "Run the printability estimate or build a kit."];
@@ -576,9 +614,9 @@ function proposalView() {
   return `<div class="panel stack">
       <div class="spread">
         <h2>Plan ${badge(ready ? "ok" : notPlanned ? "neutral" : "warn", ready ? "Ready for review" : notPlanned ? "Artwork prepared · not planned yet" : "Needs your decision")}</h2>
-        <span class="muted small">Automatic proposal · ${fmt(p.seconds, 1)} s${p.artwork_edits ? ` · planned from artwork you edited (${p.artwork_edits.region_recolors} region recolor${p.artwork_edits.region_recolors === 1 ? "" : "s"})` : ""} ${infoTip("No manual layer plan is used: the sheets are proposed automatically, validated, exported to STEP/STL, reopened and checked.")}</span>
+        <span class="muted small">Automatic proposal · ${fmt(p.seconds, 1)} s${p.artwork_edits ? ` · planned from artwork you edited (${p.artwork_edits.region_recolors} artwork edit${p.artwork_edits.region_recolors === 1 ? "" : "s"})` : ""} ${infoTip("No manual layer plan is used: the sheets are proposed automatically, validated, exported to STEP/STL, reopened and checked.")}</span>
       </div>
-      ${notPlanned ? `<div class="banner info">The flat-color artwork is ready; no sheets are planned yet. Recolor regions in <strong>Artwork colors</strong> below if needed, then choose <strong>Plan sheets from this artwork</strong>.</div>` : ""}
+      ${notPlanned ? `<div class="banner info">The flat-color artwork is ready; no sheets are planned yet. Edit the artwork in the <strong>Artwork editor</strong> below if needed, then choose <strong>Plan sheets from this artwork</strong>.</div>` : ""}
       ${p.artwork_check ? artworkCheck(p.artwork_check) : ""}
       ${ready || notPlanned ? "" : `<div class="banner warn">No candidate passed every check. Nothing was edited automatically. ${obstruction.length ? "The obstruction maps (Previews) show where the planner cannot support the artwork." : "See the notes below."}${ui.state.upscale?.available ? " You can also try <strong>Upscale &amp; Retry</strong> below." : ""}</div>`}
       ${blockers.length ? `<ul class="banner error small blockers" data-testid="proposal-blockers">${blockers.map((f) => `<li><strong>${esc(f.code)}</strong> — ${esc(f.message)}</li>`).join("")}</ul>` : ""}
@@ -593,7 +631,8 @@ function proposalView() {
         <summary><h4 style="margin:0">Notes</h4><span class="small muted">${notes.length} note${notes.length === 1 ? "" : "s"}${warnings ? ` · ${warnings} to check` : ""}</span></summary>
         <div class="section-body stack" style="gap:6px"><ul class="small" style="margin:0">${notes.map((f) => `<li>${badge(f.severity === "WARN" ? "warn" : "neutral", f.severity)} <strong>${esc(f.code)}</strong> — ${esc(f.message)}</li>`).join("")}</ul>${cadLine}</div></details>` : ""}
     </div>
-    ${ui.state.draft ? `<p class="small muted panel tight">Artwork colors are edited in <a href="#/${encodeURIComponent(ui.name)}/review" data-action="tab" data-tab="review">Review &amp; edit</a> while a review exists.</p>` : artworkPanel()}
+    ${ui.state.draft ? "" : issuesPanel()}
+    ${ui.state.draft ? `<p class="small muted panel tight">The artwork is edited in <a href="#/${encodeURIComponent(ui.name)}/review" data-action="tab" data-tab="review">Review &amp; edit</a> while a review exists.</p>` : artworkPanel()}
     ${resizePanel()}
     ${upscalePanel()}
     ${detailsPanel(p, reviewing)}
@@ -731,7 +770,7 @@ function resizePreview(v, a) {
       ${pr.improved.length || pr.cleared.length ? `<details data-section="resize-improve" ${openAttr("resize-improve")}><summary>Improve (${pr.cleared.length + pr.improved.length})</summary><ul class="small">${list([...pr.improved, ...pr.cleared])}</ul></details>` : ""}
       ${pr.remaining.length ? `<details data-section="resize-remain" ${openAttr("resize-remain", true)}><summary>Remain (${pr.remaining.length})</summary><ul class="small">${list(pr.remaining)}</ul></details>` : ""}</div>
     <div><h4>Artwork fidelity ${badge(changes.length ? "warn" : "ok", `${changes.length} visible change${changes.length === 1 ? "" : "s"}`)}</h4>
-      ${v.artwork_edits ? `<div class="banner info small" data-testid="resize-keeps-artwork">Your ${v.artwork_edits.region_recolors} region recolor${v.artwork_edits.region_recolors === 1 ? "" : "s"}${v.artwork_edits.pending ? " (not planned yet)" : ""} ${v.artwork_edits.region_recolors === 1 ? "is" : "are"} kept: the edited artwork is planned at the new size pixel for pixel, and its edit history moves with the new proposal. ${esc(v.artwork_edits.note)}</div>`
+      ${v.artwork_edits ? `<div class="banner info small" data-testid="resize-keeps-artwork">Your ${v.artwork_edits.region_recolors} artwork edit${v.artwork_edits.region_recolors === 1 ? "" : "s"}${v.artwork_edits.pending ? " (not planned yet)" : ""} ${v.artwork_edits.region_recolors === 1 ? "is" : "are"} kept: the edited artwork is planned at the new size pixel for pixel, and its edit history moves with the new proposal. ${esc(v.artwork_edits.note)}</div>`
         : `<p class="small muted">Same pixels and colors; the intake filters work in millimetres, so a larger sheet can keep details a smaller one merged. ${(v.details || []).length} intake detail(s) at this size (removed pieces such as eye highlights are kept by default).</p>`}
       ${v.images?.comparison ? `<figure><img class="img" style="max-width:720px" src="${esc(v.images.comparison)}" alt="current target | new target"><figcaption>Current target | target at the new size (changes outlined)</figcaption></figure>` : ""}
       ${changeRows ? `<div class="table-wrap"><table><tbody>${changeRows}</tbody></table></div>` : ""}</div>
@@ -813,7 +852,7 @@ function attemptsPanel() {
       <td><strong>${esc(a.id)}</strong><br><span class="small muted">${esc(a.archived_utc)}</span></td>
       <td>scale ${a.scale}<br>${badge(a.status === "PROPOSAL_READY_FOR_REVIEW" ? "neutral" : "bad", a.status)} ${(a.blockers || []).map((b) => badge("neutral", b)).join(" ")}</td>
       <td class="small">${a.candidates.map((c) => `${esc(c.name)}: ${esc(c.status)}${c.reason ? ` — ${esc(c.reason)}` : ""}`).join("<br>")}</td>
-      <td class="small">${a.sheet_mm ? `${fmt(a.sheet_mm, 1)} mm sheet · ` : ""}replaced by ${a.replaced_by.kind === "physical_resize" ? `resize to ${fmt(a.replaced_by.sheet_mm, 1)} mm` : a.replaced_by.kind === "artwork_edit" ? `planning from the edited artwork (${a.replaced_by.region_recolors} region recolor${a.replaced_by.region_recolors === 1 ? "" : "s"})` : `${a.replaced_by.upscale_factor}× processing (scale ${a.replaced_by.scale})`}: ${esc(a.replaced_by.status)}; ${a.replaced_by.approved_visible_changes} visible changes approved</td>
+      <td class="small">${a.sheet_mm ? `${fmt(a.sheet_mm, 1)} mm sheet · ` : ""}replaced by ${a.replaced_by.kind === "physical_resize" ? `resize to ${fmt(a.replaced_by.sheet_mm, 1)} mm` : a.replaced_by.kind === "artwork_edit" ? `planning from the edited artwork (${a.replaced_by.region_recolors} artwork edit${a.replaced_by.region_recolors === 1 ? "" : "s"})` : `${a.replaced_by.upscale_factor}× processing (scale ${a.replaced_by.scale})`}: ${esc(a.replaced_by.status)}; ${a.replaced_by.approved_visible_changes} visible changes approved</td>
       <td class="small"><a href="${esc(a.images.target)}" target="_blank" rel="noopener">target</a>${a.images.obstruction.map((u) => ` · <a href="${esc(u)}" target="_blank" rel="noopener">obstruction map</a>`).join("")} · ${a.images.comparison ? `<a href="${esc(a.images.comparison)}" target="_blank" rel="noopener">preview comparison</a>` : ""}</td></tr>`).join("");
   return `<details class="panel section" data-section="attempts" data-testid="attempts" ${openAttr("attempts")}>
     <summary><h3>Previous attempts ${badge("neutral", String(attempts.length))}</h3><span class="small muted">archived proposals with their diagnostics and settings</span></summary>
@@ -881,7 +920,7 @@ function artworkCheck(c) {
     <h4 style="margin:0">Planned from the edited artwork ${badge(c.after.status === "PROPOSAL_READY_FOR_REVIEW" ? "ok" : "warn", c.after.status)}</h4>
     <div class="table-wrap"><table><thead><tr><th></th><th>Palette (colors)</th><th>Sheets (measured)</th><th>Status</th></tr></thead><tbody>
       <tr><td>Before (${esc(c.before.stage)})</td><td>${n(c.before.palette_size)}</td><td>${n(c.before.sheet_count)}</td><td class="small">${esc(c.before.status)}</td></tr>
-      <tr data-testid="artwork-check-after"><td>After ${c.region_recolors} region recolor${c.region_recolors === 1 ? "" : "s"}</td><td>${n(c.after.palette_size)}</td><td>${n(c.after.sheet_count)}${c.after.selected ? ` <span class="muted small">(${esc(c.after.selected)})</span>` : ""}</td><td class="small">${esc(c.after.status)}</td></tr>
+      <tr data-testid="artwork-check-after"><td>After ${c.region_recolors} artwork edit${c.region_recolors === 1 ? "" : "s"}</td><td>${n(c.after.palette_size)}</td><td>${n(c.after.sheet_count)}${c.after.selected ? ` <span class="muted small">(${esc(c.after.selected)})</span>` : ""}</td><td class="small">${esc(c.after.status)}</td></tr>
     </tbody></table></div>
     <p class="small muted" style="margin:0">${esc(c.note)}${c.archived_as ? ` The previous attempt is kept as <code>${esc(c.archived_as)}</code> (Previous attempts).` : ""}</p></div>`;
 }
@@ -899,46 +938,135 @@ const ICON = {
   undo: svg('<path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/>'),
   check: svg('<path d="M5 12l5 5 9-10"/>'),
   plan: svg('<path d="M7 4l12 8-12 8z"/>'),
+  fill: svg('<path d="M5 11l6-6 8 8-6 6z"/><path d="M5 11h14"/><path d="M20 16s1.5 2 1.5 3a1.5 1.5 0 0 1-3 0c0-1 1.5-3 1.5-3z"/>'),
+  line: svg('<path d="M5 19L19 5"/><circle cx="5" cy="19" r="1.5"/><circle cx="19" cy="5" r="1.5"/>'),
+  curve: svg('<path d="M4 19C6 6 18 18 20 5"/><circle cx="4" cy="19" r="1.5"/><circle cx="20" cy="5" r="1.5"/>'),
+  brush: svg('<path d="M14 4l6 6-8 8-6-6z"/><path d="M6 12c-2 1-3 3-3 6 3 0 5-1 6-3"/>'),
+  gap: svg('<path d="M4 12a6 6 0 0 1 6-6"/><path d="M14 18a6 6 0 0 0 6-6"/><path d="M10 6l4 12" stroke-dasharray="2 2.5"/>'),
 };
+
+// Drawing tools paint the chosen color with a chosen thickness: Line (drag), Curve (drag, then bend
+// with its two control points), Brush (freehand, only inside the selected regions) and Close gap (two
+// clicks near the ends of an open contour; each end snaps to the nearest pixel of the paint color
+// within 2 mm). Line, Curve and Close gap stay editable (drag the points, thickness, angle, length)
+// until Apply; every change is previewed with the exact pixels the edit would paint.
+const DRAW_MODES = ["line", "curve", "brush", "gap"];
+const SHAPE_KINDS = ["line", "curve", "gap"];
+const CUBIC_SEGMENTS = 64;
+const isDrawOp = (op) => op && (op.op === "paint_stroke" || op.op === "close_gap");
+const MAX_BRUSH_POINTS = 4000;
+
+function artOpLabel(op) {
+  const w = `${+Number(op.width_mm).toFixed(2)} mm`;
+  if (op.op === "close_gap") return `Close gap ${w}${op.path === "cubic" ? " (curved)" : ""}`;
+  if (op.op === "paint_stroke") return op.clip_regions ? `Brush ${w} in ${op.clip_regions.length} region(s)` : `${op.path === "cubic" ? "Curve" : "Line"} ${w}`;
+  if (op.op === "recolor_regions") return `Recolor ${op.regions.length} region${op.regions.length === 1 ? "" : "s"}`;
+  return "Fill";
+}
+
+// Centre line of a stroke in artwork pixels ([row, col]); the same cubic sampling as the server.
+function centreLine(points, path) {
+  if (path !== "cubic") return points;
+  const [p0, c1, c2, p3] = points;
+  return Array.from({ length: CUBIC_SEGMENTS + 1 }, (_, i) => {
+    const t = i / CUBIC_SEGMENTS;
+    const a = (1 - t) ** 3, b = 3 * (1 - t) ** 2 * t, c = 3 * (1 - t) * t ** 2, d = t ** 3;
+    return [0, 1].map((k) => a * p0[k] + b * c1[k] + c * c2[k] + d * p3[k]);
+  });
+}
+
+function clampPx(q) {
+  const img = $("#art-image");
+  const h = img?.naturalHeight || 1e9, w = img?.naturalWidth || 1e9;
+  return [Math.min(h - 1, Math.max(0, Math.round(q[0]))), Math.min(w - 1, Math.max(0, Math.round(q[1])))];
+}
+
+// Control points that bend a straight segment a -> b into an arc (bulge: fraction of the length).
+function bentControls(a, b, bulge = 0.2) {
+  const d = [b[0] - a[0], b[1] - a[1]];
+  const n = [-d[1] * bulge, d[0] * bulge];
+  return [clampPx([a[0] + d[0] / 3 + n[0], a[1] + d[1] / 3 + n[1]]), clampPx([a[0] + (2 * d[0]) / 3 + n[0], a[1] + (2 * d[1]) / 3 + n[1]])];
+}
+
+// Angle (degrees, counter-clockwise from "right", screen up = +) and length (mm) of a straight shape.
+function shapeGeometry(points, mpp) {
+  const [a, b] = [points[0], points[points.length - 1]];
+  const angle = (Math.atan2(-(b[0] - a[0]), b[1] - a[1]) * 180) / Math.PI;
+  return { angle: Math.round(angle * 10) / 10, length: Math.round(Math.hypot(b[0] - a[0], b[1] - a[1]) * mpp * 100) / 100 };
+}
+
+function shapeCard(d, mpp, pv) {
+  const title = { line: "Line", curve: "Curve", gap: "Close gap" }[d.kind];
+  const pt = (q) => `(${q[0]}, ${q[1]})`;
+  const straight = d.path !== "cubic";
+  const g = shapeGeometry(d.points, mpp);
+  const fields = straight ? `<div class="art-shape-fields">
+      <label>Angle <input type="number" id="art-angle" data-testid="art-angle" step="1" value="${g.angle}"> °</label>
+      <label>Length <input type="number" id="art-length" data-testid="art-length" min="0.1" step="0.5" value="${g.length}"> mm</label></div>` : "";
+  const gapPath = d.kind === "gap" ? `<div class="segmented" role="group" aria-label="Connection">${[["line", "Straight"], ["cubic", "Curved"]].map(([k, l]) => `<button class="tool-btn ${d.path === k ? "active" : ""}" data-action="art-gap-path" data-path="${k}" data-testid="art-gap-${k}" aria-pressed="${d.path === k}">${l}</button>`).join("")}</div>` : "";
+  const straighten = d.kind === "curve" ? '<button class="tool-btn" data-action="art-straighten" data-testid="art-straighten">Straighten</button>' : "";
+  return `<div class="subpanel art-shape" data-testid="art-shape">
+    <div class="art-selection-head"><strong>${title}</strong><span class="small muted" data-testid="art-shape-points">${pt(d.points[0])} → ${pt(d.points[d.points.length - 1])}</span></div>
+    <div class="row">${gapPath}${straighten}</div>${fields}
+    ${pv ? `<p class="small" style="margin:0" data-testid="art-stroke-info">${esc(artOpLabel(pv.op))}${pv.op.op === "close_gap" ? ` · ends snapped to ${[pv.stroke_px[0], pv.stroke_px[pv.stroke_px.length - 1]].map((q) => `(${q[0]}, ${q[1]})`).join(" and ")}` : ""} · ${fmt(pv.change.pixels)} px · palette ${pv.change.palette_size_before} → ${pv.change.palette_size_after} ${infoTip(pv.notes.join(" "))}</p>` : ""}
+    <div class="row"><button class="primary small" data-action="art-done" data-testid="art-done" ${pv ? "" : "disabled"}>${ICON.check}<span>Done</span></button>
+      <button class="ghost small" data-action="art-remove" data-testid="art-remove">Remove</button>
+      <span class="small muted">Drag the ${straight ? "end points" : "end and control points"} to adjust · Enter: Done</span></div></div>`;
+}
 
 // Secondary explanations live in an "i" that shows its text on hover and on keyboard focus.
 const infoTip = (text) => `<span class="info-tip tip" tabindex="0" role="note" aria-label="${esc(text)}" data-tip="${esc(text)}">i</span>`;
 
 function artworkSelectionCard(sel, s) {
   if (!sel) {
-    const hint = s.mode === "box" ? "Drag a box on the artwork; then click inside it." : "Click a region in the artwork to select it.";
-    return `<div class="art-empty small muted">${hint}</div>`;
+    const hint = {
+      box: "Drag a box on the artwork; then click inside it.",
+      fill: "Fill: choose a color, then click a region to fill it.",
+      line: "Line: choose a color and thickness, then drag from start to end.",
+      curve: "Curve: drag from start to end, then drag the control points to bend it.",
+      brush: "Brush: first click the region(s) to paint in (Shift+Click adds); then paint inside them.",
+      gap: "Close gap: choose the contour's color and thickness, then click near each end of the gap.",
+    }[s.mode] || "Click a region in the artwork to select it.";
+    return `<div class="art-empty small muted" data-testid="art-empty">${hint}</div>`;
   }
   const clear = `<button class="art-clear" data-action="art-cancel" data-testid="art-clear-selection">${ICON.close}<span>Clear selection</span></button>`;
   if (sel.regions === 1) {
     return `<div class="subpanel art-selection" data-testid="art-selection">
       <div class="art-selection-head"><div class="row">${swatch(sel.color, true)} <strong>${esc(sel.color)}</strong> <span class="small muted">${fmt(sel.pixels)} px · ${fmt(sel.area_mm2, 2)} mm²</span></div>${clear}</div>
-      <p class="small" style="margin:0"><span data-testid="art-selection-count">1 region selected</span> · One connected region of ${sel.regions_of_color} with this color${sel.limited_by_box ? `, limited to the box (${fmt(sel.pixels)} of the region's ${fmt(sel.whole_region_pixels)} px)` : ""}.</p></div>`;
+      <p class="small" style="margin:0"><span data-testid="art-selection-count">1 region selected</span> · One connected region of ${sel.regions_of_color} with this color${sel.limited_by_box ? `, limited to the box (${fmt(sel.pixels)} of the region's ${fmt(sel.whole_region_pixels)} px)` : ""}.</p>${brushNote(s)}</div>`;
   }
   const items = sel.items.slice(0, 12).map((i) => `<li>${swatch(i.color)} ${fmt(i.pixels)} px${i.limited_by_box ? " (box)" : ""}</li>`).join("")
     + (sel.items.length > 12 ? `<li class="muted">… ${sel.items.length - 12} more</li>` : "");
   return `<div class="subpanel art-selection" data-testid="art-selection">
     <div class="art-selection-head"><div class="row"><strong data-testid="art-selection-count">${sel.regions} regions selected</strong> ${swatches(sel.colors)} <span class="small muted">${fmt(sel.pixels)} px · ${fmt(sel.area_mm2, 2)} mm²</span></div>${clear}</div>
     ${sel.colors.length > 1 ? `<p class="small" style="margin:0">${sel.colors.length} different original colors; all take the new color together.</p>` : ""}
-    <ul class="small art-region-list">${items}</ul></div>`;
+    <ul class="small art-region-list">${items}</ul>${brushNote(s)}</div>`;
 }
+
+const brushNote = (s) => (s.mode === "brush" ? '<p class="small" data-testid="art-brush-note" style="margin:0">The brush paints only inside the selected region(s); nothing outside changes.</p>' : "");
 
 function artworkPanel() {
   const a = ui.state.artwork;
   if (!a) return "";
-  if (!a.available) return `<div class="panel tight small muted">Artwork colors are unavailable: ${esc(a.reason || "")}</div>`;
+  if (!a.available) return `<div class="panel tight small muted">The artwork editor is unavailable: ${esc(a.reason || "")}</div>`;
   const s = ui.art;
   const dis = busy() ? "disabled" : "";
   const edits = a.edits || [];
   const palette = a.palette || [];
-  const sel = (s.preview || s.selection)?.selection;
-  const image = s.preview ? s.preview.images[s.view === "after" ? "after" : "selection"] : s.selection ? s.selection.images.selection : a.image;
-  const canPick = sel && !busy() ? "" : "disabled";
+  const drawing = DRAW_MODES.includes(s.mode);
+  const painting = drawing || s.mode === "fill";
+  const sel = s.selection?.selection;
+  const shape = s.draw && SHAPE_KINDS.includes(s.draw.kind) ? s.draw : null;
+  const pv = shape && isDrawOp(s.preview?.op) ? s.preview : null;
+  const image = pv ? pv.images.after : s.selection ? s.selection.images.selection : a.image;
+  const canPick = (sel || painting) && !busy() ? "" : "disabled";
+  const u = a.unsaved || { count: 0, redo: 0, ops: [] };
+  const savedDis = u.count || busy() ? "disabled" : "";  // the saved history waits for Save / Discard
 
   const banners = [
     a.differs_from_planned ? `<div class="banner warn" data-testid="art-differs"><strong>Artwork edited after the sheets were planned.</strong> Print-kit export is blocked until you plan sheets from this artwork or undo the edits. ${infoTip(`The current ${a.stage === "review" ? "reviewed stack" : "proposal"} is validated against the previous artwork only, not this one. Planning keeps the current attempt under Previous attempts.`)}</div>` : "",
     a.base_changed ? '<div class="banner info small">The reviewed artwork changed (accepted front view) after these artwork edits started; planning uses the edited artwork shown here.</div>' : "",
-    a.planned_from_edited_artwork && !edits.length ? `<p class="small muted" style="margin:0">The current sheets were planned from artwork you edited (${a.planned_from_edited_artwork.region_recolors} region recolor${a.planned_from_edited_artwork.region_recolors === 1 ? "" : "s"}).</p>` : "",
+    a.planned_from_edited_artwork && !edits.length ? `<p class="small muted" style="margin:0">The current sheets were planned from artwork you edited (${a.planned_from_edited_artwork.region_recolors} artwork edit${a.planned_from_edited_artwork.region_recolors === 1 ? "" : "s"}).</p>` : "",
   ].join("");
 
   // Tools: select (click / Shift+Click) and the limit box; the eyedropper is a color source below.
@@ -948,18 +1076,32 @@ function artworkPanel() {
         ${tool("select", ICON.select, "Select", "Click a region to select it. Shift+Click adds or removes regions, of any colors.")}
         ${tool("box", ICON.box, "Box", "Limit box: drag a box; selections then stay inside it (e.g. one leg when both legs are one region).")}
       </div>
+      <div class="segmented" role="group" aria-label="Paint tool">
+        ${tool("fill", ICON.fill, "Fill", "Fill: click a region to fill exactly that connected region with the chosen color.")}
+        ${tool("line", ICON.line, "Line", "Line: drag a straight line in the chosen color and thickness. A line across a region splits it.")}
+        ${tool("curve", ICON.curve, "Curve", "Curve: drag, then bend it with the two control points. A curve across a region splits it.")}
+        ${tool("brush", ICON.brush, "Brush", "Brush: select region(s) first, then paint freehand; paint never spills outside them.")}
+        ${tool("gap", ICON.gap, "Close gap", "Close gap: click near the two ends of an open contour; the ends snap to the contour and are joined.")}
+      </div>
+      ${drawing ? `<label class="art-width tip" data-tip="Stroke thickness in mm (the planner's structural width is 1.2 mm)">Thickness
+        <input type="number" id="art-width" data-testid="art-width" min="0.1" max="50" step="0.1" value="${esc(String(s.width))}" ${dis}> mm</label>
+        ${s.width < 1.2 ? '<span class="small warn-text" data-testid="art-width-warn">thinner than 1.2 mm</span>' : ""}` : ""}
       ${s.box ? `<button class="tool-btn" data-action="art-clear-box" data-testid="art-clear-box">${ICON.close}<span>Clear box</span></button>` : ""}
-      ${s.preview ? `<div class="segmented" role="group" aria-label="Artwork view">${[["selection", "Selection"], ["after", "After"]].map(([k, l]) => `<button class="tool-btn ${s.view === k ? "active" : ""}" data-action="art-view" data-view="${k}" aria-pressed="${s.view === k}">${l}</button>`).join("")}</div>` : ""}
     </div>`;
   const zoom = zoomBar("art");
   const hint = s.mode === "eyedropper" ? "Click the artwork to sample a color."
+    : s.mode === "line" ? (shape ? "Drag an end point to adjust · drag elsewhere for a new line." : "Drag from the start to the end of the line.")
+    : s.mode === "curve" ? (shape ? "Drag the end or control points to adjust · drag elsewhere for a new curve." : "Drag from the start to the end of the curve.")
+    : s.mode === "brush" ? (s.regions.length ? "Drag to paint inside the selection · Shift+Click adds or removes regions." : "Click the region to paint in first.")
+    : s.mode === "gap" ? (s.gap ? `First end at row ${s.gap[0]}, column ${s.gap[1]}: click near the other end.` : "Click near the first end of the gap.")
+    : s.mode === "fill" ? "Click a region to fill it."
     : s.box ? `Box: rows ${s.box[0]}–${s.box[2] - 1}, columns ${s.box[1]}–${s.box[3] - 1}.`
     : "Click to select · Shift+Click to add or remove.";
 
   // New color: palette swatches, any color (the swatch opens the system picker), or sample one.
   const custom = (s.color || (sel && sel.color !== "mixed" ? sel.color : "") || "#888888").toLowerCase();
   const colors = `<div class="art-colors">
-      <h4>New color${sel && sel.regions > 1 ? ` for all ${sel.regions} regions` : ""}</h4>
+      <h4>${painting ? "Paint color" : `New color${sel && sel.regions > 1 ? ` for all ${sel.regions} regions` : ""}`} ${!painting && sel ? '<span class="small muted" style="font-weight:normal">(a click recolors)</span>' : ""}</h4>
       <div class="art-color-row" role="group" aria-label="New color">
         ${palette.map((c) => `<button class="art-swatch tip ${s.color === c.hex ? "chosen" : ""}" data-action="art-color" data-color="${esc(c.hex)}" data-testid="art-palette-color" aria-label="Use ${esc(c.hex)}" aria-pressed="${s.color === c.hex}" data-tip="${esc(c.hex)} · ${fmt(c.area_mm2, 1)} mm² · ${c.regions_4} region(s)" ${canPick}><span class="swatch-fill" style="background:${esc(c.hex)}"></span></button>`).join("")}
         <span class="art-sep" aria-hidden="true"></span>
@@ -969,51 +1111,56 @@ function artworkPanel() {
         <button class="icon-btn tip ${s.mode === "eyedropper" ? "active" : ""}" data-action="art-mode" data-mode="eyedropper" data-testid="art-eyedropper" aria-label="Sample color" aria-pressed="${s.mode === "eyedropper"}" data-tip="Sample color: click anywhere in the artwork to use its exact color" ${canPick}>${ICON.pipette}</button>
       </div>
       <div class="art-chosen" data-testid="art-chosen">${s.color ? `<span class="swatch big" style="background:${esc(s.color)}"></span><strong>${esc(s.color)}</strong><span class="small muted">${esc(ART_SOURCES[s.source] || "")}${s.sampled ? ` at row ${s.sampled[0]}, column ${s.sampled[1]}` : ""}</span>`
-        : `<span class="small muted">${sel ? "Choose a color." : "Select a region first."}</span>`}</div>
+        : `<span class="small muted">${painting ? "Choose a color to paint with." : sel ? "Choose a color." : "Select a region first."}</span>`}</div>
     </div>`;
 
-  const pv = s.preview;
-  const ch = pv?.change;
-  const preview = pv ? `<div class="art-preview" data-testid="art-preview">
-      <figure style="margin:0"><img class="img" src="${esc(pv.images.before_after)}" alt="before | after"><figcaption>Before | after ${infoTip("The selection is outlined in the before image. Nothing is saved until Apply.")}</figcaption></figure>
-      <dl class="kv small">
-        <dt>Change</dt><dd>${swatches(ch.from_colors)} ${ch.from_colors.length === 1 ? esc(ch.from) : `${ch.from_colors.length} colors`} → ${swatch(ch.to)} ${esc(ch.to)} · ${fmt(ch.pixels)} px${pv.selection.regions > 1 ? ` in ${pv.selection.regions} regions` : ""}</dd>
-        <dt>Palette</dt><dd data-testid="art-palette-change">${ch.palette_size_before} → ${ch.palette_size_after} colors${ch.colors_removed.length ? ` · removed ${swatches(ch.colors_removed)}` : ""}${ch.colors_added.length ? ` · added ${swatches(ch.colors_added)}` : ""}</dd>
-        <dt>Regions</dt><dd>${Object.keys(ch.regions_before).map((h) => `${swatch(h)} ${ch.regions_before[h]} → ${ch.regions_after[h]}`).join(" · ")}</dd>
-        <dt>Merge</dt><dd>${ch.merged_with_adjacent_regions ? `joins ${ch.merged_with_adjacent_regions} adjacent ${esc(ch.to)} region(s)` : "none"}</dd>
-      </dl>
-      <div class="art-actions"><button class="ghost" data-action="art-cancel" data-testid="art-cancel">Cancel</button>
-        <button class="primary" data-action="art-apply" data-testid="art-apply" ${dis}>${ICON.check}<span>Apply to artwork</span></button>
-        ${infoTip(pv.notes.join(" "))}</div></div>` : "";
+  // One bar for the working session: status, Undo / Redo of single unsaved edits, Discard, Save Changes.
+  const status = u.stale ? '<span class="no" data-testid="art-unsaved">Unsaved changes were made on an earlier artwork and cannot be saved; discard them.</span>'
+    : u.count ? `<span class="unsaved-dot" aria-hidden="true"></span><strong data-testid="art-unsaved">${u.count} unsaved change${u.count === 1 ? "" : "s"}</strong>${s.recovered ? ' <span class="small muted" data-testid="art-recovered">(recovered)</span>' : ""}`
+    : '<span class="small muted" data-testid="art-unsaved">All changes saved</span>';
+  const last = s.last ? `<span class="small ${s.last.bad ? "no" : "muted"}" data-testid="art-last">${esc(s.last.text)}</span>` : "";
+  const savebar = s.confirmDiscard ? `<div class="art-savebar confirm" data-testid="art-savebar">
+      <span><strong>Discard ${u.count} unsaved change${u.count === 1 ? "" : "s"}?</strong> <span class="small muted">The saved artwork stays as it is.</span></span>
+      <div class="row"><button class="ghost" data-action="art-discard-cancel" data-testid="art-discard-cancel">Keep editing</button>
+        <button class="danger" data-action="art-discard-confirmed" data-testid="art-discard-confirm">Discard</button></div></div>`
+    : `<div class="art-savebar ${u.count ? "dirty" : ""}" data-testid="art-savebar">
+      <span class="row" style="gap:6px">${status} ${last}</span>
+      <div class="row">
+        <button class="icon-btn tip" data-action="art-session" data-session="undo" data-testid="art-session-undo" aria-label="Undo" data-tip="Undo the last unsaved change (Ctrl+Z)" ${u.count && !u.stale ? dis : "disabled"}>${ICON.undo}</button>
+        <button class="icon-btn tip" data-action="art-session" data-session="redo" data-testid="art-session-redo" aria-label="Redo" data-tip="Redo (Ctrl+Y)" ${u.redo && !u.stale ? dis : "disabled"}><span class="flip">${ICON.undo}</span></button>
+        <button class="ghost" data-action="art-discard-ask" data-testid="art-discard" ${u.count || u.stale ? dis : "disabled"}>Discard Changes</button>
+        <button class="primary" data-action="art-session" data-session="save" data-testid="art-save" ${(u.count || shape) && !u.stale ? dis : "disabled"}>${ICON.check}<span>Save Changes</span></button>
+      </div></div>`;
 
   const v = a.verify;
   const history = `<div class="stack" style="gap:6px">
-      <h4 style="margin:0">Artwork edits ${badge("neutral", String(edits.length))} ${infoTip("Saved after every edit and reloaded after a restart. A multi-region recolor is one edit (one undo step).")}</h4>
-      ${edits.length ? `<ul class="history small" data-testid="art-history">${edits.slice().reverse().map((e) => `<li><span>#${e.index} ${swatches(e.from_colors)} → ${swatch(e.to)} ${fmt(e.selection.pixels)} px${(e.selection.regions || 1) > 1 ? ` · ${e.selection.regions} regions` : ""}${e.selection.limited_by_box ? " (box)" : ""} · ${esc(ART_SOURCES[e.op.source] || e.op.source)}${e.change.merged_with_adjacent_regions ? " · merged" : ""}</span>
-          <button class="small ghost tip" data-action="art-undo" data-keep="${e.index}" ${e.index === edits.length ? "disabled" : dis} data-tip="Keep edits 1..${e.index}">Revert here</button></li>`).join("")}</ul>` : '<p class="small muted" style="margin:0">No artwork edits.</p>'}
-      <div class="row"><button class="tool-btn" data-action="art-undo" data-testid="art-undo" ${edits.length ? dis : "disabled"}>${ICON.undo}<span>Undo last</span></button>
-        <button class="tool-btn" data-action="art-undo" data-keep="0" ${edits.length > 1 ? dis : "disabled"}>Revert all</button>
+      <h4 style="margin:0">Artwork edits ${badge("neutral", String(edits.length))} ${infoTip("Saved edits are kept with the project and reloaded after a restart; Save Changes adds the unsaved ones together. A multi-region recolor is one edit.")}</h4>
+      ${edits.length || u.ops.length ? `<ul class="history small" data-testid="art-history">${u.ops.slice().reverse().map((e) => `<li class="unsaved" data-testid="art-history-unsaved"><span>${badge("warn", "unsaved")} ${esc(artOpLabel(e.op))} ${swatches(e.from_colors)} → ${swatch(e.to)} ${fmt(e.selection.pixels)} px</span></li>`).join("")}${edits.slice().reverse().map((e) => `<li><span>#${e.index} ${esc(artOpLabel(e.op))} ${swatches(e.from_colors)} → ${swatch(e.to)} ${fmt(e.selection.pixels)} px${!isDrawOp(e.op) && (e.selection.regions || 1) > 1 ? ` · ${e.selection.regions} regions` : ""}${!isDrawOp(e.op) && e.selection.limited_by_box ? " (box)" : ""} · ${esc(ART_SOURCES[e.op.source] || e.op.source)}${e.change.merged_with_adjacent_regions ? " · merged" : ""}</span>
+          <button class="small ghost tip" data-action="art-undo" data-keep="${e.index}" ${e.index === edits.length ? "disabled" : savedDis} data-tip="Keep edits 1..${e.index}">Revert here</button></li>`).join("")}</ul>` : '<p class="small muted" style="margin:0">No artwork edits.</p>'}
+      <div class="row"><button class="tool-btn" data-action="art-undo" data-testid="art-undo" ${edits.length ? savedDis : "disabled"}>${ICON.undo}<span>Undo last saved</span></button>
+        <button class="tool-btn" data-action="art-undo" data-keep="0" ${edits.length > 1 ? savedDis : "disabled"}>Revert all</button>
         <button class="tool-btn tip" data-action="art-verify" data-testid="art-verify" ${edits.length ? dis : "disabled"} data-tip="Reload the saved log and replay it from its base">Verify save/reload</button></div>
       ${v ? `<p class="small" data-testid="art-verify-result">${v.replay_identical ? `<span class="yes">✓</span> Replaying all ${v.edits} saved edit(s) from the base reproduces the saved artwork exactly.` : `<span class="no">✗</span> ${esc(v.problems.join("; "))}`} <span class="muted">(${esc(v.checked_utc)})</span></p>` : ""}</div>`;
 
   // Planning from the artwork; also shown where Apply was after a color change.
-  const pending = a.can_replan && edits.length > 0;
+  const pending = a.can_replan && edits.length > 0 && !u.count;
   const replanNote = `Runs the same automatic proposal (unchanged planner and validators) on the artwork shown here.${a.planned ? " The current attempt (proposal, review, estimate) is archived under Previous attempts." : ""} The palette size and the measured sheet count are shown afterwards; merging colors does not guarantee fewer sheets.`;
-  const replanButton = (testid) => `<button class="plan" data-action="art-replan" data-testid="${testid}" ${dis}>${ICON.plan}<span>Plan sheets from this artwork</span></button>`;
-  const callout = pending && !sel ? `<div class="banner ok art-callout" data-testid="art-try-again-callout">
-      <div><strong>${edits.length} color change${edits.length === 1 ? "" : "s"} applied to the artwork.</strong>
+  const replanButton = (testid) => `<button class="plan tip" data-action="art-replan" data-testid="${testid}" ${u.count ? 'disabled data-tip="Save Changes first: planning uses the saved artwork"' : dis}>${ICON.plan}<span>Plan sheets from this artwork</span></button>`;
+  const callout = pending && !sel && !shape ? `<div class="banner ok art-callout" data-testid="art-try-again-callout">
+      <div><strong>${edits.length} artwork edit${edits.length === 1 ? "" : "s"} saved.</strong>
       <span class="small">The sheets are not planned for ${edits.length === 1 ? "it" : "them"} yet. Choose Plan sheets from this artwork to plan ${edits.length === 1 ? "it" : "them"}, or keep editing first.</span></div>
       <div class="row">${replanButton("art-try-again")}</div></div>` : "";
   const replan = a.can_replan ? `<div class="subpanel art-replan" data-testid="art-replan">
       ${replanButton("art-replan-button")}
-      <span class="small muted">Nothing is planned until you click. ${infoTip(replanNote)}</span></div>` : "";
+      <span class="small muted">${u.count ? "Save Changes first." : "Nothing is planned until you click."} ${infoTip(replanNote)}</span></div>` : "";
 
   return `<details class="panel section art-panel" data-section="artwork" data-testid="artwork-panel" ${openAttr("artwork", true)}>
-    <summary><h3>Artwork colors ${badge("neutral", "artwork edit · not a sheet edit")}</h3>
-      <span class="small muted">${palette.length ? `${palette.length} colors · ` : ""}${edits.length} edit${edits.length === 1 ? "" : "s"}${a.differs_from_planned ? " · not planned yet" : ""}</span></summary>
+    <summary><h3>Artwork editor ${badge("neutral", "artwork edit · not a sheet edit")}</h3>
+      <span class="small muted">${palette.length ? `${palette.length} colors · ` : ""}${edits.length} edit${edits.length === 1 ? "" : "s"}${u.count ? ` · <span class="unsaved-dot" aria-hidden="true"></span>${u.count} unsaved` : ""}${a.differs_from_planned ? " · not planned yet" : ""}</span></summary>
     <div class="section-body stack">
-      <p class="small muted" style="margin:0">Recolor regions of the flat-color artwork. Sheets change only when you plan again. ${infoTip("The uploaded image is never changed and no sheet is edited here. Examples: unify two skin tones, change a necklace, or change one leg only with the Box tool.")}</p>
+      <p class="small muted" style="margin:0">Edit the flat-color artwork: recolor and fill regions, draw lines and curves (they split regions), close contour gaps, paint inside a region. Sheets change only when you plan again. ${infoTip("The uploaded image is never changed and no sheet is edited here. Examples: unify two skin tones, change a necklace, or change one leg only with the Box tool.")}</p>
       ${banners}
+      ${savebar}
       <div class="grid2">
         <div class="stack" style="gap:8px">
           ${tools}
@@ -1024,7 +1171,7 @@ function artworkPanel() {
           ${zoom}
           <span class="small muted coords" id="art-coords">${esc(hint)}</span>
         </div>
-        <div class="stack art-side">${callout}${artworkSelectionCard(sel, s)}${colors}${preview}</div>
+        <div class="stack art-side">${callout}${shape ? shapeCard(shape, a.mm_per_pixel, pv) : artworkSelectionCard(sel, s)}${colors}</div>
       </div>
       <div class="grid2">
         <div class="stack" style="gap:6px"><h4 style="margin:0">Palette now ${badge("neutral", `${palette.length} colors`)} ${infoTip("One filament color per sheet; the planner decides how many sheets these colors need.")}</h4>
@@ -1043,6 +1190,7 @@ function artworkPanel() {
 const VIEWS = {
   art: { state: () => ui.art, root: "#art-viewport", stage: "#art-stage", image: "#art-image", label: "#art-zoom-label", fitButton: '[data-testid="art-zoom-fit"]', redraw: () => drawArtOverlay() },
   edit: { state: () => ui.editView, root: "#edit-viewport", stage: "#edit-stage", image: "#edit-image", label: "#edit-zoom-label", fitButton: '[data-testid="edit-zoom-fit"]', redraw: () => drawOverlay() },
+  insp: { state: () => ui.insp, root: "#insp-viewport", stage: "#insp-stage", image: "#insp-image", label: "#insp-zoom-label", fitButton: '[data-testid="insp-zoom-fit"]', redraw: () => drawInspOverlay() },
 };
 const ZOOM_MAX = 40;  // x the fitted size
 
@@ -1070,7 +1218,8 @@ function applyView(key) {
   g.state.lastView = { vw: g.vw, vh: g.vh, scale: g.scale };
   const w = g.img.naturalWidth * g.scale;
   const h = g.img.naturalHeight * g.scale;
-  const clamp = (p, size, room) => (size <= room ? (room - size) / 2 : Math.min(0, Math.max(room - size, p)));
+  const clamp = (p, size, room) => (g.state.free && g.state.zoom !== null ? Math.min(room / 2, Math.max(room / 2 - size, p))
+    : size <= room ? (room - size) / 2 : Math.min(0, Math.max(room - size, p)));
   g.state.pan = [clamp(g.state.zoom === null ? 0 : g.state.pan[0], w, g.vw), clamp(g.state.zoom === null ? 0 : g.state.pan[1], h, g.vh)];
   const stage = $(g.v.stage);
   stage.style.width = `${w}px`;
@@ -1089,9 +1238,9 @@ function zoomView(key, how, cx, cy) {
   const g = viewGeometry(key);
   if (!g) return;
   const state = g.state;
-  if (how === "fit") { state.zoom = null; applyView(key); return; }
+  if (how === "fit") { state.zoom = null; state.free = false; applyView(key); return; }
   const zoom = Math.min(ZOOM_MAX, Math.max(1, (state.zoom ?? 1) * how));
-  if (zoom <= 1 + 1e-6) { state.zoom = null; applyView(key); return; }
+  if (zoom <= 1 + 1e-6) { state.zoom = null; state.free = false; applyView(key); return; }
   const vr = g.vp.getBoundingClientRect();
   const x = cx ?? vr.left + vr.width / 2;
   const y = cy ?? vr.top + vr.height / 2;
@@ -1205,7 +1354,80 @@ function drawArtOverlay() {
     ctx.strokeRect(ox + box[1] * sx, oy + box[0] * sy, (box[3] - box[1]) * sx, (box[2] - box[0]) * sy);
     ctx.setLineDash([]);
   }
-  const marks = [...ui.art.regions.map((reg) => [reg.at_px, "#ff2d55"]), [ui.art.sampled, "#00a86b"]];
+  if (ui.art.focus) {  // the issue opened from the inspector ([row0, col0, row1, col1])
+    const [r0, c0, r1, c1] = ui.art.focus;
+    ctx.save();
+    ctx.strokeStyle = "#e0245e";
+    ctx.lineWidth = 2 * dpr;
+    ctx.setLineDash([5 * dpr, 3 * dpr]);
+    const pad = 4 * dpr;
+    ctx.strokeRect(ox + c0 * sx - pad, oy + r0 * sy - pad, (c1 - c0) * sx + 2 * pad, (r1 - r0) * sy + 2 * pad);
+    ctx.restore();
+  }
+  const stroke = ui.art.stroke;
+  const mpp = ui.state?.artwork?.mm_per_pixel;
+  if (stroke && stroke.points.length && mpp) {  // the stroke being drawn, at its real thickness
+    ctx.save();
+    ctx.globalAlpha = 0.7;
+    ctx.strokeStyle = ctx.fillStyle = ui.art.color || "#ff2d55";
+    ctx.lineWidth = Math.max(1, (ui.art.width / mpp) * sx);
+    ctx.lineCap = ctx.lineJoin = "round";
+    ctx.beginPath();
+    stroke.points.forEach((q, i) => ctx[i ? "lineTo" : "moveTo"](ox + (q[1] + 0.5) * sx, oy + (q[0] + 0.5) * sy));
+    if (stroke.points.length === 1) ctx.lineTo(ox + (stroke.points[0][1] + 0.5) * sx + 0.01, oy + (stroke.points[0][0] + 0.5) * sy);
+    ctx.stroke();
+    ctx.restore();
+  }
+  const d = ui.art.draw;
+  if (d && SHAPE_KINDS.includes(d.kind)) {  // the pending shape: centre line, handles (and the live stroke while dragging)
+    const at = (q) => [ox + (q[1] + 0.5) * sx, oy + (q[0] + 0.5) * sy];
+    const line = centreLine(d.points, d.path);
+    const trace = (width, color, dash) => {
+      ctx.save();
+      ctx.strokeStyle = color;
+      ctx.lineWidth = width;
+      ctx.lineCap = ctx.lineJoin = "round";
+      ctx.setLineDash(dash);
+      ctx.beginPath();
+      line.forEach((q, i) => ctx[i ? "lineTo" : "moveTo"](...at(q)));
+      ctx.stroke();
+      ctx.restore();
+    };
+    if (ui.art.handle !== null && mpp) {
+      ctx.globalAlpha = 0.7;
+      trace(Math.max(1, (ui.art.width / mpp) * sx), ui.art.color || "#ff2d55", []);
+      ctx.globalAlpha = 1;
+    }
+    trace(1.5 * dpr, "#00a0ff", [5 * dpr, 4 * dpr]);
+    if (d.path === "cubic") {  // tangents end -> control
+      ctx.save();
+      ctx.strokeStyle = "#ff9500";
+      ctx.lineWidth = 1 * dpr;
+      ctx.beginPath();
+      ctx.moveTo(...at(d.points[0])); ctx.lineTo(...at(d.points[1]));
+      ctx.moveTo(...at(d.points[3])); ctx.lineTo(...at(d.points[2]));
+      ctx.stroke();
+      ctx.restore();
+    }
+    d.points.forEach((q, i) => {
+      const [x, y] = at(q);
+      const control = d.path === "cubic" && (i === 1 || i === 2);
+      ctx.fillStyle = "#ffffff";
+      ctx.strokeStyle = control ? "#ff9500" : "#0070f0";
+      ctx.lineWidth = 2 * dpr;
+      ctx.beginPath();
+      if (control) ctx.rect(x - 5 * dpr, y - 5 * dpr, 10 * dpr, 10 * dpr);
+      else ctx.arc(x, y, 6 * dpr, 0, Math.PI * 2);
+      ctx.fill(); ctx.stroke();
+    });
+  }
+  if (ui.art.gap && mpp) {  // first gap end and its 2 mm snap radius
+    ctx.strokeStyle = "#ff9500";
+    ctx.setLineDash([4 * dpr, 3 * dpr]);
+    ctx.beginPath(); ctx.arc(ox + (ui.art.gap[1] + 0.5) * sx, oy + (ui.art.gap[0] + 0.5) * sy, (2 / mpp) * sx, 0, Math.PI * 2); ctx.stroke();
+    ctx.setLineDash([]);
+  }
+  const marks = [...ui.art.regions.map((reg) => [reg.at_px, "#ff2d55"]), [ui.art.sampled, "#00a86b"], [ui.art.gap, "#ff9500"]];
   for (const [point, color] of marks) {
     if (!point) continue;
     ctx.strokeStyle = color;
@@ -1221,10 +1443,22 @@ function bindArtwork() {
   applyArtView();
   canvas.addEventListener("pointerdown", (e) => {
     if (busy() || e.button !== 0) return;
-    if (ui.art.mode === "box") {
+    const s = ui.art;
+    const point = artPx(e);
+    const handle = shapeHandleAt(e);
+    if (handle !== null) {  // adjust the pending line, curve or gap closure
       canvas.setPointerCapture(e.pointerId);
-      const point = artPx(e);
-      ui.art.drag = { from: point, to: point };
+      s.handle = handle;
+      showCurrentArtwork();
+      drawArtOverlay();
+    } else if (s.mode === "box") {
+      canvas.setPointerCapture(e.pointerId);
+      s.drag = { from: point, to: point };
+    } else if (s.mode === "line" || s.mode === "curve" || (s.mode === "brush" && s.regions.length && !e.shiftKey)) {
+      if (!s.color) { artNotice("Choose a paint color first."); return; }
+      canvas.setPointerCapture(e.pointerId);
+      s.stroke = { points: s.mode === "brush" ? [point] : [point, point] };
+      drawArtOverlay();
     }
   });
   canvas.addEventListener("pointermove", (e) => {
@@ -1232,11 +1466,47 @@ function bindArtwork() {
     const c = $("#art-coords");
     if (c) c.textContent = `row ${point[0]} · column ${point[1]} (artwork pixels)`;
     if (ui.art.drag) { ui.art.drag.to = point; drawArtOverlay(); }
+    if (ui.art.handle !== null && ui.art.draw) { ui.art.draw.points[ui.art.handle] = point; drawArtOverlay(); return; }
+    const stroke = ui.art.stroke;
+    if (stroke) {
+      const last = stroke.points[stroke.points.length - 1];
+      if (ui.art.mode !== "brush") stroke.points[1] = point;
+      else if ((last[0] !== point[0] || last[1] !== point[1]) && stroke.points.length < MAX_BRUSH_POINTS) stroke.points.push(point);
+      drawArtOverlay();
+    }
   });
   canvas.addEventListener("pointerup", async (e) => {
     if (busy() || e.button !== 0) return;
+    const s = ui.art;
     const point = artPx(e);
-    if (ui.art.drag) {
+    if (s.handle !== null) {
+      s.handle = null;
+      await artworkDraw();
+      return;
+    }
+    if (s.stroke) {
+      const points = s.stroke.points;
+      s.stroke = null;
+      if (s.mode === "brush") { await artworkBrush(points); return; }
+      const [a, b] = points;
+      if (Math.hypot(b[0] - a[0], b[1] - a[1]) < 2) { render(); artNotice("Drag from the start to the end."); return; }
+      if (!(await finalizeShape())) return;  // a new shape: the previous one becomes an edit first
+      await artworkDraw(s.mode === "curve" ? { kind: "curve", path: "cubic", points: [a, ...bentControls(a, b), b] }
+        : { kind: "line", path: "line", points: [a, b] });
+      return;
+    }
+    if (s.mode === "gap") {
+      if (!s.color) { artNotice("Choose the contour's color first."); return; }
+      if (s.draw && !(await finalizeShape())) return;
+      const g = ui.art;
+      if (!g.gap) { g.gap = point; drawArtOverlay(); artNotice(`First end at row ${point[0]}, column ${point[1]}: click near the other end.`); return; }
+      const first = g.gap;
+      g.gap = null;
+      await artworkDraw({ kind: "gap", path: "line", points: [first, point] });
+      return;
+    }
+    if (s.mode === "line" || s.mode === "curve") return;
+    if (s.drag) {
       const box = artBox(ui.art.drag.from, point);
       ui.art.drag = null;
       ui.art.box = box[2] - box[0] > 1 && box[3] - box[1] > 1 ? box : null;
@@ -1244,9 +1514,47 @@ function bindArtwork() {
       render();
       return;
     }
-    if (ui.art.mode === "eyedropper") await artworkSample(point);
+    if (s.mode === "eyedropper") await artworkSample(point);
+    else if (s.mode === "fill") await artworkFill(point);
     else await artworkSelect(point, e.shiftKey);
   });
+}
+
+// Index of the pending shape's point under the cursor (within 9 screen px), or null.
+function shapeHandleAt(event) {
+  const d = ui.art.draw;
+  const img = $("#art-image");
+  if (!d || !SHAPE_KINDS.includes(d.kind) || !img?.naturalWidth) return null;
+  const r = img.getBoundingClientRect();
+  let best = null, bestDist = 9;
+  d.points.forEach((q, i) => {
+    const x = r.left + ((q[1] + 0.5) / img.naturalWidth) * r.width;
+    const y = r.top + ((q[0] + 0.5) / img.naturalHeight) * r.height;
+    const dist = Math.hypot(event.clientX - x, event.clientY - y);
+    if (dist <= bestDist) { best = i; bestDist = dist; }
+  });
+  return best;
+}
+
+// While a shape point is dragged the artwork is shown without the previewed stroke.
+function showCurrentArtwork() {
+  const img = $("#art-image");
+  const base = ui.state.artwork?.image;
+  if (img && base && !img.src.endsWith(base)) img.src = base;
+}
+
+// Drop the pending shape (and its preview) before a new one starts.
+function discardShape(rerender = false) {
+  const s = ui.art;
+  if (!s.draw || !SHAPE_KINDS.includes(s.draw.kind)) return;
+  s.draw = null;
+  if (isDrawOp(s.preview?.op)) s.preview = null;
+  if (rerender) render(); else showCurrentArtwork();
+}
+
+function artNotice(text) {
+  const c = $("#art-coords");
+  if (c) c.textContent = text;
 }
 
 // Space held (not while typing) turns a left drag on the artwork into panning.
@@ -1258,6 +1566,23 @@ function onArtKey(event) {
   if (ui.artSpace === down) return;
   ui.artSpace = down;
   document.querySelectorAll(".zoom-viewport").forEach((vp) => vp.classList.toggle("space", down));
+}
+
+// Inside the Artwork editor (not while typing): Ctrl+Z / Ctrl+Y (Ctrl+Shift+Z) undo / redo one unsaved
+// change; Enter finishes and Escape removes the pending Line / Curve / Close gap.
+async function onArtShortcut(event) {
+  if (!event.target.closest?.('[data-testid="artwork-panel"]') || event.target.closest("input, textarea, select")) return;
+  const ctrl = event.ctrlKey || event.metaKey;
+  const key = event.key.toLowerCase();
+  const shape = ui.art.draw && SHAPE_KINDS.includes(ui.art.draw.kind);
+  let act = null;
+  if (ctrl && key === "z" && !event.shiftKey) act = () => artworkSession("undo");
+  else if (ctrl && (key === "y" || (key === "z" && event.shiftKey))) act = () => artworkSession("redo");
+  else if (!ctrl && event.key === "Enter" && shape && !event.target.closest("button")) act = finalizeShape;
+  else if (!ctrl && event.key === "Escape" && shape) act = () => discardShape(true);
+  if (!act) return;
+  event.preventDefault();
+  await act();
 }
 
 // Keyboard focus inside the Artwork colors panel survives a re-render (e.g. after choosing a color),
@@ -1274,7 +1599,7 @@ function restoreArtFocus(key) {
   if (!key) return;
   const el = document.querySelector(key);
   // A control that is now disabled cannot take focus; fall back to the panel's next useful action.
-  const target = el && !el.disabled ? el : document.querySelector('[data-testid="art-try-again"], [data-testid="art-apply"], [data-testid="art-clear-selection"]');
+  const target = el && !el.disabled ? el : document.querySelector('[data-testid="art-save"]:not([disabled]), [data-testid="art-try-again"], [data-testid="art-clear-selection"]');
   target?.focus({ preventScroll: true });
 }
 
@@ -1282,18 +1607,125 @@ function artworkCall(action, body) {
   return api("POST", `/api/projects/${encodeURIComponent(ui.name)}/artwork/${action}`, body);
 }
 
-// The view (zoom, pan), tool and limit box survive a new selection, Apply, Undo and Cancel.
+// The view (zoom, pan), tool, thickness and limit box survive a new selection, Apply, Undo and
+// Cancel; the paint tools also keep their color, so several strokes or fills follow one another.
 function keepArtView(extra = {}) {
-  return { ...freshArt(), mode: ui.art.mode === "eyedropper" ? "select" : ui.art.mode, box: ui.art.box,
-           zoom: ui.art.zoom, pan: ui.art.pan, ...extra };
+  const s = ui.art;
+  const mode = s.mode === "eyedropper" ? s.prevMode || "select" : s.mode;
+  const paint = DRAW_MODES.includes(mode) || mode === "fill";
+  return { ...freshArt(), mode, box: s.box, zoom: s.zoom, pan: s.pan, width: s.width, recovered: false, focus: s.focus,
+           ...(paint ? { color: s.color, source: s.source, sampled: s.sampled } : {}), ...extra };
 }
 
-async function artworkPreview() {
+// Preview a shape: Line, Curve or Close gap. ``spec`` ({kind, points, path}) starts a new shape;
+// without it the pending one is previewed again (moved points, new color, thickness, angle or
+// length). The shape stays pending (editable) until Done, the next shape, a tool change or Save.
+async function artworkDraw(spec) {
   const s = ui.art;
-  const body = { regions: s.regions, color: s.color, source: s.source };
+  ui.error = null;
+  if (spec) s.draw = { path: "line", ...spec, op: spec.kind === "gap" ? "close_gap" : "paint_stroke" };
+  const d = s.draw;
+  if (!d) return;
+  const body = { op: d.op, points_px: d.points, width_mm: s.width, color: s.color, source: s.source };
+  if (d.path === "cubic") body.path = "cubic";
   if (s.source === "eyedropper") body.sampled_at_px = s.sampled;
-  s.preview = await artworkCall("preview", body);
-  s.view = "after";
+  try {
+    s.preview = await artworkCall("preview", body);
+    if (d.kind === "gap") {  // the ends snapped to the contour: the handles follow
+      const snapped = s.preview.stroke_px;
+      d.points[0] = snapped[0];
+      d.points[d.points.length - 1] = snapped[snapped.length - 1];
+    }
+  } catch (err) {
+    s.preview = null;  // the shape stays pending so its points can be moved
+    render();
+    artNotice(`Not drawn: ${err.message || err}`);
+    return;
+  }
+  render();
+}
+
+// One completed edit into the working session (shown at once, saved with Save Changes).
+async function artworkAdd(op, extra = {}) {
+  if (busy()) return false;
+  ui.error = null;
+  try {
+    const result = await artworkCall("session/add", { op });
+    ui.art = keepArtView({ ...extra, last: { text: `${artOpLabel(op)}: ${fmt(result.change.pixels)} px changed` } });
+    await loadState();
+  } catch (err) {
+    ui.art.last = { text: `Not changed: ${err.message || err}`, bad: true };
+    render();
+    return false;
+  }
+  render();
+  return true;
+}
+
+// The pending Line / Curve / Close gap becomes an edit (its last preview). Without a valid preview it
+// is dropped. Returns false when the edit was refused (the shape then stays for correction).
+async function finalizeShape() {
+  const s = ui.art;
+  if (!s.draw || !SHAPE_KINDS.includes(s.draw.kind)) return true;
+  const pv = s.preview;
+  if (!pv || !isDrawOp(pv.op)) { s.draw = null; return true; }
+  return artworkAdd(pv.op);
+}
+
+function opColor(extra) {
+  const s = ui.art;
+  const op = { ...extra, color: s.color, source: s.source };
+  if (s.source === "eyedropper") op.sampled_at_px = s.sampled;
+  return op;
+}
+
+async function artworkFill(at) {
+  if (!ui.art.color) { artNotice("Choose a paint color first."); return; }
+  await artworkAdd(opColor({ op: "recolor_region", at_px: at, ...(ui.art.box ? { box_px: ui.art.box } : {}) }));
+}
+
+// Brush: paint inside the selected regions; the selection stays for the next stroke.
+async function artworkBrush(points) {
+  const regions = ui.art.regions.slice();
+  const op = opColor({ op: "paint_stroke", points_px: points, width_mm: ui.art.width, clip_regions: regions });
+  if (!(await artworkAdd(op))) { drawArtOverlay(); return; }
+  try {
+    const result = await artworkCall("preview", { regions });
+    ui.art.regions = result.regions;
+    ui.art.selection = result.selection ? result : null;
+  } catch { /* the painted region no longer exists as selected: choose again */ }
+  render();
+}
+
+async function artworkSession(action) {
+  if (busy()) return;
+  if (action === "save" && !(await finalizeShape())) return;
+  if (action === "undo" && ui.art.draw && SHAPE_KINDS.includes(ui.art.draw.kind)) { discardShape(true); return; }
+  ui.error = null;
+  try {
+    const result = await artworkCall(`session/${action}`, {});
+    const text = action === "save" ? `Saved ${result.saved} change${result.saved === 1 ? "" : "s"}`
+      : action === "discard" ? `Discarded ${result.discarded} change${result.discarded === 1 ? "" : "s"}` : null;
+    ui.art = keepArtView(text ? { last: { text } } : {});
+    await loadState();
+  } catch (err) {
+    showError(err, action === "save" ? "Save Changes" : `Artwork ${action}`);
+    return;
+  }
+  render();
+  if (action === "save") $('[data-testid="art-try-again-callout"]')?.scrollIntoView({ block: "center" });
+}
+
+// Angle / length fields of a straight pending shape: the start stays, the end moves.
+function setShapeGeometry(angle, length) {
+  const d = ui.art.draw;
+  const mpp = ui.state.artwork?.mm_per_pixel;
+  if (!d || d.path === "cubic" || !mpp) return;
+  const a = d.points[0];
+  const px = length / mpp;
+  const rad = (angle * Math.PI) / 180;
+  d.points[d.points.length - 1] = clampPx([a[0] - Math.sin(rad) * px, a[1] + Math.cos(rad) * px]);
+  artworkDraw();
 }
 
 // Click: select the region at the point (replacing the selection). Shift+Click: add the region, or
@@ -1306,8 +1738,7 @@ async function artworkSelect(at, additive = false) {
     s.regions = result.regions;
     s.preview = null;
     s.selection = result.selection ? result : null;
-    s.view = "selection";
-    if (s.selection && s.color && !(result.selection.colors.length === 1 && result.selection.colors[0] === s.color)) await artworkPreview();
+    s.draw = null;
   } catch (err) {
     showError(err, "Artwork selection");
     return;
@@ -1318,40 +1749,19 @@ async function artworkSelect(at, additive = false) {
 async function artworkChoose(color, source, sampled = null) {
   ui.error = null;
   Object.assign(ui.art, { color, source, sampled });
-  if (!ui.art.regions.length) { render(); return; }
-  try {
-    await artworkPreview();
-  } catch (err) {
-    ui.art.preview = null;
-    showError(err, "Artwork preview");
-    return;
-  }
-  render();
+  if (ui.art.draw) { await artworkDraw(); return; }  // same shape, new color
+  if (!ui.art.regions.length || DRAW_MODES.includes(ui.art.mode) || ui.art.mode === "fill") { render(); return; }
+  await artworkAdd(opColor({ op: "recolor_regions", regions: ui.art.regions }), { color, source, sampled });  // recolor the selection now
 }
 
 async function artworkSample(at) {
   try {
     const sampled = await artworkCall("sample", { at_px: at });
-    ui.art.mode = "select";
+    ui.art.mode = ui.art.prevMode || "select";
     await artworkChoose(sampled.color, "eyedropper", sampled.at_px);
   } catch (err) {
     showError(err, "Eyedropper");
   }
-}
-
-async function artworkApply() {
-  const pv = ui.art.preview;
-  if (!pv || busy()) return;
-  try {
-    await artworkCall("apply", { op: pv.op, preview_id: pv.preview_id });
-    ui.art = keepArtView();
-    await loadState();
-  } catch (err) {
-    showError(err, "Apply artwork edit");
-    return;
-  }
-  render();
-  $('[data-testid="art-try-again-callout"]')?.scrollIntoView({ block: "center" });  // the next step, in view
 }
 
 async function artworkPost(action, body) {
@@ -1365,6 +1775,442 @@ async function artworkPost(action, body) {
     return;
   }
   render();
+}
+
+// ----------------------------------------------------------------------- issue inspector
+// Located problems drawn on the physical sheet they belong to (or on the artwork for intake and
+// planner findings, never on a sheet). One layer is shown at a time; the strip above the image picks
+// it and counts its issues. Clicking an outline, a numbered marker or a list row zooms onto it; Edit
+// layer / Edit artwork open the existing editors there. The inspector never edits: it reads /issues,
+// which the server computes from the existing checks (sheet validation and the FDM geometry check of
+// the shown sheets, or a current saved estimate) and the proposal's saved evidence.
+const SEV_CLASS = { FAIL: "bad", BLOCKER: "bad", UNSUPPORTED: "bad", RISK: "warn", WARN: "warn", INFO: "neutral" };
+const SEV_COLOR = { FAIL: "#ff1f5a", BLOCKER: "#ff1f5a", UNSUPPORTED: "#ff1f5a", RISK: "#ff7a00", WARN: "#f5c400", INFO: "#2f8cff" };
+const SEV_ORDER = ["FAIL", "BLOCKER", "UNSUPPORTED", "RISK", "WARN", "INFO"];
+const ISSUE_SOURCES = { validation: ["validation", "candidate"], fdm_estimate: ["fdm_estimate"], geometry_check: ["geometry_check"],
+  planner: ["proposal"], intake: ["proposal"] };
+
+function freshInsp() {
+  return { selected: null, kind: "", severity: "", view: "auto", zoom: null, pan: [0, 0], panning: null, shown: null };
+}
+
+async function loadIssues() {
+  if (!ui.name || ui.issuesLoading || !ui.state?.proposal || busy()) return;
+  ui.issuesLoading = true;
+  ui.issuesDirty = false;
+  const name = ui.name;
+  const same = (a, b) => JSON.stringify({ ...a, computed_utc: null }) === JSON.stringify({ ...b, computed_utc: null });
+  let changed = true;
+  const wasStale = Boolean(ui.issues && !ui.issues.error && inspBasisStale(ui.issues));
+  if (wasStale) render();  // show "re-checking" on the old locations while the check runs
+  try {
+    const data = await api("GET", `/api/projects/${encodeURIComponent(name)}/issues`);
+    if (ui.name !== name) return;
+    changed = wasStale || !ui.issues || !same(ui.issues, data);
+    ui.issues = data;
+  } catch (err) {
+    if (ui.name === name) ui.issues = { error: err.message || String(err) };
+  } finally {
+    ui.issuesLoading = false;
+  }
+  if (changed) render();  // nothing new: no re-render (it would interrupt a drag or a pan in progress)
+}
+
+// The sheets the shown issues were computed for, and the sheets the state has now: after a layer edit
+// (or a new review) the old locations are drawn as out of date until the checks have run again.
+function currentIssueBasis() {
+  const s = ui.state;
+  if (s?.draft) return `draft:${s.draft.updated_utc}`;
+  return `candidate:${s?.proposal?.selected ?? null}`;
+}
+function inspBasisStale(d) {
+  return Boolean(d && !d.error && d.basis && d.basis !== currentIssueBasis());
+}
+
+function issueStale(d, issue) {
+  if (inspBasisStale(d) && issue.sheet !== undefined && issue.destination === "layer") {
+    return { stale_reason: "the sheets changed; re-checking" };
+  }
+  const ids = ISSUE_SOURCES[issue.source] || [];
+  return d.sources.find((s) => ids.includes(s.id) && s.stale) || null;
+}
+
+const issueNo = (i) => Number(String(i.id).replace(/\D/g, "")) || 0;
+
+function sheetLabel(d, id) {
+  const s = d.sheets.find((x) => x.id === id);
+  return s ? `Layer ${s.layer_from_front} (from front) · ${s.color}` : id ? id : "whole stack";
+}
+
+const measure = (m) => (!m ? "–" : m.text ? esc(m.text) : `${esc(m.label)} <strong>${fmt(m.value, m.unit === "px" ? 0 : 3)}${m.unit === "px" ? " px" : ` ${esc(m.unit)}`}</strong>`);
+
+// Which image an issue belongs on: its own layer; whole-stack checks on the front view; intake and
+// planner findings on the artwork only.
+function issueHome(i) {
+  if (i.sheet) return i.sheet;
+  return i.destination === "artwork" ? "artwork" : "front";
+}
+
+function inspImages(d) {
+  const imgs = Object.fromEntries(d.images.map((i) => [i.key, i]));
+  const out = [];
+  for (const s of d.sheets.slice().reverse()) {  // front first
+    if (imgs.front) out.push({ key: s.id, label: sheetLabel(d, s.id), short: `L${s.layer_from_front}`, color: s.color, url: s.image, extent_mm: imgs.front.extent_mm, layer: true });
+  }
+  if (imgs.front) out.push({ ...imgs.front, short: "Front view" });
+  if (imgs.artwork) out.push({ ...imgs.artwork, short: "Artwork" });
+  return out;
+}
+
+// The image shown: chosen in the strip, or (auto) the selected issue's home, else the first layer
+// with an issue, else the front layer (the sheets are the focus), else the artwork.
+function inspImage(d, issue) {
+  const all = inspImages(d);
+  const byKey = (k) => all.find((x) => x.key === k);
+  if (ui.insp.view !== "auto" && byKey(ui.insp.view)) return byKey(ui.insp.view);
+  if (issue && byKey(issueHome(issue))) return byKey(issueHome(issue));
+  const first = d.issues.find((i) => i.sheet && byKey(i.sheet));
+  return (first && byKey(first.sheet)) || all.find((x) => x.layer) || byKey("artwork") || all[0];
+}
+
+function filteredIssues(d) {
+  const f = ui.insp;
+  const key = ui.insp.shown?.key;
+  return d.issues.filter((i) => (!f.kind || i.kind === f.kind) && (!f.severity || i.severity === f.severity)
+    && (!key || issueHome(i) === key));
+}
+
+function checkedText(d, shown) {
+  const c = d.checks;
+  if (shown?.key === "artwork") return "No located artwork or intake findings.";
+  if (!c) return "No sheets to check.";
+  if (shown?.key === "front") return "The front view matches the artwork (no whole-stack issue). Each layer's own issues are on its tab.";
+  return `No geometric issues found on this layer. Checked: every piece reaches the perimeter, connections at least ${fmt(c.structural_width_mm, 2)} mm,
+    openings at least ${fmt(c.min_opening_mm, 2)} mm (unsupported below ${fmt(c.nozzle_diameter_mm, 2)} mm), material at least
+    ${fmt(c.min_positive_feature_mm, 2)} mm (unsupported below ${fmt(c.line_width_mm, 2)} mm) — ${esc(c.geometry_source)}.`;
+}
+
+function issuesPanel() {
+  if (!ui.state?.proposal) return "";
+  const d = ui.issues;
+  if ((!d || ui.issuesDirty) && !ui.issuesLoading && !busy()) queueMicrotask(loadIssues);  // the previous result stays meanwhile
+  if (!d) {
+    return `<section class="panel tight small muted" data-testid="issue-inspector">${busy() ? "Issues are shown when the running job has finished." : "Checking the sheets for issues…"}</section>`;
+  }
+  if (d.error) return `<section class="panel tight small no" data-testid="issue-inspector">Issues unavailable: ${esc(d.error)}</section>`;
+  const selected = d.issues.find((i) => i.id === ui.insp.selected) || null;
+  const shown = inspImage(d, selected);
+  ui.insp.shown = shown;
+  const list = filteredIssues(d);
+  const issue = list.find((i) => i.id === ui.insp.selected) || null;
+  const basisStale = inspBasisStale(d);
+  const sheetIssues = d.issues.filter((i) => i.destination === "layer" || i.sheet);
+  const artIssues = d.issues.filter((i) => issueHome(i) === "artwork");
+  const countBadges = (items) => SEV_ORDER.map((s) => [s, items.filter((i) => i.severity === s).length]).filter(([, n]) => n)
+    .map(([s, n]) => badge(SEV_CLASS[s] || "neutral", `${n} ${s.toLowerCase()}`)).join(" ");
+  const stale = d.sources.filter((s) => s.stale);
+  const options = (values, current) => values.map(([v, l]) => `<option value="${esc(v)}" ${v === current ? "selected" : ""}>${esc(l)}</option>`).join("");
+  const here = d.issues.filter((i) => issueHome(i) === shown?.key);
+  const kinds = [...new Set(here.map((i) => i.kind))].map((k) => [k, here.find((i) => i.kind === k).title]);
+  const sevs = SEV_ORDER.filter((s) => here.some((i) => i.severity === s)).map((s) => [s, s]);
+  const index = issue ? list.indexOf(issue) : -1;
+  const hasDraft = Boolean(ui.state.draft && d.has_review);
+  const chips = inspImages(d).map((img) => {
+    const mine = d.issues.filter((i) => issueHome(i) === img.key);
+    const worst = SEV_ORDER.find((s) => mine.some((i) => i.severity === s));
+    return `<button class="insp-chip ${img.key === shown?.key ? "active" : ""}" data-action="insp-layer" data-key="${esc(img.key)}" data-testid="insp-layer-chip" title="${esc(img.label)}">
+      ${img.layer ? `<span class="swatch" style="background:${esc(img.color)}"></span>` : ""}${esc(img.short)}
+      ${mine.length ? `<span class="insp-count" style="background:${SEV_COLOR[worst] || "#888"}">${mine.length}</span>` : '<span class="insp-ok" aria-label="no issues">✓</span>'}</button>`;
+  }).join("");
+  const card = issue ? (() => {
+    const st = issueStale(d, issue);
+    const th = issue.threshold;
+    const thText = !th ? "–" : th.text ? esc(th.text) : `${esc(th.label)} <strong>${fmt(th.value, 3)} ${esc(th.unit)}</strong>${th.nominal_mm != null ? ` <span class="muted">(nominal ${fmt(th.nominal_mm, 2)} mm)</span>` : ""}${th.unsupported_below_mm != null ? ` <span class="muted">(unsupported below ${fmt(th.unsupported_below_mm, 3)} mm)</span>` : ""}`;
+    const fromCandidate = issue.destination === "layer" && !hasDraft && issue.sheet && d.sheet_source === "candidate";
+    const layerBtn = issue.destination === "layer"
+      ? `<button class="primary" data-action="insp-edit-layer" data-testid="insp-edit-layer" ${busy() || (!hasDraft && !fromCandidate) ? "disabled" : ""}>Edit layer</button>` : "";
+    const artBtn = issue.artwork_box_px ? `<button class="${issue.destination === "artwork" ? "primary" : ""}" data-action="insp-edit-artwork" data-testid="insp-edit-artwork" ${busy() ? "disabled" : ""}>Edit artwork</button>` : "";
+    const crop = issue.details?.image_url ? `<img class="insp-crop" src="${esc(issue.details.image_url)}" alt="original | default intake | as planned" data-testid="insp-detail-image">
+      <p class="small muted" style="margin:0">original · default intake · as planned</p>` : "";
+    return `<div class="subpanel insp-card" data-testid="insp-card">
+      <div class="spread"><strong><span class="insp-no">${issueNo(issue)}</span> <span data-testid="insp-title">${esc(issue.title)}</span></strong>${badge(SEV_CLASS[issue.severity] || "neutral", issue.severity)}</div>
+      <dl class="kv small">
+        <dt>Measured</dt><dd data-testid="insp-measured">${measure(issue.measured)}</dd>
+        <dt>Threshold</dt><dd data-testid="insp-threshold">${thText}</dd>
+        <dt>Where</dt><dd data-testid="insp-sheet">${esc(issue.sheet ? sheetLabel(d, issue.sheet) : issue.destination === "artwork" ? "Artwork (flat color) — not a sheet defect" : "Whole stack (front view)")}${issue.outline_exact ? "" : ' <span class="muted">(bounding box only)</span>'}</dd>
+      </dl>
+      ${crop}
+      ${st ? `<p class="small warn-text" data-testid="insp-stale" style="margin:0">Out of date: ${esc(st.stale_reason || "re-check")}</p>` : ""}
+      <div class="row">${layerBtn}${artBtn}</div>
+      ${fromCandidate ? '<p class="small muted" style="margin:0">Edit layer starts the review of this candidate (layers are edited in a review).</p>' : ""}
+      <details class="small"><summary>Technical details</summary>
+        <dl class="kv"><dt>Code</dt><dd><code>${esc(issue.kind)}</code></dd><dt>Source</dt><dd>${esc(issue.source)}</dd>
+          <dt>Box (mm)</dt><dd class="mono">${esc((issue.bbox_mm || []).join(", "))}</dd></dl>
+        <pre class="mono small">${esc(JSON.stringify({ measured: issue.measured, threshold: issue.threshold, details: { ...issue.details, held_material_outline_mm: undefined } }, null, 2))}</pre></details>
+    </div>`;
+  })() : list.length ? `<div class="small muted" data-testid="insp-card-empty">Click a highlighted area or a row.</div>`
+    : `<div class="subpanel small ${here.length ? "muted" : "ok-text"}" data-testid="insp-card-empty">${here.length ? "No issue here matches the filters." : checkedText(d, shown)}</div>`;
+  const rows = list.map((i) => `<li class="${i.id === ui.insp.selected ? "active" : ""} ${issueStale(d, i) ? "stale" : ""}"><button class="insp-row" data-action="insp-select" data-issue="${esc(i.id)}" data-testid="insp-row">
+      <span class="insp-no" style="background:${SEV_COLOR[i.severity] || "#888"}">${issueNo(i)}</span><span class="insp-row-title">${esc(i.title)}</span>
+      <span class="small muted">${i.measured && i.measured.value != null ? `${fmt(i.measured.value, i.measured.unit === "px" ? 0 : 2)} ${esc(i.measured.unit)}` : ""}</span></button></li>`).join("");
+  const summary = [sheetIssues.length ? `<span class="small muted">sheets</span> ${countBadges(sheetIssues)}` : '<span class="small ok-text">sheets: no issues</span>',
+    artIssues.length ? `<span class="small muted">artwork</span> ${countBadges(artIssues)}` : ""].filter(Boolean).join(" ");
+  return `<details class="panel section insp" data-section="issues" data-testid="issue-inspector" ${openAttr("issues", true)}>
+    <summary><h3>Issues</h3><span class="small" data-testid="insp-summary">${summary}${stale.length || basisStale ? " " + badge("warn", "out of date") : ""}</span></summary>
+    <div class="section-body stack">
+      ${d.notice ? `<div class="banner info small" data-testid="insp-notice">${esc(d.notice)}</div>` : ""}
+      ${basisStale ? `<div class="banner warn small" data-testid="insp-basis-stale">The sheets changed: the locations shown are from before the edit. ${ui.issuesLoading ? "Re-checking…" : "They are checked again shortly."}</div>` : ""}
+      ${stale.map((s) => `<div class="banner warn small" data-testid="insp-source-stale"><strong>${esc(s.label)}</strong> is out of date: ${esc(s.stale_reason || "re-check")}.</div>`).join("")}
+      <div class="insp-chips" role="tablist" aria-label="Layer" data-testid="insp-layers">${chips}</div>
+      <div class="insp-grid">
+        <div class="stack" style="gap:6px">
+          <div class="zoom-viewport insp-viewport ${ui.artSpace ? "space" : ""}" id="insp-viewport" data-testid="insp-viewport" tabindex="0" aria-label="Issues (mouse wheel zooms; + / - / 0 with focus)">
+            <div class="zoom-stage" id="insp-stage"><img id="insp-image" src="${esc(shown?.url || "")}" alt="${esc(shown?.label || "")}" draggable="false"></div>
+            <canvas id="insp-overlay" data-testid="insp-canvas" aria-label="Issue locations"></canvas>
+          </div>
+          <div class="spread"><span class="small muted" data-testid="insp-shown">${esc(shown?.label || "")}</span>${zoomBar("insp")}</div>
+        </div>
+        <div class="stack insp-side" style="gap:8px">
+          ${here.length ? `<div class="row insp-filters">
+            <select id="insp-kind" data-testid="insp-filter-kind" aria-label="Type"><option value="">All types</option>${options(kinds, ui.insp.kind)}</select>
+            <select id="insp-severity" data-testid="insp-filter-severity" aria-label="Severity"><option value="">All severities</option>${options(sevs, ui.insp.severity)}</select>
+          </div>
+          <div class="row"><button class="tool-btn" data-action="insp-step" data-step="-1" data-testid="insp-prev" ${list.length ? "" : "disabled"}>◀</button>
+            <span class="small" data-testid="insp-position">${index >= 0 ? index + 1 : "–"} / ${list.length}</span>
+            <button class="tool-btn" data-action="insp-step" data-step="1" data-testid="insp-next" ${list.length ? "" : "disabled"}>▶</button></div>` : ""}
+          ${card}
+          ${list.length ? `<ul class="insp-list" data-testid="insp-list">${rows}</ul>` : ""}
+        </div>
+      </div>
+      ${d.unlocalized.length ? `<details class="small" data-testid="insp-unlocalized"><summary>${d.unlocalized.length} other diagnostic${d.unlocalized.length === 1 ? "" : "s"} without a location (not drawn)</summary>
+        <ul>${d.unlocalized.map((u) => `<li>${badge(SEV_CLASS[u.severity] || "neutral", u.severity)} <code>${esc(u.code)}</code>${u.sheet ? ` (${esc(u.sheet)})` : u.source === "intake" || u.source === "proposal" ? " (artwork / intake)" : ""} — ${esc(u.text)}</li>`).join("")}</ul></details>` : ""}
+    </div>
+  </details>`;
+}
+
+// Image pixels of a sheet-mm point on the shown image (its extent in mm).
+function inspToImage(entry, img, [x, y]) {
+  const [x0, y0, x1, y1] = entry.extent_mm;
+  return [((x - x0) / (x1 - x0)) * img.naturalWidth, ((y1 - y) / (y1 - y0)) * img.naturalHeight];
+}
+
+function inspOnImage(d, i) {
+  return Boolean(ui.insp.shown && i.outline_mm && issueHome(i) === ui.insp.shown.key);
+}
+
+// Screen geometry of the issues drawn on the shown image (shared by drawing and hit testing).
+function inspScreen() {
+  const img = $("#insp-image");
+  const canvas = $("#insp-overlay");
+  const entry = ui.insp.shown;
+  if (!img || !canvas || !img.naturalWidth || !entry) return null;
+  const c = canvas.getBoundingClientRect();
+  const r = img.getBoundingClientRect();
+  const at = (p) => { const [px, py] = inspToImage(entry, img, p); return [r.left - c.left + (px * r.width) / img.naturalWidth, r.top - c.top + (py * r.height) / img.naturalHeight]; };
+  return { img, canvas, c, r, at };
+}
+
+const MARKER_R = 9;
+function inspMarker(g, issue) {  // numbered marker beside the issue (above-right), never on top of it
+  const [a, b] = [g.at([issue.bbox_mm[0], issue.bbox_mm[3]]), g.at([issue.bbox_mm[2], issue.bbox_mm[1]])];
+  const small = Math.max(b[0] - a[0], b[1] - a[1]) < 14;
+  const ring = small ? Math.max(12, Math.hypot(b[0] - a[0], b[1] - a[1]) / 2 + 6) : 0;
+  const cx = (a[0] + b[0]) / 2, cy = (a[1] + b[1]) / 2;
+  const pos = small ? [cx + ring * 0.71 + MARKER_R * 0.7, cy - ring * 0.71 - MARKER_R * 0.7] : [b[0] + MARKER_R + 2, a[1] - MARKER_R - 2];
+  return { a, b, cx, cy, small, ring, pos };
+}
+
+function drawInspOverlay() {
+  const d = ui.issues;
+  if (!d || d.error) return;
+  const g = inspScreen();
+  if (!g) return;
+  const { canvas, c } = g;
+  const dpr = window.devicePixelRatio || 1;
+  const w = Math.max(1, Math.round(c.width * dpr));
+  const h = Math.max(1, Math.round(c.height * dpr));
+  if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+  const ctx = canvas.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, c.width, c.height);
+  const trace = (outline) => {
+    ctx.beginPath();
+    for (const poly of outline) for (const ring of poly) ring.forEach((p, k) => ctx[k ? "lineTo" : "moveTo"](...g.at(p)));
+  };
+  const list = filteredIssues(d).filter((i) => inspOnImage(d, i));
+  const sel = list.find((i) => i.id === ui.insp.selected);
+  // Outlines only (no fill) so small holes and thin features stay visible: a dark halo, then the color.
+  const outline = (issue, width, selected) => {
+    const color = SEV_COLOR[issue.severity] || "#888";
+    const stale = Boolean(issueStale(d, issue));
+    ctx.save();
+    if (stale) ctx.setLineDash([4, 3]);
+    trace(issue.outline_mm);
+    if (selected) { ctx.globalAlpha = 0.22; ctx.fillStyle = color; ctx.fill("evenodd"); ctx.globalAlpha = 1; }
+    ctx.lineJoin = "round";
+    ctx.strokeStyle = selected ? "#fff" : "rgba(0,0,0,0.75)";
+    ctx.lineWidth = width + 2.5;
+    ctx.stroke();
+    ctx.strokeStyle = stale ? "#999" : color;
+    ctx.lineWidth = width;
+    ctx.stroke();
+    ctx.restore();
+  };
+  for (const issue of list) if (issue !== sel) outline(issue, 1.5, false);
+  if (sel) {
+    if (sel.details?.held_material_outline_mm) {  // the piece a narrow connection holds: thin dashed
+      ctx.save(); ctx.setLineDash([5, 4]); ctx.strokeStyle = SEV_COLOR[sel.severity]; ctx.lineWidth = 1;
+      trace(sel.details.held_material_outline_mm); ctx.stroke(); ctx.restore();
+    }
+    outline(sel, 2.5, true);
+  }
+  for (const issue of list) {  // rings around features too small to see, and the numbered markers
+    const m = inspMarker(g, issue);
+    const color = issueStale(d, issue) ? "#999" : SEV_COLOR[issue.severity] || "#888";
+    ctx.save();
+    if (m.small) {
+      ctx.setLineDash(issue === sel ? [6, 4] : [3, 3]);
+      ctx.strokeStyle = "rgba(0,0,0,0.6)"; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(m.cx, m.cy, m.ring, 0, Math.PI * 2); ctx.stroke();
+      ctx.strokeStyle = color; ctx.lineWidth = issue === sel ? 2 : 1.5; ctx.stroke();
+    }
+    ctx.setLineDash([]);
+    ctx.beginPath(); ctx.arc(m.pos[0], m.pos[1], issue === sel ? MARKER_R + 2 : MARKER_R, 0, Math.PI * 2);
+    ctx.fillStyle = color; ctx.fill();
+    ctx.strokeStyle = "#fff"; ctx.lineWidth = issue === sel ? 2.5 : 1.5; ctx.stroke();
+    ctx.fillStyle = issue.severity === "WARN" ? "#000" : "#fff";
+    ctx.font = `bold ${issue === sel ? 11 : 10}px system-ui, sans-serif`;
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText(String(issueNo(issue)), m.pos[0], m.pos[1] + 0.5);
+    ctx.restore();
+  }
+}
+
+// Zoom the view so ``box`` (image px [x0, y0, x1, y1]) fills about ``fill`` of it and centre it. A
+// focused view may pan past the image edge (``free``), so a feature near the border is centred too;
+// Fit ends that.
+function focusView(key, box, fill = 0.45) {
+  const g = viewGeometry(key);
+  if (!g) return;
+  const bw = Math.max(box[2] - box[0], 1);
+  const bh = Math.max(box[3] - box[1], 1);
+  const cx = (box[0] + box[2]) / 2, cy = (box[1] + box[3]) / 2;
+  const zoom = Math.max(1.0001, Math.min(ZOOM_MAX, (fill * Math.min(g.vw / bw, g.vh / bh)) / g.fit));
+  g.state.free = true;
+  g.state.zoom = zoom;
+  const scale = g.fit * zoom;
+  g.state.pan = [g.vw / 2 - cx * scale, g.vh / 2 - cy * scale];
+  applyView(key);
+}
+
+function afterImage(selector, fn) {
+  const img = $(selector);
+  if (!img) return;
+  if (img.complete && img.naturalWidth) fn();
+  else img.addEventListener("load", () => fn(), { once: true });
+}
+
+function focusInspIssue(issue) {
+  afterImage("#insp-image", () => {
+    const img = $("#insp-image");
+    const entry = ui.insp.shown;
+    if (!entry || !issue.bbox_mm) return;
+    const [x0, y0] = inspToImage(entry, img, [issue.bbox_mm[0], issue.bbox_mm[3]]);
+    const [x1, y1] = inspToImage(entry, img, [issue.bbox_mm[2], issue.bbox_mm[1]]);
+    focusView("insp", [x0, y0, x1, y1]);
+  });
+}
+
+function selectIssue(id) {
+  const issue = ui.issues?.issues?.find((i) => i.id === id);
+  ui.insp.selected = id;
+  if (issue && ui.insp.view !== "auto" && issueHome(issue) !== ui.insp.view) ui.insp.view = issueHome(issue);
+  render();
+  if (issue) focusInspIssue(issue);
+}
+
+function inspShowLayer(key) {
+  const d = ui.issues;
+  if (!d || d.error) return;
+  ui.insp.view = key;
+  ui.insp.kind = "";
+  ui.insp.severity = "";
+  const sel = d.issues.find((i) => i.id === ui.insp.selected);
+  if (sel && issueHome(sel) !== key) ui.insp.selected = null;
+  ui.insp.zoom = null;  // a new image starts at Fit
+  ui.insp.free = false;
+  render();
+}
+
+function bindInspector() {
+  const canvas = $("#insp-overlay");
+  if (!canvas) return;
+  bindViewport("insp", canvas);
+  $("#insp-image")?.addEventListener("load", () => applyView("insp"));
+  applyView("insp");
+  let down = null;
+  canvas.addEventListener("pointerdown", (e) => { if (e.button === 0 && !ui.artSpace) down = [e.clientX, e.clientY]; });
+  canvas.addEventListener("pointerup", (e) => {
+    if (!down || e.button !== 0) return;
+    const moved = Math.hypot(e.clientX - down[0], e.clientY - down[1]);
+    down = null;
+    const d = ui.issues;
+    const g = inspScreen();
+    if (moved > 4 || !d || d.error || !g) return;
+    const x = e.clientX - g.c.left, y = e.clientY - g.c.top;
+    const tol = 6;
+    const hits = filteredIssues(d).filter((i) => inspOnImage(d, i) && i.bbox_mm).map((i) => {
+      const m = inspMarker(g, i);
+      const onMarker = Math.hypot(x - m.pos[0], y - m.pos[1]) <= MARKER_R + 2;
+      const inBox = x >= m.a[0] - tol && x <= m.b[0] + tol && y >= m.a[1] - tol && y <= m.b[1] + tol;
+      const inRing = m.small && Math.hypot(x - m.cx, y - m.cy) <= m.ring;
+      return { i, onMarker, hit: onMarker || inBox || inRing, area: (m.b[0] - m.a[0]) * (m.b[1] - m.a[1]) };
+    }).filter((h) => h.hit);
+    if (!hits.length) return;
+    hits.sort((p, q) => (q.onMarker - p.onMarker) || p.area - q.area);
+    selectIssue(hits[0].i.id);
+  });
+}
+
+// Open the sheet editor on the issue: its layer selected, a marker on the location, zoomed onto it.
+// Issues of a proposed candidate (no review yet) start its review first, then open the editor.
+function inspEditLayer(issue) {
+  if (!issue) return;
+  if (!ui.state.draft) {
+    const candidate = ui.state.proposal?.selected;
+    if (!candidate || busy()) return;
+    ui.inspPendingEdit = { sheet: issue.sheet, at_mm: issue.at_mm, bbox_mm: issue.bbox_mm };
+    submit(`/api/projects/${encodeURIComponent(ui.name)}/review`, { candidate });
+    return;
+  }
+  if (issue.sheet) ui.sheet = issue.sheet;
+  ui.marker = issue.at_mm;
+  ui.pending = null;
+  ui.view = issue.sheet ? "sheet" : "front";
+  ui.tool = "inspect";
+  setTab("review");
+  render();
+  $("#edit-viewport")?.scrollIntoView({ block: "center" });
+  const outer = ui.state.draft.validation.outer_sheet_mm;
+  afterImage("#edit-image", () => {
+    const img = $("#edit-image");
+    const b = issue.bbox_mm;
+    const px = (x) => (x / outer) * img.naturalWidth;
+    const py = (y) => (1 - y / outer) * img.naturalHeight;
+    focusView("edit", [px(b[0]), py(b[3]), px(b[2]), py(b[1])]);
+  });
+}
+
+// Open the Artwork editor (in Review & edit, else on the proposal page) zoomed onto the issue's pixels.
+function inspEditArtwork(issue) {
+  const box = issue?.artwork_box_px;
+  if (!box) return;
+  ui.sections.artwork = true;
+  ui.art.focus = box;
+  setTab(ui.state.draft ? "review" : "proposal");
+  render();
+  $('[data-testid="artwork-panel"]')?.scrollIntoView({ block: "start" });
+  afterImage("#art-image", () => focusView("art", [box[1], box[0], box[3], box[2]]));
 }
 
 // ------------------------------------------------------------------------------ review
@@ -1382,6 +2228,7 @@ function reviewView() {
       ${draftBanner()}
       <div class="panel tight stage">${canvasPanel(sheet)}</div>
       ${validationPanel()}
+      ${issuesPanel()}
       ${artworkPanel()}
       ${changePanel()}
       ${previewsPanel()}
@@ -1414,7 +2261,7 @@ function reviewBar() {
         data-tip="Only for an intended visible change: the current front view becomes the reviewed artwork">Accept front view as artwork…</button>
       <span class="divider" aria-hidden="true"></span>
       <button class="tool-btn ghost" data-action="tab" data-tab="printability">Printability →</button>
-      <button class="primary" data-action="tab" data-tab="kit" ${ok && !ui.state.artwork?.differs_from_planned ? "" : "disabled"} title="${ui.state.artwork?.differs_from_planned ? "The artwork was edited after these sheets were planned" : ok ? "Export STEP/STL for every layer" : "Invalid drafts cannot be exported"}">Build print kit →</button>
+      <button class="primary" data-action="tab" data-tab="kit" ${ok && !ui.state.artwork?.differs_from_planned && !unsavedArt() ? "" : "disabled"} title="${unsavedArt() ? "Save or discard the unsaved artwork changes first" : ui.state.artwork?.differs_from_planned ? "The artwork was edited after these sheets were planned" : ok ? "Export STEP/STL for every layer" : "Invalid drafts cannot be exported"}">Build print kit →</button>
     </div>
     ${verified ? `<div class="review-bar-note">${verified} <span class="muted small">(${esc(v.checked_utc)})</span></div>` : ""}
   </div>`;
@@ -1452,7 +2299,7 @@ function draftBanner() {
 
 const TOOL_GROUPS = [
   ["", ["inspect"]],
-  ["Add", ["add_circle", "add_rect", "bridge"]],
+  ["Add", ["add_circle", "add_rect", "line", "curve"]],
   ["Cut", ["subtract_circle", "subtract_rect", "subtract_bar"]],
   ["Fix", ["fill_hole", "remove_island", "split"]],
 ];
@@ -1463,8 +2310,8 @@ function canvasPanel(sheet) {
   const views = [["front", "Assembled"], ["sheet", "Selected layer"], ["changes_base", "Changes vs base"], ["changes_previous", "Changes vs previous"]]
     .filter(([v]) => v === "sheet" || (v === "front" && images.assembled_front) || (v === "changes_base" && images.changes_vs_base) || (v === "changes_previous" && images.changes_vs_previous));
   const tool = TOOLS.find(([t]) => t === ui.tool);
-  const needsWidth = ui.tool === "bridge" || ui.tool === "subtract_bar";
-  const shaped = ["add_circle", "subtract_circle", "add_rect", "subtract_rect", "subtract_bar", "bridge"].includes(ui.tool);
+  const needsWidth = ui.tool === "subtract_bar" || STROKE_TOOLS.includes(ui.tool);
+  const shaped = ["add_circle", "subtract_circle", "add_rect", "subtract_rect", "subtract_bar", ...STROKE_TOOLS].includes(ui.tool);
   const label = (t) => TOOLS.find(([x]) => x === t);
   const caption = {
     front: "Assembled front view of all layers",
@@ -1513,6 +2360,7 @@ function viewImage(sheet) {
 
 function pendingPanel() {
   if (!ui.pending) return "";
+  if (isStroke(ui.pending)) return strokePanel(ui.pending);
   return `<div class="pending" data-testid="pending-edit">
     <div class="spread"><strong>Pending edit: ${esc(describeOp(ui.pending))}</strong>
       <div class="row"><button class="small ghost" data-action="cancel-pending">Cancel</button><button class="small primary" data-action="apply-pending" ${busy() ? "disabled" : ""}>Apply edit</button></div></div>
@@ -1527,6 +2375,7 @@ function describeOp(op) {
     case "remove_island": return `remove the island of ${op.sheet}${at}`;
     case "split": return `split the region at (${op.region.region_at_mm.join(", ")}) mm into a new sheet`;
     case "add": case "subtract": {
+      if (isStroke(op)) return `add a ${op.shape.path === "line" ? "line" : "curve"} ${op.shape.width_mm} mm wide on ${op.sheet}`;
       const s = op.shape;
       const what = s.type === "circle" ? `circle r=${s.radius_mm} mm` : s.type === "bar" ? `slot ${s.width_mm} mm wide` : "rectangle";
       return `${op.op === "add" ? "add" : "cut"} ${what} on ${op.sheet} (${op.precision || "vector"})`;
@@ -1767,6 +2616,7 @@ function drawOverlay() {
 function drawShape(ctx, op, g, mmToPx) {
   const s = op.shape || (op.op === "bridge" ? { type: "bar", from_mm: op.from_mm, to_mm: op.to_mm, width_mm: op.width_mm } : null);
   if (!s) return;
+  if (s.type === "stroke") { drawStroke(ctx, op, g, mmToPx); return; }
   const adding = op.op === "add" || op.op === "bridge";
   ctx.strokeStyle = adding ? "#00a86b" : "#ff2d55";
   ctx.fillStyle = adding ? "rgba(0,168,107,0.25)" : "rgba(255,45,85,0.25)";
@@ -1806,6 +2656,8 @@ function shapeFromDrag({ from, to }) {
       return { op: "subtract", sheet, shape: { type: "bar", from_mm: from, to_mm: to, width_mm: ui.barWidth }, precision };
     case "bridge":
       return { op: "bridge", sheet, from_mm: from, to_mm: to, width_mm: ui.barWidth, precision };
+    case "line": case "curve":
+      return strokeOp(ui.tool, from, to);
     default:
       return null;
   }
@@ -1821,12 +2673,23 @@ function bindCanvas() {
     ui.hover = toMm(e);
     const c = $("#coords");
     if (c) c.textContent = `x ${ui.hover[0].toFixed(2)} mm · y ${ui.hover[1].toFixed(2)} mm`;
-    if (ui.drag) { ui.drag.to = ui.hover; drawOverlay(); }
+    if (ui.strokeDrag) { moveStrokeHandle(ui.hover, e.shiftKey); drawOverlay(); return; }
+    if (ui.drag) { ui.drag.to = ui.hover; drawOverlay(); return; }
+    if (isStroke(ui.pending)) {
+      const hit = strokeHit(e);
+      canvas.style.cursor = hit === null ? "" : hit === "move" ? "move" : "grab";
+    }
   });
   canvas.addEventListener("pointerdown", (e) => {
-    if (busy() || !ui.sheet) return;
+    if (busy() || !ui.sheet || e.button !== 0) return;
     const point = toMm(e);
-    if (["add_circle", "subtract_circle", "add_rect", "subtract_rect", "subtract_bar", "bridge"].includes(ui.tool)) {
+    const hit = isStroke(ui.pending) ? strokeHit(e) : null;
+    if (hit !== null) {  // edit the pending connector instead of drawing a new one
+      canvas.setPointerCapture(e.pointerId);
+      ui.strokeDrag = { handle: hit, start: point, orig: ui.pending.shape.points_mm.map((q) => [...q]) };
+      return;
+    }
+    if (["add_circle", "subtract_circle", "add_rect", "subtract_rect", "subtract_bar", ...STROKE_TOOLS].includes(ui.tool)) {
       canvas.setPointerCapture(e.pointerId);
       ui.drag = { from: point, to: point };
       ui.pending = null;
@@ -1835,13 +2698,20 @@ function bindCanvas() {
   });
   canvas.addEventListener("pointerup", (e) => {
     const point = toMm(e);
+    if (ui.strokeDrag) {
+      ui.strokeDrag = null;
+      strokeChanged();
+      return;
+    }
     if (ui.drag) {
       ui.drag.to = point;
       const op = shapeFromDrag(ui.drag);
       ui.drag = null;
       const degenerate = (op.shape?.radius_mm === 0) || (op.shape?.type === "polygon" && (op.shape.points_mm[0][0] === op.shape.points_mm[1][0] || op.shape.points_mm[0][1] === op.shape.points_mm[2][1]))
-        || ((op.shape?.type === "bar" || op.op === "bridge") && JSON.stringify(op.from_mm || op.shape.from_mm) === JSON.stringify(op.to_mm || op.shape.to_mm));
+        || ((op.shape?.type === "bar" || op.op === "bridge") && JSON.stringify(op.from_mm || op.shape.from_mm) === JSON.stringify(op.to_mm || op.shape.to_mm))
+        || (isStroke(op) && strokeLength(op.shape) < 0.05);
       ui.pending = degenerate ? null : op;
+      if (isStroke(ui.pending)) { strokeChanged(); return; }
       render();
       return;
     }
@@ -1852,6 +2722,201 @@ function bindCanvas() {
     render();
   });
   canvas.addEventListener("pointerleave", () => { ui.hover = null; });
+}
+
+// -------------------------------------------------------------- Line / Curve connectors
+// A connector is an ``add`` of a ``stroke`` shape (core.editing): a straight or cubic Bezier centre line
+// with a width.  It stays an editable pending shape until Apply; the preview draws the real material
+// (the centre line buffered by half the width, round or flat ends), sampled like the core samples it.
+const STROKE_SEGMENTS = 64;
+const isStroke = (op) => op?.op === "add" && op.shape?.type === "stroke";
+const lerp = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+
+function strokeOp(tool, from, to) {
+  const points = tool === "line" ? [from, to] : [from, lerp(from, to, 1 / 3), lerp(from, to, 2 / 3), to];
+  return { op: "add", sheet: ui.sheet, shape: { type: "stroke", path: tool === "line" ? "line" : "cubic",
+    points_mm: points.map((q) => q.map(r3)), width_mm: r3(ui.barWidth), cap: ui.strokeCap }, precision: ui.precision };
+}
+
+function strokeCentre(shape) {
+  const p = shape.points_mm;
+  if (shape.path === "line") return p;
+  const out = [];
+  for (let i = 0; i <= STROKE_SEGMENTS; i++) {
+    const t = i / STROKE_SEGMENTS;
+    const a = (1 - t) ** 3, b = 3 * (1 - t) ** 2 * t, c = 3 * (1 - t) * t ** 2, d = t ** 3;
+    out.push([a * p[0][0] + b * p[1][0] + c * p[2][0] + d * p[3][0], a * p[0][1] + b * p[1][1] + c * p[2][1] + d * p[3][1]]);
+  }
+  return out;
+}
+
+function strokeLength(shape) {
+  const c = strokeCentre(shape);
+  let n = 0;
+  for (let i = 1; i < c.length; i++) n += Math.hypot(c[i][0] - c[i - 1][0], c[i][1] - c[i - 1][1]);
+  return n;
+}
+
+// Which part of the pending connector is under the pointer: a handle index, "move" (the body) or null.
+function strokeHit(event) {
+  const g = overlayGeometry();
+  if (!g || !isStroke(ui.pending)) return null;
+  const s = ui.pending.shape;
+  const ex = (event.clientX - g.crect.left) * g.dpr;
+  const ey = (event.clientY - g.crect.top) * g.dpr;
+  const near = (q, r) => { const [x, y] = toPx(q, g); return Math.hypot(x - ex, y - ey) <= r * g.dpr; };
+  const order = s.path === "line" ? [0, 1] : [1, 2, 0, 3];  // curve handles before the ends they belong to
+  for (const i of order) if (near(s.points_mm[i], 11)) return i;
+  const mmToPx = (g.rect.width * g.dpr) / g.size;
+  const reach = (s.width_mm * mmToPx) / 2 + 5 * g.dpr;
+  const c = strokeCentre(s).map((q) => toPx(q, g));
+  for (let i = 1; i < c.length; i++) {
+    const [ax, ay] = c[i - 1], [bx, by] = c[i];
+    const len2 = (bx - ax) ** 2 + (by - ay) ** 2 || 1;
+    const t = Math.max(0, Math.min(1, ((ex - ax) * (bx - ax) + (ey - ay) * (by - ay)) / len2));
+    if (Math.hypot(ex - (ax + t * (bx - ax)), ey - (ay + t * (by - ay))) <= reach) return "move";
+  }
+  return null;
+}
+
+function moveStrokeHandle(point, snap) {
+  const d = ui.strokeDrag;
+  const pts = ui.pending.shape.points_mm;
+  const last = pts.length - 1;
+  if (d.handle === "move") {
+    const dx = point[0] - d.start[0], dy = point[1] - d.start[1];
+    d.orig.forEach((q, i) => { pts[i] = [r3(q[0] + dx), r3(q[1] + dy)]; });
+    return;
+  }
+  let target = point;
+  if (snap && ui.pending.shape.path === "line") {  // Shift: 15 degree steps around the other end
+    const other = d.orig[d.handle === 0 ? 1 : 0];
+    const len = Math.hypot(point[0] - other[0], point[1] - other[1]);
+    const angle = Math.round(Math.atan2(point[1] - other[1], point[0] - other[0]) / (Math.PI / 12)) * (Math.PI / 12);
+    target = [other[0] + len * Math.cos(angle), other[1] + len * Math.sin(angle)];
+  }
+  pts[d.handle] = target.map(r3);
+  // On a curve an end carries its own handle along, so the bend keeps its shape.
+  if (ui.pending.shape.path === "cubic" && (d.handle === 0 || d.handle === last)) {
+    const h = d.handle === 0 ? 1 : last - 1;
+    pts[h] = [r3(d.orig[h][0] + target[0] - d.orig[d.handle][0]), r3(d.orig[h][1] + target[1] - d.orig[d.handle][1])];
+  }
+}
+
+function drawStroke(ctx, op, g, mmToPx) {
+  const s = op.shape;
+  const dpr = g.dpr;
+  const color = ui.state.draft?.sheets.find((x) => x.id === op.sheet)?.color || "#00a86b";
+  const path = () => { ctx.beginPath(); strokeCentre(s).forEach((q, i) => { const [x, y] = toPx(q, g); if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y); }); };
+  ctx.save();
+  ctx.lineJoin = "round";
+  ctx.lineCap = s.cap === "flat" ? "butt" : "round";
+  path(); ctx.strokeStyle = "rgba(10, 14, 20, 0.85)"; ctx.lineWidth = Math.max(1, s.width_mm * mmToPx + 3 * dpr); ctx.stroke();
+  path(); ctx.strokeStyle = color; ctx.globalAlpha = 0.9; ctx.lineWidth = Math.max(1, s.width_mm * mmToPx); ctx.stroke();
+  ctx.globalAlpha = 1;
+  if (ui.drag) { ctx.restore(); return; }  // handles once the connector exists
+  const pts = s.points_mm.map((q) => toPx(q, g));
+  ctx.lineWidth = 1.5 * dpr;
+  if (s.path === "cubic") {
+    ctx.setLineDash([4 * dpr, 3 * dpr]); ctx.strokeStyle = "#2f5bd3";
+    ctx.beginPath(); ctx.moveTo(...pts[0]); ctx.lineTo(...pts[1]); ctx.moveTo(...pts[3]); ctx.lineTo(...pts[2]); ctx.stroke();
+    ctx.setLineDash([]);
+    for (const i of [1, 2]) { ctx.fillStyle = "#ffffff"; ctx.fillRect(pts[i][0] - 5 * dpr, pts[i][1] - 5 * dpr, 10 * dpr, 10 * dpr); ctx.strokeRect(pts[i][0] - 5 * dpr, pts[i][1] - 5 * dpr, 10 * dpr, 10 * dpr); }
+  }
+  for (const q of [pts[0], pts[pts.length - 1]]) {
+    ctx.beginPath(); ctx.arc(q[0], q[1], 6 * dpr, 0, Math.PI * 2);
+    ctx.fillStyle = "#ffffff"; ctx.fill(); ctx.strokeStyle = "#2f5bd3"; ctx.stroke();
+  }
+  ctx.restore();
+}
+
+// Any change to the pending connector: the last check no longer applies; check again shortly.
+let strokeCheckTimer = null;
+function strokeChanged() {
+  ui.strokeCheck = null;
+  render();
+  clearTimeout(strokeCheckTimer);
+  strokeCheckTimer = setTimeout(runStrokeCheck, 400);
+}
+
+async function runStrokeCheck() {
+  const op = ui.pending;
+  if (!isStroke(op) || busy()) return;
+  const key = JSON.stringify(op);
+  ui.strokeCheck = { key, pending: true };
+  if (!ui.strokeDrag) render();
+  let result;
+  try {
+    result = { key, result: await api("POST", `/api/projects/${encodeURIComponent(ui.name)}/edit/check`, { op }) };
+  } catch (err) {
+    result = { key, error: err.message };
+  }
+  if (JSON.stringify(ui.pending) !== key) return;  // edited meanwhile: a newer check follows
+  ui.strokeCheck = result;
+  if (!ui.strokeDrag) render();
+}
+
+function strokePanel(op) {
+  const s = op.shape;
+  const line = s.path === "line";
+  const a = s.points_mm[0];
+  const b = s.points_mm[s.points_mm.length - 1];
+  const angle = Math.atan2(b[1] - a[1], b[0] - a[0]) * 180 / Math.PI;
+  const sheet = ui.state.draft.sheets.find((x) => x.id === op.sheet);
+  const check = ui.strokeCheck?.key === JSON.stringify(op) ? ui.strokeCheck : null;
+  let checkLine = '<span class="small muted">Checking…</span>';
+  if (check?.error) checkLine = `<span class="small no">${esc(check.error)}</span>`;
+  else if (check?.result) {
+    const r = check.result;
+    const [cls, label] = CHANGE_KINDS[r.change.kind] || ["neutral", r.change.kind];
+    const visible = r.change.kind === "visible_artwork" || r.change.kind === "visible_subgrid_geometry";
+    checkLine = `${badge(cls, label)} ${badge(r.validation_status === "PASS" ? "ok" : "bad", r.validation_status === "PASS" ? "valid" : "invalid")}
+      <span class="small">${visible ? `Changes ${fmt(r.change.visible_changed_px)} visible px: applying it makes the draft invalid until you accept the front view (your approval).`
+        : r.validation_status === "PASS" ? "Hidden behind the sheets in front: the front view is unchanged." : ""}
+      ${r.failures.length ? `<span class="no">${esc(r.failures.join("; "))}</span>` : ""}</span>`;
+  }
+  return `<div class="pending stroke-editor" data-testid="pending-edit">
+    <div class="spread"><strong>Pending ${line ? "line" : "curve"} on ${swatch(sheet?.color || "#888")} ${esc(sheet?.export_name || op.sheet)}</strong>
+      <span class="small muted">Drag the round ends${line ? "" : " and the square curve handles"}; drag the stroke to move it${line ? "; Shift snaps to 15°" : ""}.</span></div>
+    <div class="stroke-fields">
+      <label class="field"><span>Width (mm)</span><input type="number" id="stroke-width" data-testid="stroke-width" min="0.1" step="0.1" value="${s.width_mm}"></label>
+      ${line ? `<label class="field"><span>Angle (°)</span><input type="number" id="stroke-angle" data-testid="stroke-angle" step="1" value="${r3(angle).toFixed(1)}"></label>
+      <label class="field"><span>Length (mm)</span><input type="number" id="stroke-length" data-testid="stroke-length" min="0.1" step="0.1" value="${r3(strokeLength(s)).toFixed(2)}"></label>`
+        : `<div class="field"><span>Length</span><strong data-testid="stroke-arc-length">${fmt(strokeLength(s), 2)} mm</strong></div>
+      <button class="tool-btn" data-action="stroke-straighten" data-testid="stroke-straighten">Straighten</button>`}
+      <label class="field"><span>Ends</span><select id="stroke-cap" data-testid="stroke-cap"><option value="round" ${s.cap === "round" ? "selected" : ""}>Round</option><option value="flat" ${s.cap === "flat" ? "selected" : ""}>Flat</option></select></label>
+    </div>
+    <p class="small muted" style="margin:0">From (${a.map((v) => fmt(v, 2)).join(", ")}) to (${b.map((v) => fmt(v, 2)).join(", ")}) mm${s.width_mm < 1.2 ? ' · <span class="no">narrower than the 1.2 mm minimum material width: validation will report it</span>' : ""}</p>
+    <div class="row" data-testid="stroke-check">${checkLine}</div>
+    <div class="spread"><details><summary class="small">Edit request (L2 format)</summary><pre class="mono small">${esc(JSON.stringify(op, null, 2))}</pre></details>
+      <div class="row"><button class="small ghost" data-action="cancel-pending">Cancel</button><button class="small primary" data-action="apply-pending" data-testid="stroke-apply" ${busy() ? "disabled" : ""}>Apply</button></div></div>
+  </div>`;
+}
+
+// Numeric fields of the pending connector.
+function strokeField(el, live) {
+  const op = ui.pending;
+  if (!isStroke(op)) return false;
+  const s = op.shape;
+  const v = Number(el.value);
+  if (el.id === "stroke-width") {
+    if (!(v > 0)) return true;
+    s.width_mm = r3(v);
+    ui.barWidth = v;
+  } else if (el.id === "stroke-cap") {
+    s.cap = el.value;
+    ui.strokeCap = el.value;
+  } else if ((el.id === "stroke-angle" || el.id === "stroke-length") && s.path === "line") {
+    const [a, b] = s.points_mm;
+    const len = el.id === "stroke-length" ? v : Math.hypot(b[0] - a[0], b[1] - a[1]);
+    const ang = (el.id === "stroke-angle" ? v : Math.atan2(b[1] - a[1], b[0] - a[0]) * 180 / Math.PI) * Math.PI / 180;
+    if (!(len > 0) || !Number.isFinite(ang)) return true;
+    s.points_mm[1] = [r3(a[0] + len * Math.cos(ang)), r3(a[1] + len * Math.sin(ang))];
+  } else {
+    return false;
+  }
+  if (live) { ui.strokeCheck = null; drawOverlay(); } else strokeChanged();
+  return true;
 }
 
 // ----------------------------------------------------------------------- printability
@@ -1902,13 +2967,15 @@ function printabilityView() {
       <span class="small muted">${esc(est.process.name)} · ${esc(est.checked_utc)}</span></div>
     <p class="small">${est.counts.UNSUPPORTED} unsupported · ${est.counts.RISK} risk · ${est.counts.INFO} info. ${esc(est.basis)}.</p>
     ${findings.length ? `<p class="small"><a href="#" data-action="tab" data-tab="proposal" data-testid="to-resize">Check whether a larger sheet clears these (Physical size) →</a></p>` : ""}
-    ${findingsTable(findings)}
+    <p class="small" style="margin:0">Each finding is shown where it is in <strong>Issues</strong> below.</p>
+    <details class="small" data-testid="findings-table"><summary>Findings table (${findings.length})</summary>${findingsTable(findings)}</details>
     ${info.length ? `<details><summary>${info.length} informational item(s)</summary>${infoList(info)}</details>` : ""}
     <details class="section subtle" data-section="est-maps" ${openAttr("est-maps", findings.length > 0)}>
       <summary><h4 style="margin:0">Layer maps</h4><span class="small muted">${est.map_urls.length} map${est.map_urls.length === 1 ? "" : "s"} · <span class="legend"><span><i style="background:#ff8c00"></i>risk</span><span><i style="background:#ff0000"></i>unsupported</span></span></span></summary>
       <div class="section-body"><div class="gallery compact">${est.map_urls.map((u) => `<figure><img class="img" src="${esc(u)}" alt="map" loading="lazy"><figcaption>${esc(u.split("/").pop().split("?")[0])}</figcaption></figure>`).join("")}</div></div></details>
     <p class="small muted">Physical result: ${badge("outline", "NOT VERIFIED")} — only your test print can confirm these thresholds.</p>
-  </div>` : ""}`;
+  </div>` : ""}
+  ${est ? issuesPanel() : ""}`;
 }
 
 function infoList(items) {
@@ -1943,7 +3010,7 @@ function kitNotice() {
 }
 
 function kitBuildPanel(latest) {
-  const valid = ui.state.draft.status.printable && !ui.state.artwork?.differs_from_planned;
+  const valid = ui.state.draft.status.printable && !ui.state.artwork?.differs_from_planned && !unsavedArt();
   // The build form is the main action until a kit matches the current draft; then it folds away.
   const needed = !latest || latest.stale || latest.status.cad !== "CAD_VALID";
   return `<section class="panel kit-build" data-testid="kit-build">
@@ -1956,7 +3023,8 @@ function kitBuildPanel(latest) {
         <div class="section-body">${processForm("kit")}</div></details>
       ${bambuOption()}
       <div class="row"><button class="${needed ? "primary" : ""}" data-action="build-kit" ${valid && !busy() ? "" : "disabled"}>${latest ? "Build new print kit" : "Build print kit"}</button>
-        ${ui.state.artwork?.differs_from_planned ? '<span class="small no">The artwork was edited after these sheets were planned; plan from the edited artwork or undo the artwork edits (Review &amp; edit → Artwork colors).</span>'
+        ${unsavedArt() ? '<span class="small no" data-testid="kit-unsaved-art">The artwork has unsaved changes; save or discard them first (Review &amp; edit → Artwork editor).</span>'
+          : ui.state.artwork?.differs_from_planned ? '<span class="small no">The artwork was edited after these sheets were planned; plan from the edited artwork or undo the artwork edits (Review &amp; edit → Artwork editor).</span>'
           : valid ? "" : '<span class="small no">The draft is invalid (see Review &amp; edit); invalid drafts are never exported.</span>'}</div>
     </div>
   </section>`;
@@ -2261,7 +3329,15 @@ async function onClick(event) {
       ui.tool = el.dataset.tool; ui.pending = null;
       if (ui.tool !== "inspect" && ui.view === "front") ui.view = "sheet";  // edits act on the selected layer: show it
       render(); break;
-    case "cancel-pending": ui.pending = null; render(); break;
+    case "cancel-pending": ui.pending = null; ui.strokeCheck = null; render(); break;
+    case "stroke-straighten":
+      if (isStroke(ui.pending) && ui.pending.shape.path === "cubic") {
+        const pts = ui.pending.shape.points_mm;
+        pts[1] = lerp(pts[0], pts[3], 1 / 3).map(r3);
+        pts[2] = lerp(pts[0], pts[3], 2 / 3).map(r3);
+        strokeChanged();
+      }
+      break;
     case "apply-pending": if (ui.pending) editOp(ui.pending); break;
     case "propose-op": ui.pending = JSON.parse(el.dataset.op); if (ui.pending.sheet) ui.sheet = ui.pending.sheet; ui.view = "sheet"; setTab("review"); render(); break;
     case "locate":
@@ -2308,13 +3384,53 @@ async function onClick(event) {
       render();
       break;
     case "dismiss-kit-notice": ui.kitNotice = null; render(); break;
-    case "art-mode": ui.art.mode = el.dataset.mode; render(); break;
+    case "art-mode": {
+      if (el.dataset.mode !== "eyedropper" && el.dataset.mode !== ui.art.mode && !(await finalizeShape())) break;
+      const s = ui.art;  // a pending shape became an edit: a new tool starts clean
+      if (el.dataset.mode === "eyedropper") s.prevMode = s.mode === "eyedropper" ? s.prevMode : s.mode;
+      s.mode = el.dataset.mode;
+      s.gap = null;
+      s.stroke = null;
+      render();
+      break;
+    }
     case "art-clear-box": ui.art.box = null; render(); break;
+    case "art-gap-path": {  // Close gap: straight or curved connection between the snapped ends
+      const d = ui.art.draw;
+      if (!d || d.kind !== "gap" || d.path === el.dataset.path) break;
+      const [a, b] = [d.points[0], d.points[d.points.length - 1]];
+      Object.assign(d, el.dataset.path === "cubic" ? { path: "cubic", points: [a, ...bentControls(a, b), b] } : { path: "line", points: [a, b] });
+      await artworkDraw();
+      break;
+    }
+    case "art-straighten": {
+      const d = ui.art.draw;
+      if (!d || d.path !== "cubic") break;
+      d.points.splice(1, 2, ...bentControls(d.points[0], d.points[3], 0));
+      await artworkDraw();
+      break;
+    }
     case "zoom-fit": zoomView(el.dataset.viewKey, "fit"); break;
     case "art-color": await artworkChoose(el.dataset.color, "palette"); break;
-    case "art-view": ui.art.view = el.dataset.view; render(); break;
     case "art-cancel": ui.art = keepArtView(); render(); break;
-    case "art-apply": await artworkApply(); break;
+    case "insp-select": selectIssue(el.dataset.issue); break;
+    case "insp-layer": inspShowLayer(el.dataset.key); break;
+    case "insp-step": {
+      const list = ui.issues && !ui.issues.error ? filteredIssues(ui.issues) : [];
+      if (!list.length) break;
+      const at = list.findIndex((i) => i.id === ui.insp.selected);
+      const step = Number(el.dataset.step);
+      selectIssue(list[at < 0 ? (step > 0 ? 0 : list.length - 1) : (at + step + list.length) % list.length].id);
+      break;
+    }
+    case "insp-edit-layer": inspEditLayer(ui.issues?.issues?.find((i) => i.id === ui.insp.selected)); break;
+    case "insp-edit-artwork": inspEditArtwork(ui.issues?.issues?.find((i) => i.id === ui.insp.selected)); break;
+    case "art-done": await finalizeShape(); break;
+    case "art-remove": discardShape(true); break;
+    case "art-session": await artworkSession(el.dataset.session); break;
+    case "art-discard-ask": ui.art.confirmDiscard = true; render(); $('[data-testid="art-discard-cancel"]')?.focus(); break;
+    case "art-discard-cancel": ui.art.confirmDiscard = false; render(); break;
+    case "art-discard-confirmed": await artworkSession("discard"); break;
     case "art-undo": await artworkPost("undo", el.dataset.keep === undefined ? {} : { keep: Number(el.dataset.keep) }); break;
     case "art-verify": await artworkPost("verify", {}); break;
     case "art-replan": submit(`${project}/artwork/replan`, {}); break;
@@ -2325,10 +3441,24 @@ async function onClick(event) {
 
 function onChange(event) {
   const el = event.target;
+  if (el.id?.startsWith("stroke-") && strokeField(el, false)) return;
   if (el.id === "project-select") {
     location.hash = el.value ? `#/${encodeURIComponent(el.value)}` : "#/";
+  } else if (["insp-kind", "insp-severity"].includes(el.id)) {
+    ui.insp[el.id.slice(5)] = el.value;
+    render();
   } else if (el.id === "art-picker") {
     artworkChoose(el.value.toUpperCase(), "picker");
+  } else if (el.id === "art-width") {
+    const width = Number(el.value);
+    if (!(width > 0 && width <= 50)) { el.value = String(ui.art.width); return; }
+    ui.art.width = Math.round(width * 1000) / 1000;
+    if (ui.art.draw) artworkDraw();  // same stroke, new thickness
+    else render();
+  } else if (el.id === "art-angle" || el.id === "art-length") {
+    const angle = Number($("#art-angle")?.value);
+    const length = Number($("#art-length")?.value);
+    if (Number.isFinite(angle) && length > 0) setShapeGeometry(angle, length);
   } else if (el.id === "f-plan-later") {
     ui.planLater = el.checked;  // no re-render: that would reset the other import fields
     const button = $('[data-action="create"]');
@@ -2384,15 +3514,23 @@ function onChange(event) {
 async function main() {
   document.addEventListener("click", onClick);
   document.addEventListener("change", onChange);
+  // Width, angle and length update the connector preview while typing (the check runs on change).
+  document.addEventListener("input", (e) => { if (e.target.id?.startsWith("stroke-") && e.target.id !== "stroke-cap") strokeField(e.target, true); });
   // Remember sections the user opens or closes (only clicks: renders also toggle <details>).
   document.addEventListener("click", (e) => {
     const details = e.target.closest("summary")?.parentElement;
     if (details?.dataset.section) ui.sections[details.dataset.section] = !details.open;
   });
   window.addEventListener("hashchange", route);
-  window.addEventListener("resize", () => { applyView("edit"); applyArtView(); });
+  window.addEventListener("resize", () => { applyView("edit"); applyArtView(); applyView("insp"); });
   document.addEventListener("keydown", onArtKey);
   document.addEventListener("keyup", onArtKey);
+  document.addEventListener("keydown", onArtShortcut);
+  window.addEventListener("beforeunload", (e) => {  // closing or reloading with unsaved artwork changes
+    if (!unsavedArt()) return;
+    e.preventDefault();
+    e.returnValue = "";
+  });
   try {
     ui.info = await api("GET", "/api/info");
     ui.process = { ...ui.info.process_presets[0] };

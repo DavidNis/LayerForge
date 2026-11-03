@@ -11,6 +11,8 @@ An artwork edit directory holds::
     base.png      the artwork the edits started from (copy; never modified)
     current.png   the artwork after every edit in the log
     edits.json    schema, base hash/origin, ordered edits with their measured effect
+    session/      unsaved working session (optional): edits made on top of current.png that are not
+                  saved yet (session.json, current.png); Save appends them all to edits.json at once
 
 Every edit records the color it replaced and a hash of the exact pixels it changed, so replaying
 the log from ``base.png`` must reproduce ``current.png`` bit for bit (``verify``); undo/revert
@@ -35,6 +37,24 @@ from .model import StackError, hex_color
 ARTWORK_SCHEMA = "layerforge.artwork_edits"
 ARTWORK_VERSION = "1.0.0"
 COLOR_SOURCES = ("palette", "picker", "eyedropper")
+# Ops: recolor one region / several regions; paint a stroke (straight line, or freehand brush clipped to
+# selected regions); close a contour gap (a straight stroke between two snapped contour ends).
+OPS = ("recolor_region", "recolor_regions", "paint_stroke", "close_gap")
+MAX_STROKE_POINTS = 4000
+GAP_SNAP_MM = 2.0
+# A stroke path: "line" (straight segments through the points) or "cubic" Bezier (start, control 1,
+# control 2, end), sampled with a fixed number of segments so a logged edit replays bit-exact.
+STROKE_PATHS = ("line", "cubic")
+CUBIC_SEGMENTS = 64
+# Minimum stroke radius in pixels: sqrt(2)/2 (plus a margin against rounding) makes every stroke one
+# 4-connected set of pixels, so a line or curve is one region and separates the regions on its two
+# sides under the planner's 4-connectivity. Thicker strokes use width / 2.
+MIN_STROKE_RADIUS_PX = 0.7072
+# Stroke rasterization version, saved with every new stroke so a logged edit always replays with the
+# geometry it was applied with. 1: minimum radius 0.5 px (strokes saved before the version was recorded;
+# a 1 px diagonal was only corner-connected); 2: minimum radius MIN_STROKE_RADIUS_PX.
+STROKE_RASTERS = {1: 0.5, 2: MIN_STROKE_RADIUS_PX}
+STROKE_RASTER = 2
 FOUR = ndimage.generate_binary_structure(2, 1)
 
 
@@ -271,20 +291,103 @@ def toggle_region(image: np.ndarray, frame_hex: str | None, regions: list[dict[s
     return regions + [{"at_px": [row, col], **({"box_px": info["box_px"]} if info["box_px"] else {})}]
 
 
+def centre_line(points_px: list[list[int]], path: str = "line") -> list[list[float]]:
+    """The stroke's centre line ([row, col] points): the points themselves, or a sampled cubic Bezier."""
+
+    if path != "cubic":
+        return [[float(v) for v in q] for q in points_px]
+    p0, c1, c2, p3 = (np.array(q, float) for q in points_px)
+    t = np.linspace(0.0, 1.0, CUBIC_SEGMENTS + 1)[:, None]
+    curve = (1 - t) ** 3 * p0 + 3 * (1 - t) ** 2 * t * c1 + 3 * (1 - t) * t**2 * c2 + t**3 * p3
+    return curve.tolist()
+
+
+def stroke_mask(shape: tuple[int, int], points_px: list[list[float]], width_px: float,
+                min_radius_px: float = MIN_STROKE_RADIUS_PX) -> np.ndarray:
+    """Pixels whose centre lies within ``width_px / 2`` of the polyline through ``points_px`` ([row, col]).
+
+    Exact distance to each segment (round ends and joins), evaluated only in each segment's bounding box,
+    so the result is deterministic and independent of any drawing library. Never anti-aliased: a pixel
+    is painted or not. The radius is at least ``min_radius_px`` (by default ``MIN_STROKE_RADIUS_PX``: one
+    4-connected stroke)."""
+
+    out = np.zeros(shape, bool)
+    r = max(float(width_px) / 2.0, min_radius_px)
+    pts = [np.array(q, float) for q in points_px]
+    if len(pts) == 1:
+        pts = pts * 2
+    for a, b in zip(pts[:-1], pts[1:]):
+        r0, r1 = int(np.floor(min(a[0], b[0]) - r)), int(np.ceil(max(a[0], b[0]) + r)) + 1
+        c0, c1 = int(np.floor(min(a[1], b[1]) - r)), int(np.ceil(max(a[1], b[1]) + r)) + 1
+        r0, c0, r1, c1 = max(r0, 0), max(c0, 0), min(r1, shape[0]), min(c1, shape[1])
+        if r0 >= r1 or c0 >= c1:
+            continue
+        rows, cols = np.mgrid[r0:r1, c0:c1].astype(float)
+        d = b - a
+        length2 = float(d @ d)
+        t = np.zeros_like(rows) if length2 == 0 else np.clip(((rows - a[0]) * d[0] + (cols - a[1]) * d[1]) / length2, 0, 1)
+        dist = np.hypot(rows - (a[0] + t * d[0]), cols - (a[1] + t * d[1]))
+        out[r0:r1, c0:c1] |= dist <= r
+    return out
+
+
+def snap_to_color(image: np.ndarray, at: tuple[int, int], rgb: tuple[int, int, int], radius_px: float) -> tuple[int, int] | None:
+    """The pixel of color ``rgb`` nearest to ``at`` within ``radius_px`` (ties: lowest row, then column)."""
+
+    row, col = at
+    r = int(np.ceil(radius_px))
+    r0, c0 = max(row - r, 0), max(col - r, 0)
+    window = _color_mask(image[r0:row + r + 1, c0:col + r + 1], rgb)
+    if not window.any():
+        return None
+    ys, xs = np.nonzero(window)
+    dist = np.hypot(ys + r0 - row, xs + c0 - col)
+    best = np.lexsort((xs, ys, dist))[0]
+    if dist[best] > radius_px:
+        return None
+    return int(ys[best] + r0), int(xs[best] + c0)
+
+
 def check_op(op: Any) -> dict[str, Any]:
     """Normalized request: ``recolor_region`` (at_px, optional box_px) or ``recolor_regions`` (regions:
     a multi-region selection recolored at once as one edit), plus color, source and sampled_at_px."""
 
     if not isinstance(op, dict):
-        raise ArtworkError("an artwork edit needs op 'recolor_region' or 'recolor_regions'")
+        raise ArtworkError(f"an artwork edit needs op one of {', '.join(OPS)}")
     kind = op.get("op") or ("recolor_regions" if "regions" in op else "recolor_region")
-    if kind not in ("recolor_region", "recolor_regions"):
-        raise ArtworkError("an artwork edit needs op 'recolor_region' or 'recolor_regions'")
+    if kind not in OPS:
+        raise ArtworkError(f"an artwork edit needs op one of {', '.join(OPS)}")
     source = op.get("source", "picker")
     if source not in COLOR_SOURCES:
         raise ArtworkError(f"source must be one of {', '.join(COLOR_SOURCES)}")
     out: dict[str, Any] = {"op": kind, "color": "#%02X%02X%02X" % parse_hex(op.get("color")), "source": source}
-    if kind == "recolor_regions":
+    if kind in ("paint_stroke", "close_gap"):
+        try:
+            width = float(op.get("width_mm"))
+            points = [[int(round(float(v))) for v in q] for q in (op.get("points_px") or [])]
+        except (TypeError, ValueError):
+            raise ArtworkError("a stroke needs width_mm and points_px [[row, column], ...] in artwork pixels") from None
+        if not (0 < width <= 50):
+            raise ArtworkError("the thickness must be between 0 and 50 mm")
+        path = op.get("path") or "line"
+        if path not in STROKE_PATHS:
+            raise ArtworkError(f"a stroke path must be one of {', '.join(STROKE_PATHS)}")
+        need = (4, 4) if path == "cubic" else (2, 2) if kind == "close_gap" else (1, MAX_STROKE_POINTS)
+        if not (need[0] <= len(points) <= need[1]) or any(len(q) != 2 for q in points):
+            raise ArtworkError("a curve needs 4 points: start, control 1, control 2, end" if path == "cubic"
+                               else "close_gap needs the two end points" if kind == "close_gap"
+                               else f"a stroke needs 1 to {MAX_STROKE_POINTS} points [row, column]")
+        raster = op.get("stroke_raster", STROKE_RASTER)
+        if raster not in STROKE_RASTERS or isinstance(raster, bool):
+            raise ArtworkError(f"stroke_raster must be one of {', '.join(map(str, STROKE_RASTERS))}")
+        out.update(points_px=points, width_mm=round(width, 3), stroke_raster=raster)
+        if path == "cubic":
+            out["path"] = "cubic"  # absent for straight strokes, so earlier logged edits keep their form
+        if kind == "paint_stroke" and op.get("clip_regions"):
+            out["clip_regions"] = check_regions(op["clip_regions"])  # paint only inside these regions
+        if kind == "close_gap":
+            out["snap_color"] = "#%02X%02X%02X" % parse_hex(op.get("snap_color") or op.get("color"))
+    elif kind == "recolor_regions":
         out["regions"] = check_regions(op.get("regions"))
         if not out["regions"]:
             raise ArtworkError("no region is selected")
@@ -319,7 +422,10 @@ def plan_edit(image: np.ndarray, op: dict[str, Any], frame_hex: str | None,
         sampled = hex_color(tuple(int(v) for v in image[row, col]))
         if sampled != op["color"]:
             raise ArtworkError(f"the eyedropper point now has {sampled}, not {op['color']}; sample again")
-    if op["op"] == "recolor_regions":
+    if op["op"] in ("paint_stroke", "close_gap"):
+        mask, selection = _stroke_selection(image, op, frame_hex, mm_per_pixel)
+        froms = selection["colors"]
+    elif op["op"] == "recolor_regions":
         mask, selection = select_regions(image, frame_hex, op["regions"], mm_per_pixel)
         if selection["colors"] == [op["color"]]:
             raise ArtworkError(f"every selected region already has {op['color']}; nothing would change")
@@ -331,6 +437,47 @@ def plan_edit(image: np.ndarray, op: dict[str, Any], frame_hex: str | None,
         froms = selection["color"]
     after = recolor(image, mask, op["color"], frame_hex)  # all selected pixels at once, nothing else
     return after, mask, selection, change_summary(image, after, mask, froms, op["color"], frame_hex)
+
+
+def _stroke_selection(image: np.ndarray, op: dict[str, Any], frame_hex: str | None,
+                      mm_per_pixel: float) -> tuple[np.ndarray, dict[str, Any]]:
+    """The pixels a line, brush stroke or gap closure paints, described like a selection."""
+
+    for q in op["points_px"]:
+        check_point(image, q)
+    points = op["points_px"]
+    if op["op"] == "close_gap":  # each end snaps to the nearest contour pixel, so the closure meets it
+        rgb = parse_hex(op["snap_color"])
+        snapped = []
+        for q in (points[0], points[-1]):  # only the ends snap; control points stay where they are
+            hit = snap_to_color(image, (q[0], q[1]), rgb, GAP_SNAP_MM / mm_per_pixel)
+            if hit is None:
+                raise ArtworkError(f"no {op['snap_color']} contour within {GAP_SNAP_MM:g} mm of {q}; click closer to its end")
+            snapped.append(list(hit))
+        if snapped[0] == snapped[1]:
+            raise ArtworkError("both ends snapped to the same pixel; click the two ends of the gap")
+        points = [snapped[0], *points[1:-1], snapped[1]]  # a curved closure keeps its control points
+    line = centre_line(points, op.get("path", "line"))
+    radius = STROKE_RASTERS[op.get("stroke_raster", STROKE_RASTER)]
+    mask = stroke_mask(image.shape[:2], line, op["width_mm"] / mm_per_pixel, radius) & artwork_area(image, frame_hex)
+    clip = None
+    if op.get("clip_regions"):
+        clip, _ = select_regions(image, frame_hex, op["clip_regions"], mm_per_pixel)
+        mask &= clip
+    changed = mask & np.any(image != np.asarray(parse_hex(op["color"]), np.uint8), axis=2)
+    if not changed.any():
+        raise ArtworkError("the stroke changes no pixel" + (" inside the selected region(s)" if clip is not None else ""))
+    rows, cols = np.nonzero(mask)
+    colors = sorted({hex_color(tuple(int(v) for v in c)) for c in np.unique(image[changed].reshape(-1, 3), axis=0)})
+    selection = {
+        "color": colors[0] if len(colors) == 1 else "mixed", "colors": colors, "regions": 1, "items": [],
+        "pixels": int(mask.sum()), "area_mm2": round(float(mask.sum()) * mm_per_pixel**2, 3),
+        "bbox_px": [int(rows.min()), int(cols.min()), int(rows.max()) + 1, int(cols.max()) + 1],
+        "regions_of_color": None, "limited_by_box": clip is not None, "whole_region_pixels": int(mask.sum()),
+        "box_px": None, "region_sha256": mask_sha256(mask), "stroke_points_px": points,
+        "clipped_to_regions": len(op.get("clip_regions") or []),
+    }
+    return mask, selection
 
 
 # -- previews ------------------------------------------------------------------------------------
@@ -404,6 +551,15 @@ def start(directory: Path, base: np.ndarray, origin: dict[str, Any], frame_hex: 
     return log
 
 
+def _as_logged(op: dict[str, Any]) -> dict[str, Any]:
+    """A saved op as it was applied: a stroke saved without ``stroke_raster`` predates the version and
+    was drawn with version 1, so it replays with that geometry rather than the current default."""
+
+    if op.get("op") in ("paint_stroke", "close_gap") and "stroke_raster" not in op:
+        return {**op, "stroke_raster": 1}
+    return op
+
+
 def replay(directory: Path, log: dict[str, Any], count: int | None = None) -> np.ndarray:
     """``base.png`` with the first ``count`` edits (all by default), each checked against its record."""
 
@@ -412,11 +568,25 @@ def replay(directory: Path, log: dict[str, Any], count: int | None = None) -> np
         raise ArtworkError("artwork base.png does not match its recorded hash; the edit log cannot be trusted")
     frame, mpp = log["base"]["frame_color"], log["base"]["mm_per_pixel"]
     for entry in log["edits"][:count]:
-        after, mask, selection, _ = plan_edit(image, check_op(entry["op"]), frame, mpp)
+        after, mask, selection, _ = plan_edit(image, check_op(_as_logged(entry["op"])), frame, mpp)
         if selection["color"] != entry["from"] or mask_sha256(mask) != entry["region_sha256"]:
             raise ArtworkError(f"artwork edit #{entry['index']} no longer selects the same pixels; the log does not replay")
         image = after
     return image
+
+
+def _entry(image: np.ndarray, op: dict[str, Any], frame: str | None, mpp: float,
+           index: int) -> tuple[np.ndarray, dict[str, Any]]:
+    """(after, log entry) of one checked op on ``image``: what it replaced and the exact pixels it changed."""
+
+    after, mask, selection, change = plan_edit(image, op, frame, mpp)
+    entry = {"index": index, "op": op, "from": selection["color"],
+             "from_colors": selection.get("colors", [selection["color"]]), "to": op["color"],
+             "region_sha256": mask_sha256(mask), "selection": {**{k: selection[k] for k in (
+                 "pixels", "area_mm2", "bbox_px", "regions_of_color", "limited_by_box", "whole_region_pixels")},
+                 "regions": selection.get("regions", 1)},
+             "change": change, "palette_after": palette_summary(after, frame, mpp), "applied_utc": _now()}
+    return after, entry
 
 
 def apply(directory: Path, op: dict[str, Any]) -> tuple[np.ndarray, dict[str, Any]]:
@@ -430,13 +600,7 @@ def apply(directory: Path, op: dict[str, Any]) -> tuple[np.ndarray, dict[str, An
     if rgb_sha256(image) != log["current_sha256"]:
         raise ArtworkError("current.png does not match the edit log; verify or undo to rebuild it")
     frame, mpp = log["base"]["frame_color"], log["base"]["mm_per_pixel"]
-    after, mask, selection, change = plan_edit(image, op, frame, mpp)
-    entry = {"index": len(log["edits"]) + 1, "op": op, "from": selection["color"],
-             "from_colors": selection.get("colors", [selection["color"]]), "to": op["color"],
-             "region_sha256": mask_sha256(mask), "selection": {**{k: selection[k] for k in (
-                 "pixels", "area_mm2", "bbox_px", "regions_of_color", "limited_by_box", "whole_region_pixels")},
-                 "regions": selection.get("regions", 1)},
-             "change": change, "palette_after": palette_summary(after, frame, mpp), "applied_utc": _now()}
+    after, entry = _entry(image, op, frame, mpp, len(log["edits"]) + 1)
     save_rgb(after, directory / "current.png")
     log["edits"].append(entry)
     log["current_sha256"] = rgb_sha256(after)
@@ -481,3 +645,176 @@ def verify(directory: Path) -> dict[str, Any]:
         problems.append("current.png does not match the hash recorded in edits.json")
     return {"edits": len(log["edits"]), "replay_identical": identical and not problems, "problems": problems,
             "current_sha256": rgb_sha256(saved), "checked_utc": _now()}
+
+
+# -- working session: unsaved edits on top of the saved artwork ------------------------------------
+# Edits are made one after another in a session (each on the result of the previous one) and saved
+# together.  The session is kept on disk, so it survives a reload or a restart (recovery), but it is
+# not part of the edit log: nothing reads it as saved or planned artwork until Save appends its edits
+# to ``edits.json`` (the same entries ``apply`` writes, replayed and checked again first).
+SESSION_SCHEMA = "layerforge.artwork_session"
+SESSION_VERSION = "1.0.0"
+SESSION_DIR = "session"
+
+
+def read_session(directory: Path) -> dict[str, Any] | None:
+    path = Path(directory) / SESSION_DIR / "session.json"
+    if not path.is_file():
+        return None
+    session = json.loads(path.read_text(encoding="utf-8"))
+    if session.get("schema") != SESSION_SCHEMA or session.get("version") != SESSION_VERSION:
+        raise ArtworkError(f"{path} is not a {SESSION_SCHEMA} {SESSION_VERSION} session")
+    return session
+
+
+def _write_session(directory: Path, session: dict[str, Any], image: np.ndarray) -> None:
+    folder = Path(directory) / SESSION_DIR
+    folder.mkdir(parents=True, exist_ok=True)
+    save_rgb(image, folder / "current.png")
+    session["current_sha256"] = rgb_sha256(image)
+    session["updated_utc"] = _now()
+    partial = folder / "session.json.partial"
+    partial.write_text(json.dumps(session, indent=2) + "\n", encoding="utf-8")
+    partial.replace(folder / "session.json")
+
+
+def session_stale(log: dict[str, Any], session: dict[str, Any]) -> bool:
+    """True when the saved artwork changed under the session (its edits were made on other pixels)."""
+
+    return session["base_sha256"] != log["current_sha256"]
+
+
+def _session_replay(directory: Path, log: dict[str, Any], entries: list[dict[str, Any]]) -> np.ndarray:
+    """The saved artwork with ``entries`` replayed in order, each checked against its record."""
+
+    image = load_rgb(Path(directory) / "current.png")
+    if rgb_sha256(image) != log["current_sha256"]:
+        raise ArtworkError("current.png does not match the edit log; verify or undo to rebuild it")
+    frame, mpp = log["base"]["frame_color"], log["base"]["mm_per_pixel"]
+    for number, entry in enumerate(entries, 1):
+        after, mask, selection, _ = plan_edit(image, check_op(entry["op"]), frame, mpp)
+        if selection["color"] != entry["from"] or mask_sha256(mask) != entry["region_sha256"]:
+            raise ArtworkError(f"unsaved change {number} no longer selects the same pixels; discard the unsaved changes")
+        image = after
+    return image
+
+
+def session_image(directory: Path, log: dict[str, Any], session: dict[str, Any] | None) -> np.ndarray:
+    """The working artwork: the session's result (rebuilt by replay if its file does not match), else
+    the saved artwork."""
+
+    directory = Path(directory)
+    if session is None:
+        return load_rgb(directory / "current.png")
+    if session_stale(log, session):
+        raise ArtworkError("the saved artwork changed after these unsaved changes were made; discard them")
+    file = directory / SESSION_DIR / "current.png"
+    if file.is_file():
+        image = load_rgb(file)
+        if rgb_sha256(image) == session["current_sha256"]:
+            return image
+    return _session_replay(directory, log, session["ops"])
+
+
+def _session_or_new(directory: Path, log: dict[str, Any]) -> dict[str, Any]:
+    session = read_session(directory)
+    if session is not None:
+        return session
+    return {"schema": SESSION_SCHEMA, "version": SESSION_VERSION, "started_utc": _now(),
+            "base_sha256": log["current_sha256"], "ops": [], "redo": [], "current_sha256": log["current_sha256"]}
+
+
+def _log_or_error(directory: Path) -> dict[str, Any]:
+    log = read_log(directory)
+    if log is None:
+        raise ArtworkError("no artwork edit log")
+    return log
+
+
+def session_add(directory: Path, op: dict[str, Any]) -> tuple[np.ndarray, dict[str, Any], dict[str, Any]]:
+    """Make one checked op on the working artwork (unsaved). Returns (image, entry, session)."""
+
+    directory = Path(directory)
+    log = _log_or_error(directory)
+    session = _session_or_new(directory, log)
+    image = session_image(directory, log, session)
+    after, entry = _entry(image, op, log["base"]["frame_color"], log["base"]["mm_per_pixel"],
+                          len(log["edits"]) + len(session["ops"]) + 1)
+    session["ops"].append(entry)
+    session["redo"] = []  # a new edit ends the redo chain
+    _write_session(directory, session, after)
+    return after, entry, session
+
+
+def session_undo(directory: Path) -> tuple[np.ndarray, dict[str, Any]]:
+    """Take back the last unsaved edit (it can be redone)."""
+
+    directory = Path(directory)
+    log = _log_or_error(directory)
+    session = read_session(directory)
+    if session is None or not session["ops"]:
+        raise ArtworkError("there is no unsaved artwork change to undo")
+    session_image(directory, log, session)  # refuses a stale session
+    session["redo"].append(session["ops"].pop())
+    image = _session_replay(directory, log, session["ops"])
+    _write_session(directory, session, image)
+    return image, session
+
+
+def session_redo(directory: Path) -> tuple[np.ndarray, dict[str, Any]]:
+    """Make the last undone unsaved edit again; it must change exactly the same pixels."""
+
+    directory = Path(directory)
+    log = _log_or_error(directory)
+    session = read_session(directory)
+    if session is None or not session["redo"]:
+        raise ArtworkError("there is no undone artwork change to redo")
+    image = session_image(directory, log, session)
+    entry = session["redo"].pop()
+    frame, mpp = log["base"]["frame_color"], log["base"]["mm_per_pixel"]
+    after, mask, selection, _ = plan_edit(image, check_op(entry["op"]), frame, mpp)
+    if selection["color"] != entry["from"] or mask_sha256(mask) != entry["region_sha256"]:
+        raise ArtworkError("the undone change no longer selects the same pixels; make it again")
+    session["ops"].append(entry)
+    _write_session(directory, session, after)
+    return after, session
+
+
+def session_discard(directory: Path) -> int:
+    """Drop the session (its unsaved edits and redo steps); the saved artwork is not touched."""
+
+    import shutil
+
+    directory = Path(directory)
+    try:
+        session = read_session(directory)
+    except (ArtworkError, json.JSONDecodeError):
+        session = None  # an unreadable session is dropped too
+    shutil.rmtree(directory / SESSION_DIR, ignore_errors=True)
+    return len(session["ops"]) if session else 0
+
+
+def session_save(directory: Path) -> tuple[np.ndarray, list[dict[str, Any]]]:
+    """Save every unsaved edit together: replayed and checked on the saved artwork, then appended to
+    the log as ordinary entries (one batch id) with one write of ``current.png`` and ``edits.json``."""
+
+    directory = Path(directory)
+    log = _log_or_error(directory)
+    session = read_session(directory)
+    if session is None or not session["ops"]:
+        raise ArtworkError("there are no unsaved artwork changes to save")
+    if session_stale(log, session):
+        raise ArtworkError("the saved artwork changed after these unsaved changes were made; discard them")
+    image = _session_replay(directory, log, session["ops"])
+    if rgb_sha256(image) != session["current_sha256"]:
+        raise ArtworkError("the unsaved changes do not reproduce the working artwork; nothing was saved")
+    saved_utc = _now()
+    batch = f"save_{len({e['batch'] for e in log['edits'] if e.get('batch')}) + 1:03d}"
+    entries = [{**entry, "index": len(log["edits"]) + n, "batch": batch, "saved_utc": saved_utc}
+               for n, entry in enumerate(session["ops"], 1)]
+    save_rgb(image, directory / "current.png")
+    log["edits"].extend(entries)
+    log["current_sha256"] = rgb_sha256(image)
+    _write_log(directory, log)
+    session_discard(directory)
+    return image, entries

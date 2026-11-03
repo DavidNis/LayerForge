@@ -11,7 +11,8 @@ outside the perimeter band, a point outside the sheet) raise ``EditError``.
 Geometry follows the existing Boolean model on the stack grid: ``add`` is a
 union and ``subtract`` a difference with a region, where a region is a
 ``geometry.shape_from_spec`` primitive in sheet millimetres (CAD x right, y up,
-origin at the outer sheet's bottom-left corner), a ``bar`` (bridge), or a
+origin at the outer sheet's bottom-left corner), a ``bar`` (bridge), a ``stroke``
+(a straight or cubic Bezier centre line with a width: an editable connector), or a
 binary mask PNG.
 
 Hybrid precision.  ``"precision": "raster"`` (the default when the key is absent,
@@ -152,8 +153,33 @@ def point_to_pixel(stack: SheetStack, point_mm: Any) -> tuple[int, int]:
     return row, col
 
 
+# A stroke's centre line: "line" (2 points) or "cubic" Bezier (start, control 1, control 2, end).
+# The curve is sampled with a fixed number of segments so replaying a logged edit is bit-exact.
+STROKE_PATHS = {"line": 2, "cubic": 4}
+STROKE_CAPS = {"round": 1, "flat": 2}
+STROKE_SEGMENTS = 64
+
+
+def stroke_centre_line(spec: dict[str, Any]) -> list[tuple[float, float]]:
+    """The sampled centre line of a ``stroke`` shape, in sheet mm."""
+
+    path = spec.get("path", "line")
+    if path not in STROKE_PATHS:
+        raise EditError(f"stroke path must be one of {sorted(STROKE_PATHS)}, got {path!r}")
+    points = [tuple(float(v) for v in p) for p in spec["points_mm"]]
+    if len(points) != STROKE_PATHS[path] or any(len(p) != 2 or not all(np.isfinite(p)) for p in points):
+        raise EditError(f"a {path} stroke needs {STROKE_PATHS[path]} points [x, y] in mm")
+    if path == "line":
+        return points
+    p0, c1, c2, p3 = (np.array(p) for p in points)
+    t = np.linspace(0.0, 1.0, STROKE_SEGMENTS + 1)[:, None]
+    curve = (1 - t) ** 3 * p0 + 3 * (1 - t) ** 2 * t * c1 + 3 * (1 - t) * t**2 * c2 + t**3 * p3
+    return [tuple(map(float, q)) for q in curve]
+
+
 def shape_geometry(spec: dict[str, Any]):
-    """``geometry.shape_from_spec`` primitives plus ``bar`` (from_mm, to_mm, width_mm)."""
+    """``geometry.shape_from_spec`` primitives plus ``bar`` (from_mm, to_mm, width_mm) and ``stroke``
+    (path "line" | "cubic", points_mm, width_mm, cap "round" | "flat")."""
 
     from shapely.geometry import LineString
 
@@ -168,6 +194,17 @@ def shape_geometry(spec: dict[str, Any]):
             if width <= 0:
                 raise EditError("bar width must be positive")
             return LineString([spec["from_mm"], spec["to_mm"]]).buffer(width / 2, cap_style=2)
+        if spec.get("type") == "stroke":
+            width = float(spec["width_mm"])
+            if width <= 0:
+                raise EditError("stroke width must be positive")
+            cap = spec.get("cap", "round")
+            if cap not in STROKE_CAPS:
+                raise EditError(f"stroke cap must be one of {sorted(STROKE_CAPS)}, got {cap!r}")
+            line = LineString(stroke_centre_line(spec))
+            if line.length <= 0:
+                raise EditError("a stroke needs two different end points")
+            return line.buffer(width / 2, cap_style=STROKE_CAPS[cap], join_style=1)
         return shape_from_spec(spec)
     except (KeyError, TypeError, ValueError) as error:
         raise EditError(f"invalid shape {spec}: {error}") from error

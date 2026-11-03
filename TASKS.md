@@ -308,3 +308,39 @@ No complete UI/server, arbitrary photographic depth estimation, frame design, gl
   (Shift+Click toggle, mixed colors, limit box) with batch recolor as one undoable edit.
 - [x] exe/zip rebuilt with zoom/pan and multi-region selection (2026-10-30 15:49); packaged tests 6 PASS.
 - [ ] Not done: Hebrew guide chapter 12 does not describe zoom/pan or Shift+Click yet.
+
+## Line / Curve connectors (2026-10-31)
+
+- [x] `stroke` shape (line, cubic Bezier) committed via `add`; dry-run `edit/check`; editable pending connector UI
+  (handles, body move, width/angle/length, caps, straighten) with material-accurate preview; Bridge removed from
+  the toolbar, `bridge` edits still replay.
+- [x] Tests: `tests/test_stroke_connectors.py` (geometry, invalid requests, hidden island connection by line and
+  curve, 1.2 mm rule, visible change needs approval, replay/undo incl. old bridge edits, dry run saves nothing, CAD
+  export of a curve); browser drive extended (toolbar, handle drag, numeric fields, check, apply, undo, curve bend).
+- [ ] Not done: exe/zip rebuild; Hebrew guide still describes Bridge.
+
+## Artwork painting operations (2026-11-01)
+
+- [x] Fill tool (click a region -> preview with the chosen color); Replace color = Select + color (existing).
+- [x] Line (drag, chosen thickness), Brush (freehand, only inside the selected regions), Close gap (two clicks
+  snapped to the contour color within 2 mm); color choosable without a selection for these tools; live overlay at
+  the real thickness; history labels per op; color and thickness kept between strokes.
+- [x] Tests: `tests/test_artwork_paint.py` (13: exact line pixels, frame kept, brush clipped, gap closes the region,
+  invalid requests, log replay/undo, server line + brush); browser drive extended (Fill, Line, Brush, Close gap,
+  revert).
+- [x] exe/zip rebuilt 2026-11-01 16:11 (packaged tests not run).
+- [ ] Not done: Hebrew guide does not describe the paint tools; palette swatches in a reviewed
+  project appear only after the first artwork preview (Custom and Sample color work before that).
+
+## Artwork editor: Line, Curve, Fill, Close gap, restricted painting (2026-11-01)
+
+- [x] Curve tool (cubic, draggable control points); Line/Curve/Close gap editable before Apply (end and control
+  points, thickness, angle/length, Straight/Curved gap, Straighten); 4-connected strokes split regions; Fill of
+  split regions; panel renamed Artwork editor; wording "artwork edits" instead of "region recolors" in the UI and
+  server messages.
+- [x] Tests: `tests/test_artwork_paint.py` now 20 (line-created splits incl. 1 px diagonals, curve boundary, curved
+  gap, save/reload/replay/undo with curves and fills, server: curve splits the reviewed sail, fill one part, export
+  blocked, reload, undo, explicit re-plan with the attempt archived and the source unchanged); browser drive
+  extended (line end drag + typed angle, curve control drag, fill of the cut-off sail part, curved gap).
+- [ ] Not done: test_l4_app and packaged tests not run (2 GB free memory); exe/zip not rebuilt; Hebrew guide not
+  updated; Brush is the only region-restricted tool (Line/Curve are not clipped to a selection).

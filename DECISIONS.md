@@ -751,3 +751,143 @@ FDM thresholds remain generic assumptions until a print calibrates them).
     fits, arrows pan; zoom range fit .. 40x fit; viewport resize keeps the same centre. Viewport only: pixel
     data, resolution, physical dimensions and geometry are untouched; hit-testing maps through the image's
     on-screen rectangle.
+- 2026-10-31 Line / Curve connectors replace the rigid Bridge tool in the editor (user instruction):
+  - DESIGN_CHOICE: new shape `stroke` in `core.editing.shape_geometry`: `path` "line" (2 points) or "cubic"
+    (start, control 1, control 2, end), `width_mm`, `cap` round | flat; the centre line (cubic sampled with a
+    fixed 64 segments, so replay is bit-exact) is buffered by half the width with round joins. It is committed
+    with the existing `add` op (union with the selected sheet, exact vector precision by default), so
+    validation (4-connectivity, 1.2 mm width incl. the exact vector check), the visible-change approval
+    (Accept front view as artwork), undo/revert/replay and CAD export are the existing machinery.
+  - The `bridge` op is unchanged: saved Bridge edits replay identically; the Bridge button is removed from the
+    toolbar (Add: circle, rectangle, Line, Curve).
+  - UI: a drag creates an editable pending connector; drag the ends, the two Bezier handles (curve; an end
+    carries its handle) or the body (move); Shift snaps a line to 15 degree steps; numeric width (live), ends,
+    angle and length (line), arc length + Straighten (curve). The preview draws the real material (width,
+    caps, sheet color), not a guide line. A dry run (`POST .../edit/check` -> `review.check_edit`, nothing
+    saved) reports hidden vs visible change and the validation result before Apply.
+- 2026-11-01 Artwork painting operations in Artwork colors (user instruction: fill, line, close gap, replace, brush):
+  - Fill by clicked region and Replace a region's color are the existing region recolor (`recolor_region` /
+    `recolor_regions`); a new Fill tool previews on the click with the chosen color (no separate Apply flow).
+  - DESIGN_CHOICE: new artwork ops `paint_stroke` (points_px [row, col], width_mm, optional `clip_regions`) and
+    `close_gap` (two end points, width_mm, `snap_color` defaulting to the paint color). Rasterization is our own
+    exact per-segment distance test (pixel centre within width/2 of the polyline, round ends/joins), so replay is
+    bit-exact without a drawing library. Frame pixels are never painted; the frame color is refused.
+  - Brush = `paint_stroke` with `clip_regions`: the stroke mask is intersected with the selected regions (the same
+    `select_regions` resolution as a batch recolor), so nothing outside them can change.
+  - Close gap: each click snaps to the nearest pixel of `snap_color` within 2 mm (ties: lowest row, then column);
+    no such pixel, or both ends on one pixel, is an error, never a guess.
+  - A stroke thinner than 1.2 mm is allowed and labelled (the planner may only show it through cutouts or report
+    it); planner and validators unchanged; sheets change only via Plan sheets from this artwork.
+  - Each stroke is one logged, previewed, undoable edit; replay checks its pixel mask hash like a recolor.
+- 2026-11-01 Artwork editor (user instruction: dedicated artwork editor with Line, Curve, Fill, Close gap,
+  region-restricted painting; reuse the Artwork colors infrastructure):
+  - The Artwork colors panel becomes the "Artwork editor" (same log, selection, palette, undo/history, planning
+    flow); it edits only the flat-color artwork, never sheets.
+  - DESIGN_CHOICE: strokes take an optional `path: "cubic"` (start, control 1, control 2, end; sampled with a
+    fixed 64 segments, so replay is bit-exact); `close_gap` may be cubic too (only the two ends snap, the
+    control points stay). Straight strokes keep the earlier op form (no `path` key).
+  - DESIGN_CHOICE: the minimum stroke radius is sqrt(2)/2 px (0.7072), not 0.5 px. A thinner stroke steps
+    diagonally and is not 4-connected, so a thin diagonal line would neither be one region nor split the region it
+    crosses under the planner's 4-connectivity. With this minimum every line/curve is one 4-connected region and
+    separates the regions on its two sides (tested for horizontal, diagonal and steep 1 px lines; the tests fail
+    with the old 0.5 px minimum). Line, curve and gap strokes made earlier today with < 1.42 px thickness would
+    replay differently; none were committed.
+  - One Line tool and one Curve tool: there is no separate "region-creating" line; any stroke that crosses a region
+    splits it (pixels only, no hidden boundary data). Line, Curve and Close gap stay pending and editable until
+    Apply (drag ends / control points; thickness; angle and length for straight shapes; Straight/Curved for a gap;
+    Straighten for a curve); every change is previewed with the exact pixels. Nothing is applied without Apply.
+  - Pixels are painted or not (no anti-aliasing); the only new palette entry possible is the chosen color.
+  - The planning button keeps the user-approved label "Plan sheets from this artwork" (the user reverted the
+    earlier "Try Again" rename on 2026-10-30); it is the Try Again workflow (explicit, archives the attempt).
+- 2026-11-01 Artwork editor release fixes:
+  - Correction to the entry above: strokes with the 0.5 px minimum radius were not committed, but the exe built
+    2026-11-01 16:11 shipped them, so a user's saved projects can contain them. DESIGN_CHOICE: every new stroke
+    records `stroke_raster: 2` (minimum radius 0.7072 px); a saved stroke without the key predates the version
+    and replays with `stroke_raster: 1` (0.5 px), so replay, verify and undo reproduce its original pixels.
+    Saved records are never rewritten. Regression test pins the old geometry exactly and fails without the
+    rule (mutation check).
+  - OBSERVED: the server traceback in the test run was `POST /edit/check` (the layer editor's connector dry run)
+    answered after the browser drive had already killed the browser: the reply hit a reset socket
+    (ConnectionResetError), the catch-all then logged a false 500 and tried to send it on the same dead socket,
+    and socketserver printed the second error. The check itself succeeded; no data was affected. Fix: a client
+    disconnect while replying is closed quietly (no 500, no traceback); real errors are still reported.
+    Regression test through the real server (fails without the fix).
+  - OBSERVED: test_l4_app failed intermittently (test_kit_delete..., a cross-origin POST): the server answered 403
+    without reading the request body, and on Windows closing a socket with unread data resets it, so the client
+    sometimes lost the reply (ConnectionAbortedError). Pre-existing, not from the artwork editor. Fix: any error
+    reply first reads an unread request body (up to the upload limit; larger: the connection is closed).
+    Regression test sends 120 refused requests with bodies (failed 2 of 3 runs without the fix, 5 of 5 pass with it).
+- 2026-11-02 Artwork editor working session (user instruction: batch editing with one Save Changes):
+  - DESIGN_CHOICE: unsaved edits live in a server-side session (`artwork/session/session.json` + `current.png`)
+    on top of the saved `current.png`. Every completed edit (Fill, Line, Curve, Brush, Close gap, region
+    recolor) is added at once and the next edit works on the result. The session is on disk, so a reload or
+    restart recovers it (shown as "recovered"). It is never read as saved or planned artwork.
+  - Save Changes replays every unsaved edit on the saved artwork, checks each against its recorded pixels and
+    appends them to `edits.json` as ordinary entries with one `batch` id (`save_NNN`) in one write. The log
+    format is unchanged apart from the optional `batch`/`saved_utc` keys, so earlier projects load, replay
+    and undo as before (no migration).
+  - Undo/Redo step through single unsaved edits (redo must change exactly the same pixels); a new edit ends
+    the redo chain. Discard drops the session after an inline confirmation; the saved artwork is untouched.
+  - While unsaved edits exist the server refuses print-kit export, planning, physical resize, re-running
+    intake, Upscale, a direct single-edit apply and undo of saved edits ("save or discard first"); the UI
+    disables Plan sheets from this artwork and Build print kit with the same reason. After Save the planning
+    button is enabled; planning never starts by itself.
+  - Line, Curve and Close gap stay editable (points, thickness, angle/length, straight/curved) until Done
+    (or Enter); starting the next shape, changing tool or Save Changes finishes the pending shape first,
+    Remove/Escape drops it. A finished shape is an unsaved edit, not a saved one.
+  - The page asks before leaving the project or closing/reloading while unsaved edits exist (confirm /
+    beforeunload); the edits stay recoverable either way.
+  - The earlier preview + Apply panel for routine edits is gone; the server's preview/apply API is kept
+    for compatibility (apply is refused while a session has edits).
+- 2026-11-03 Visual Issue Inspector (user instruction: visual, actionable diagnostics):
+  - `core/issues.py` + `GET /api/projects/<p>/issues`: every issue comes from an existing check, evaluated by the
+    same functions and thresholds; nothing decides PASS/FAIL or edits geometry. Sources: the review draft's sheet
+    validation (else the selected candidate's), the latest FDM estimate, and the proposal's obstruction map and
+    unmatched-region map. Results are cached per input file state and recomputed only from new validation results.
+  - Localized precisely (OBSERVED in tests): floating material (4-neighbor pieces not reaching the perimeter);
+    material held by a too-narrow connection (`audit_connection_width` orphan cores: highlight = the affected
+    material, i.e. the orphan core dilated by the audit kernel within the material, not the neck itself; measured =
+    the audit's discrete widest passing kernel, threshold = the required kernel on this grid, nominal 1.2 mm);
+    thin visible decorative material (warning only); perimeter gaps; visible pixels outside the material;
+    front-view vs artwork mismatch (exact pixels); FDM openings that may close, narrow parts of openings, openings
+    with a narrow neck and thin material (exact polygons, the estimate's own process thresholds); planner-blocked
+    features of a failed closure (exact obstruction pixels; width = the existing resize estimate); unmatched intake
+    regions (exact pixels).
+  - Not localized (listed under "diagnostics without a location", never placed approximately): build volume, layer
+    quantization and rim steps (whole-sheet facts), proposal flags without a map (NOT_FLAT_COLOR, SNAP_CHANGED_PIXELS,
+    NEAR_DUPLICATE_COLORS, SUB_WIDTH_FEATURES, depth order, INTAKE_DETAILS_CHANGED: shown in Details), INVALID
+    candidates' failure texts, and neck widths (not measured by the estimate).
+  - Spatial evidence added: the FDM estimate now saves each finding's exact outline (`outline_mm`); estimates saved
+    earlier show the reported bounding box, labelled "bounding box only". Outlines are not sent with the project state.
+  - Destination: sheet-geometry issues open the sheet editor (layer selected, marker, zoomed); artwork-level issues
+    open the Artwork editor (focus box, zoomed); a sheet issue visible in the front view also offers Edit artwork
+    as a secondary route. Layer editing needs a review; a failed proposal offers artwork editing only.
+  - Staleness: the FDM estimate is stale when the sheets changed after it; proposal-level issues are stale when the
+    artwork was edited (saved or unsaved) after the proposal; validation issues are always current.
+  - A focused view may pan past the image edge so an issue near the border is centred; Fit ends that.
+- 2026-11-03 Issue inspector fix: problems highlighted on the physical sheets (user report: "none located" on a
+  project with real narrow openings):
+  - Root cause (OBSERVED on the user's Oscariko project): the proposed candidate passes sheet validation and no
+    printability estimate had been run (no review yet), so the only spatial sources were empty; the FDM geometry
+    check (`printkit.assess_printability`) had never run on those sheets. Run on them it finds 11 narrow-opening
+    RISKs on layers 01/03/04/05. The two warnings shown were proposal flags (UNMATCHED_COLOR_REGIONS,
+    INTAKE_DETAILS_CHANGED), listed as text.
+  - Fix: when no current saved estimate exists, the inspector runs the same `assess_printability` on the shown
+    sheets (review draft, else the proposed candidate), with the process of the last estimate if there is one,
+    else the generic default (disclosed as an assumption). A current saved estimate is used as before; a stale one
+    is marked out of date and its old locations are not drawn. Nothing is saved; validators and thresholds unchanged.
+  - Narrow connections are now highlighted at the neck itself: retained material the structural opening of the
+    same audit does not reach, in pieces touching both the held material and the rest; the held piece is a dashed
+    secondary outline. Measured/threshold stay the audit's own values (discrete widest passing kernel vs the
+    required kernel on this grid; nominal 1.2 mm shown).
+  - Intake: INTAKE_DETAILS_CHANGED details are located on the artwork (the saved detail box; intake saves no
+    detail mask, so "bounding box only"), with the saved original | default | planned crop. Intake and planner
+    findings are never drawn on a sheet. An UNMATCHED_COLOR_REGIONS flag whose saved map holds no qualifying region
+    is listed without a location (no invented coordinates).
+  - UI: one image at a time chosen in a layer strip (L1..Ln front first, Front view, Artwork) with per-tab counts;
+    outlines with a dark halo (no fill except a light one on the selected issue, so holes and thin features stay
+    visible), dashed rings around features too small to see, numbered markers beside the feature; a layer with no
+    issue says so and names the checks and thresholds that ran. Edit layer on a candidate's issue starts the review
+    of that candidate (the existing job) and then opens the editor there.
+  - Staleness: issues carry the basis they were computed for (draft update time or candidate); after a layer edit
+    the old locations are drawn grey/dashed with a "re-checking" banner until the new result arrives.

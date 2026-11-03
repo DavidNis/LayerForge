@@ -237,7 +237,8 @@ try {
   await clickSel('[data-action="run-printability"]');
   await waitFor(`document.querySelector('[data-testid="printability-result"]') && ${idle}`, "printability", 300000);
   results.printability = await text('[data-testid="printability-result"] h3');
-  results.findings = await evaluate(`[...document.querySelectorAll('[data-testid="findings"] tbody tr')].map((r) => r.innerText.replace(/\\s+/g, " ").trim())`);
+  // The findings table is folded under "Findings table" (the Issues inspector shows them on the sheets): read its text.
+  results.findings = await evaluate(`[...document.querySelectorAll('[data-testid="findings"] tbody tr')].map((r) => r.textContent.replace(/\\s+/g, " ").trim())`);
   results.fdm_card = await text('[data-testid="status-fdm"]');
   await shot("07_printability");
   step("printability", { status: results.printability, findings: results.findings.length });

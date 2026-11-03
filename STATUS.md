@@ -938,3 +938,61 @@ follow the light-blue body). Not user approved; no CAD exported.
   SHA-256 fce0d4cce6fb1f220e9932effe0cacdfcd93d3ab6f1f4ddc3c0433786718365c; static files byte-identical to
   src). Packaged tests 6 PASS / 0 FAIL / 0 SKIP (incl. the main browser workflow and the artwork/zoom drive
   against the frozen exe).
+- 2026-11-01 Line / Curve connectors replace the rigid Bridge tool (D-V3 addendum 2026-10-31). State:
+  READY_FOR_USER_TEST. Not committed. Tests: test_stroke_connectors 12 PASS (incl. CAD export of a curve);
+  test_l2_editor 22 PASS; test_artwork_recolor browser drive PASS (toolbar without Bridge, line handle drag,
+  width/angle/length fields, dry-run check "Visible change / invalid", Apply -> DRAFT_INVALID, undo ->
+  REVIEWED_VALID, curve bend 60 -> 70 mm arc, Straighten). test_l4_app NOT completed: the run was stopped by
+  the host because the system was low on memory (not a test failure); it has not been re-run. dist\ not rebuilt.
+  Rebuilt afterwards: dist\LayerForge\LayerForge.exe and dist\LayerForge-0.1.0-win64.zip (2026-11-01 06:35,
+  SHA-256 1699ac0c4363bf38910dc65f1a8c897957050de5bfd3799ab303be6c182dab4c; static files byte-identical to src,
+  Line/Curve editor included). Packaged tests NOT completed: stopped by the host because the system was low on
+  memory (not a test failure); orphaned test processes (headless exe + test browser) were stopped afterwards.
+- 2026-11-01 Artwork painting operations in Artwork colors (Fill, Line with thickness, Close gap, Replace color,
+  Brush inside a selection). State: READY_FOR_USER_TEST. Not committed. Tests: test_artwork_paint 13 PASS (new);
+  test_artwork_recolor 16 PASS incl. the browser drive (new: Fill, Line 1 mm with the thin-line warning, Brush that
+  stays inside the sun, Close gap with snapped ends, revert); test_stroke_connectors 12 PASS. test_l4_app and the
+  packaged tests not re-run (memory). dist\ exe/zip NOT rebuilt (the current exe lacks the paint tools).
+  Rebuilt afterwards: dist\LayerForge\LayerForge.exe and dist\LayerForge-0.1.0-win64.zip (2026-11-01 16:11,
+  SHA-256 b13813a44bb37143db2ec9f6df939bf51be8dbfe88dbabdacb953d15573233ed; static files byte-identical to src,
+  paint tools included; zip integrity check OK, 1770 entries). Packaged tests not run (memory).
+- 2026-11-01 Artwork editor (Line, Curve, Fill, Close gap straight/curved, Brush restricted to a selection).
+  State: READY_FOR_USER_TEST. Not committed. Tests: test_artwork_paint 20 PASS, test_artwork_recolor 16 PASS
+  (incl. the browser drive), test_stroke_connectors 12 PASS: 48 PASS / 0 FAIL / 0 SKIP. test_l4_app and the
+  packaged tests not run (2.0 GB free memory; earlier runs were stopped by the host). dist\ NOT rebuilt (the
+  current exe has the earlier paint tools, not Curve or editable shapes). Planner and validators unchanged.
+- 2026-11-01 Artwork editor release fixes: client-disconnect traceback fixed in app/server.py (root cause in
+  DECISIONS.md); saved strokes from the 16:11 exe replay with their original 0.5 px geometry (`stroke_raster`).
+  The user asked not to update the Hebrew guide now; it is unchanged.
+  Also fixed: error replies sent before the request body was read could be lost (connection reset on Windows).
+  Rebuilt dist\LayerForge\LayerForge.exe and dist\LayerForge-0.1.0-win64.zip (2026-11-01 20:26, SHA-256
+  3f45e0f7a001b925ba009cfa2d89f95f8da13879c17b0a910ac0c84c8c4c969f; static files byte-identical to src).
+  test_l4_app 13 PASS; packaged tests 8 PASS (run one at a time), incl. the artwork editor browser drive
+  (Line, Curve, Fill, Close gap, reload, planning) and a new restart / re-plan test against the exe.
+- 2026-11-02 Artwork editor batch editing (working session, Save Changes / Discard Changes, undo/redo of
+  unsaved edits, recovery, leave warnings, export/planning/resize blocked while unsaved). State:
+  READY_FOR_USER_TEST. Not committed. Planner, validators and sheet editing unchanged. dist\ NOT rebuilt.
+  Tests (2026-11-02, run one group at a time): test_artwork_session 7, test_artwork_paint 21, test_artwork_recolor 16
+  (incl. the browser drive), test_stroke_connectors 12, test_l4_app 13: all PASS, no tracebacks. Rebuilt
+  dist\LayerForge\LayerForge.exe and dist\LayerForge-0.1.0-win64.zip (2026-11-02 22:42, SHA-256
+  c3e1215eca4839fd002a72795c7c53ce1bbaa8a788d5137c571b162d0d0d5250; static files byte-identical to src).
+  Packaged tests 8 PASS (one at a time), incl. the batch-editing browser drive against the exe.
+- 2026-11-03 Visual Issue Inspector (Issues panel on Plan, Review & edit and Printability; located issues on the
+  front view, a layer or the artwork; filters, Previous/Next; Edit layer / Edit artwork). State: READY_FOR_USER_TEST.
+  Not committed. Planner and validation rules unchanged. dist\ NOT rebuilt.
+  Rebuilt dist\LayerForge\LayerForge.exe and dist\LayerForge-0.1.0-win64.zip (2026-11-03 13:25, SHA-256
+  4dd588184ec06de23a8dbd222dbac069ce541a642a5311e3d6852eccf6947dbc; static files byte-identical to src).
+  Packaged tests 9 PASS (one at a time), incl. a new packaged Issue inspector API test.
+- 2026-11-03 Issue inspector fix (user report: "none located", warnings as text, nothing highlighted). Root cause:
+  the user's candidate passes validation and no estimate existed, so the FDM geometry check never ran on the
+  sheets; it now runs on the shown sheets (same `assess_printability`, configured/last process). Narrow
+  connections highlighted at the neck; intake details located on the artwork only; layer strip with per-layer
+  counts, numbered markers, "no issues" with the checks named; Edit layer from a candidate starts its review;
+  out-of-date drawing after an edit until re-checked. Validators, planner, printkit, CAD and export unchanged.
+  State: READY_FOR_USER_TEST (partial verification). Not committed.
+  Tests: test_issue_inspector 5 PASS (incl. the browser drive; screenshots artifacts/issue_inspector_v2/screens).
+  The other related suites (test_l4_app, artwork_*, stroke_connectors, l2_editor, l3_print_kit) were started but
+  stopped by Claude Code for low system memory before any result: NOT RUN.
+  Rebuilt dist\LayerForge\LayerForge.exe and dist\LayerForge-0.1.0-win64.zip (2026-11-03 20:00, SHA-256
+  3c8fa022f8be10a10a0c887b31a2c06c0b3b722b9889bb588123437b08662bb3; static files byte-identical to src).
+  Packaged tests NOT run (user: rebuild only, no tests).

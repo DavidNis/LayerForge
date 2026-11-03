@@ -296,7 +296,7 @@ def test_recolor_before_planning_undo_eyedropper_reload_and_plan(app):
 
     # Re-running intake would drop the edits: refused, nothing is planned automatically.
     status, error = client.call("POST", f"/api/projects/{name}/propose", {})
-    assert status == 400 and "2 region recolor(s) are not planned yet" in error["error"]["message"]
+    assert status == 400 and "2 artwork edit(s) are not planned yet" in error["error"]["message"]
     assert "re-running intake is not available" in client.state(name)["proposal"]["intake_rerun_blocked"]
     assert client.state(name)["proposal"]["status"] == "ARTWORK_READY_NOT_PLANNED"
 
@@ -406,7 +406,7 @@ def test_review_artwork_edit_blocks_export_until_replanned_or_undone(app):
     assert (archive / "review" / "sheet_stack.json").read_bytes() == manifest_before
     assert not state["artwork"]["differs_from_planned"]
     status, error = client.call("POST", f"/api/projects/{name}/propose", {})
-    assert status == 400 and "planned from artwork with your region recolors" in error["error"]["message"]
+    assert status == 400 and "planned from artwork with your edits" in error["error"]["message"]
 
 
 def test_physical_resize_keeps_region_recolors(app):
@@ -552,8 +552,9 @@ def test_artwork_requests_are_checked(app):
 
 
 def test_browser_artwork_panel(app):
-    """The Artwork colors panel in a real browser: select, preview, cancel, apply, eyedropper, undo,
-    verify, reload, limit box and explicit planning (``tests/e2e/drive_artwork.mjs``)."""
+    """The Artwork editor in a real browser: instant unsaved edits (no Apply), undo/redo, Save Changes,
+    Discard with confirmation, leave/reload warnings and recovery, eyedropper, saved undo, verify, limit
+    box, every drawing tool and explicit planning (``tests/e2e/drive_artwork.mjs``)."""
 
     import subprocess
 
@@ -569,15 +570,29 @@ def test_browser_artwork_panel(app):
     lines = [line for line in run.stdout.splitlines() if line.startswith("{")]
     assert lines, run.stderr[-3000:]
     result = json.loads(lines[-1])
-    assert result["ok"], result.get("error", "") + "\n" + run.stderr[-3000:]
+    assert result["ok"], result.get("error", "") + "\nconsole: " + str(result.get("console_errors")) + "\n" + run.stderr[-3000:]
     assert result["console_errors"] == []
     assert result["create_label"] == "Import and prepare artwork" and "no sheets are planned" in result["not_planned_banner"]
     assert "One connected region of 4" in result["selection"]
-    assert result["preview_palette"].startswith("5 → 5 colors") and "Apply to artwork" in result["preview_text"]
-    assert result["history_after_cancel"] == 0
-    assert "eyedropper" in result["eyedropper_preview"] or SUN in result["eyedropper_preview"]
+    # Working session: a color choice recolors at once (no Apply button), unsaved until Save Changes.
+    assert result["no_apply_button"] and result["save_disabled_at_start"]
+    first = result["first"]
+    assert first["unsaved"] == "1 unsaved change" and first["last"].startswith("Recolor 1 region:")
+    assert "unsaved" in first["history"] and first["saved_edits"] == 0 and "1 unsaved" in first["summary"]
+    assert first["plan_disabled"] is True and first["callout"] == 0 and first["redo_enabled"]
+    assert result["history_unsaved"].count("unsaved") == 2
+    assert result["saved_last"] == "Saved 2 changes" and result["saved_batches"] == ["save_001"]
     assert "eyedropper" in result["history_text"] and "palette color" in result["history_text"]
-    assert "reproduces the saved artwork exactly" in result["verify"] and result["history_after_reload"] == 1
+    assert "reproduces the saved artwork exactly" in result["verify"]
+    # Leaving the project with unsaved changes asks first (dismissed: nothing changes); a reload asks too
+    # and the change is recovered from disk; Discard asks to confirm and keeps the saved artwork.
+    leave = result["leave"]
+    assert leave["dialog"]["type"] == "confirm" and "1 unsaved artwork change" in leave["dialog"]["message"]
+    assert leave["hash"].startswith("#/sailboat") and leave["panel"] == 1 and leave["unsaved"] == "1 unsaved change"
+    recovery = result["recovery"]
+    assert recovery["unsaved"].startswith("1 unsaved change") and recovery["recovered"] == "(recovered)"
+    assert "beforeunload" in recovery["dialogs"]
+    assert "Discard 1 unsaved change?" in result["discard_confirm"] and result["history_after_reload"] == 1
     assert "limited to the box" in result["box_selection"]
     # Zoom: buttons, Fit, Ctrl+wheel around the cursor; hit-testing and the eyedropper exact when zoomed.
     zoom = result["zoom"]
@@ -593,20 +608,56 @@ def test_browser_artwork_panel(app):
     assert zoom["anchor_drift_px"] < zoom["screen_px_per_art_px"], zoom
     assert "#AAD7F4" in result["zoomed_selection"] and "69 px" in result["zoomed_selection"]
     assert "#774627" in result["zoomed_eyedropper"]  # hull sampled a few pixels from two portholes
+    assert result["ctrl_z"] == "All changes saved"  # Ctrl+Z undid that unsaved change
     # Pan: Space + drag and middle drag move the view (no edit); clicks stay exact afterwards.
     pan = result["pan"]
     assert pan["space_drag"] != pan["before"] and pan["middle_drag"] != pan["space_drag"] and pan["history"] == 1
+    assert pan["unsaved_after"] == "All changes saved"  # selecting with a color chosen does not recolor
     assert "#AAD7F4" in result["panned_selection"] and "69 px" in result["panned_selection"]
     # Multi-region: Shift+Click adds/removes, mixed colors, one batch edit, one undo step.
     multi = result["multi"]
     assert "3 regions selected" in multi["three"] and "2 different original colors" in multi["three"]
-    assert multi["after_remove"].startswith("2 regions selected") and "in 2 regions" in multi["preview"]
-    assert "2 regions" in multi["history"] and multi["try_again"] and multi["after_undo"] == 1  # entry #2 only
-    assert "After 1 region recolor" in result["check_after_row"]
+    assert multi["after_remove"].startswith("2 regions selected") and "Recolor 2 regions" in multi["history"]
+    assert multi["callout_while_unsaved"] == 0 and multi["try_again"] and multi["after_undo"] == 1  # one undo step
+    assert "After 1 artwork edit" in result["check_after_row"]
+    # Six different edits in a row, each shown at once and building on the previous ones, saved together.
+    paint = result["paint"]
+    assert paint["fill_empty"].startswith("Fill:") and paint["fill_last"].startswith("Fill:")
+    assert "thinner than 1.2 mm" in paint["width_warn"] and "Line 1 mm" in paint["line_preview"]
+    assert paint["unsaved_while_pending"] == "1 unsaved change"  # a pending shape is not an edit yet
+    assert paint["brush_empty"].startswith("Brush:") and paint["brush_click_unsaved"] == "4 unsaved changes"
+    assert paint["brush_op"]["clip_regions"] and "only inside" in paint["brush_note"]
+    assert "First end" in paint["gap_first"] and "Close gap 1 mm" in paint["gap_info"] and "snapped" in paint["gap_info"]
+    assert "Close gap 1 mm (curved)" in paint["gap_curved"]
+    # Line: editable before Done (end point dragged, angle typed, Enter); Curve bent by a control point and
+    # finished by a tool change splits the sail, and Fill then changes only the part it cut off.
+    assert paint["line_points"] == "(60, 40) → (60, 200)" and paint["line_moved"] == "(60, 40) → (80, 200)"
+    assert paint["line_angle"].startswith("(60, 40) → (60, ")
+    assert paint["curve_handles"] == 1 and "Curve 1 mm" in paint["curve_preview"]
+    split = paint["fill_split"]
+    assert split["regions_before"][split["from"]] == 2 and split["regions_after"][split["from"]] == 1, split
+    assert paint["unsaved_history"].count("unsaved") == 6
+    assert paint["after_undo"] == {"unsaved": "4 unsaved changes", "redo": 2}
+    assert paint["saved_before"] == 1 and paint["batches"] == ["save_001"] + ["save_002"] * 6
+    assert all(label in paint["history"] for label in ("Fill", "Line 1 mm", "Curve 1 mm", "Brush 1 mm", "Close gap 1 mm (curved)"))
+    assert paint["after_revert"] == 1
     # Review & edit canvas: wheel zoom toward the cursor, exact clicks at high zoom, panning never edits.
     rz = result["review_zoom"]
     assert int(rz["after_wheel"].split("%")[0]) >= 3 * int(rz["fit"].split("%")[0]) and not rz["page_scrolled"]
     assert rz["anchor_drift_px"] < rz["screen_px_per_image_px"] * 1.5
     assert rz["clicked_mm"] and all(abs(a - b) <= 0.15 for a, b in zip(rz["clicked_mm"], rz["target_mm"])), rz
     assert rz["panned"] and rz["pending_unchanged_by_pan"] and near(rz["after_fit"], rz["fit"])
+    # Line / Curve connectors: Bridge gone from the toolbar; editable before Apply; visible change needs approval.
+    conn = result["connector"]
+    assert conn["bridge_buttons"] == 0 and conn["line_buttons"] == 1 and conn["curve_buttons"] == 1
+    assert conn["created"].startswith("Pending line")
+    assert abs(conn["after_handle"][1][0] - 110) < 0.6 and abs(conn["after_handle"][1][1] - 135) < 0.6  # end handle moved
+    shape = conn["after_fields"]
+    a, b = shape["points_mm"]
+    assert shape["width_mm"] == 2.5 and abs(b[1] - a[1]) < 1e-6 and abs(b[0] - a[0] - 50) < 0.01  # width, angle 0, length 50
+    assert "Visible change" in conn["check"] and "invalid" in conn["check"]  # dry run before Apply
+    assert "add" in conn["applied_change"] and "Visible change" in conn["applied_change"]
+    assert "DRAFT_INVALID" in conn["applied_validation"] and "REVIEWED_VALID" in conn["after_undo"]
+    assert conn["arc_bent"] > conn["arc_straight"] + 5 and abs(conn["arc_straightened"] - conn["arc_straight"]) < 0.05
+    assert conn["pending_after_cancel"] == 0
     assert "Plan sheets from this artwork" in result["try_again"] and result["try_again_in_view"] and result["replan_label"] == "Plan sheets from this artwork"

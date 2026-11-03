@@ -848,3 +848,58 @@ def test_delete_project_successful_failed_partial_and_confined(app, tmp_path, mo
     finally:
         server2.shutdown()
         server2.server_close()
+
+
+def test_a_client_that_leaves_before_the_reply_is_not_a_server_error(app, monkeypatch, capfd):
+    """A page closed or reloaded while a request runs (e.g. a connector check in flight) resets the
+    connection; the server must not report that as a 500 or print a traceback, and keeps serving."""
+
+    import socket
+    import struct
+
+    from layerforge_l1.app import server as server_module
+    from layerforge_l1.app.workspace import Workspace
+
+    client, _ = app
+    left, done = threading.Event(), threading.Event()
+
+    def slow_check(self, name, op):
+        assert left.wait(10)
+        return {"pad": "x" * 4_000_000}  # larger than any socket buffer: the write meets the reset
+
+    dispatch = server_module.Handler._dispatch
+
+    def tracked(self, route):
+        try:
+            dispatch(self, route)
+        finally:
+            done.set()
+
+    monkeypatch.setattr(Workspace, "check_edit", slow_check)
+    monkeypatch.setattr(server_module.Handler, "_dispatch", tracked)
+    host, port = client.base.split("//")[1].split(":")
+    body = b'{"op": {}}'
+    with socket.create_connection((host, int(port))) as sock:
+        sock.sendall(b"POST /api/projects/any/edit/check HTTP/1.1\r\nHost: %s:%s\r\nContent-Type: application/json\r\n"
+                     b"Content-Length: %d\r\n\r\n%s" % (host.encode(), port.encode(), len(body), body))
+        time.sleep(0.3)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))  # close with a reset
+    left.set()
+    assert done.wait(10)
+    monkeypatch.undo()
+    assert client.ok("GET", "/api/info")["physical"]["status"] == "NOT_VERIFIED"  # still serving
+    err = capfd.readouterr().err
+    assert "Traceback" not in err and "Exception occurred" not in err and " 500 " not in err, err
+
+
+def test_a_refused_request_with_an_unread_body_still_gets_its_reply(app):
+    """A request refused before its body is read (another origin, an unknown project) must still reach the
+    client: closing a socket with unread data resets it on Windows, which lost the 403 intermittently."""
+
+    client, _ = app
+    for i in range(60):
+        status, error = client.call("POST", "/api/projects/missing/kits/kit_1/delete", {"pad": "x" * (i * 97)},
+                                    headers={"Origin": "http://evil.example"})
+        assert status == 403 and "cross-origin" in error["error"]["message"]
+        status, error = client.call("POST", "/api/projects/missing/review", {"candidate": "x" * (i * 97)})
+        assert status == 404 and "no " in error["error"]["message"]

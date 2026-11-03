@@ -258,6 +258,7 @@ class Workspace:
         self.root.mkdir(parents=True, exist_ok=True)
         self._artwork_lock = threading.Lock()  # artwork edits are quick requests, not queued jobs
         self._basis_sha: dict[tuple[str, int, int], str] = {}  # artwork file stamp -> pixel hash
+        self._issue_cache: dict[str, tuple[Any, dict[str, Any]]] = {}  # project -> (input stamps, issues)
 
     # -- paths and records -----------------------------------------------------------
     def path(self, name: str) -> Path:
@@ -598,7 +599,7 @@ class Workspace:
                         "sheet_count": len(stack.sheets)}
         if basis.get("artwork", {}).get("pending"):
             measured["source"] += ("; measured on the sheets planned from the previous artwork (the artwork has "
-                                   f"{basis['artwork']['region_recolors']} unplanned region recolor(s), planned by the retry)")
+                                   f"{basis['artwork']['region_recolors']} unplanned artwork edit(s), planned by the retry)")
         options = resize.size_options(issues, basis["sheet_mm"], limit["max_sheet_mm"])
         analysis = {"schema": resize.ANALYSIS_SCHEMA, "basis": basis, "process": asdict(process),
                     "bambu_printer": bambu_printer or None, "limit": limit, "measured": measured,
@@ -889,6 +890,17 @@ class Workspace:
         result = self.refresh_draft(name, before, progress, change, validation)
         return {**result, "edit": entry["index"], "kind": entry["change"]["kind"]}
 
+    def check_edit(self, name: str, op: Any) -> dict[str, Any]:
+        """Dry run of one edit on the saved draft (nothing is saved): change kind and validation."""
+
+        op = self.check_op(op)
+        if "mask" in op:
+            raise AppError("mask-file operands are only available from the command line")
+        try:
+            return review.check_edit(self.review_dir(name), op)
+        except StackError as error:
+            raise AppError(str(error)) from None
+
     def undo(self, name: str, keep: int | None, progress: Callable[..., None]) -> dict[str, Any]:
         project = self.review_dir(name)
         before = review.load_project(project)
@@ -920,8 +932,12 @@ class Workspace:
         out = path / "printability"
         shutil.rmtree(out, ignore_errors=True)
         maps = printability_maps(stack, report, out / "maps")
+        from ..core.issues import geometry_outline
+
         for feature in report["features"]:
-            feature.pop("_geometry", None)
+            geometry = feature.pop("_geometry", None)
+            if geometry is not None:
+                feature["outline_mm"] = geometry_outline(geometry)
         report.update(maps=[f"maps/{m}" for m in maps], manifest_sha256=file_sha256(path / "review" / MANIFEST_NAME),
                       checked_utc=_now(), physical=PHYSICAL_STATUS)
         _write_json(out / "printability.json", report)
@@ -1063,12 +1079,40 @@ class Workspace:
             log = art.read_log(directory)
         except (art.ArtworkError, json.JSONDecodeError) as error:
             raise AppError(f"the artwork edit log cannot be read: {error}") from None
-        if log is not None and not log["edits"] and log["base"]["sha256"] != origin["sha256"]:
+        if (log is not None and not log["edits"] and log["base"]["sha256"] != origin["sha256"]
+                and not self._unsaved_count(directory)):
             log = None  # an empty log on an artwork that has since been replaced
         if log is None and create:
             shutil.rmtree(directory, ignore_errors=True)
             log = art.start(directory, image, origin, proposal["frame_color"], proposal["intake"]["artwork_mm_per_pixel"])
         return directory, log, {"proposal": proposal, "origin": origin, "path": path}
+
+    @staticmethod
+    def _session(directory: Path) -> dict[str, Any] | None:
+        from ..core import artwork as art
+
+        try:
+            return art.read_session(directory)
+        except (art.ArtworkError, json.JSONDecodeError, OSError):
+            return None
+
+    def _unsaved_count(self, directory: Path) -> int:
+        session = self._session(directory)
+        return len(session["ops"]) if session else 0
+
+    def unsaved_artwork(self, name: str) -> int:
+        """Number of unsaved artwork changes (the working session); 0 when there is none."""
+
+        try:
+            return self._unsaved_count(self.path(name) / "artwork")
+        except AppError:
+            return 0
+
+    def refuse_if_unsaved(self, name: str, action: str) -> None:
+        count = self.unsaved_artwork(name)
+        if count:
+            raise AppError(f"{count} unsaved artwork change(s): {action} is not available until you save or discard "
+                           "them (Save Changes / Discard Changes in the Artwork editor).")
 
     def artwork_differs(self, name: str) -> dict[str, Any] | None:
         """Why the current sheets are not validated against the current artwork, or None."""
@@ -1093,6 +1137,8 @@ class Workspace:
         proposal = _read_json(path / "proposal" / "proposal.json")
         if proposal is None:
             return None
+        if load:
+            self.refuse_if_unsaved(name, "a physical resize")
         directory, log, ctx = self._artwork_log(name)
         if log and log["edits"]:
             out = {"pending": True, "sha256": log["current_sha256"], "region_recolors": len(log["edits"]),
@@ -1127,6 +1173,7 @@ class Workspace:
             return
         if edited["pending"]:
             shutil.rmtree(path / "artwork" / "preview", ignore_errors=True)
+            shutil.rmtree(path / "artwork" / "session", ignore_errors=True)  # only redo steps can be left
             (path / "artwork").replace(path / "proposal" / "artwork_edits")
         else:  # the previous proposal (with its log) is in the archive now; the new one gets a copy
             source = archive / "proposal" / "artwork_edits"
@@ -1137,20 +1184,22 @@ class Workspace:
         path = self.path(name)
         proposal = _read_json(path / "proposal" / "proposal.json") or {}
         why = ARTWORK_LIMITS.get(action, "it starts again from the source image")
+        self.refuse_if_unsaved(name, action)
         if proposal.get("artwork_edits"):
-            raise AppError(f"this proposal was planned from artwork with your region recolors; {action} is not available "
+            raise AppError(f"this proposal was planned from artwork with your edits; {action} is not available "
                            f"for it because {why}, which would lose those recolors. Physical resize keeps them.")
         if (path / "proposal" / "proposal.json").is_file():
             _, log, _ = self._artwork_log(name)
             if log and log["edits"]:
-                raise AppError(f"{len(log['edits'])} region recolor(s) are not planned yet; {action} is not available "
+                raise AppError(f"{len(log['edits'])} artwork edit(s) are not planned yet; {action} is not available "
                                f"while they exist because {why}. Use Plan sheets from this artwork (or Physical resize) to plan them, "
                                "or undo them first.")
 
     def check_artwork_matches_stack(self, name: str) -> None:
+        self.refuse_if_unsaved(name, "print-kit export")
         differs = self.artwork_differs(name)
         if differs:
-            raise AppError(f"the artwork was edited ({differs['edits']} region recolor(s)) after these sheets were planned; "
+            raise AppError(f"the artwork was edited ({differs['edits']} artwork edit(s)) after these sheets were planned; "
                            "the sheets are validated only against the previous artwork. Plan from the edited artwork "
                            "(the current attempt is kept) or undo the artwork edits before exporting.")
 
@@ -1177,14 +1226,16 @@ class Workspace:
             raise AppError("an artwork preview needs at_px and optionally box_px, color and source")
         with self._artwork_lock:
             directory, log, ctx = self._artwork_log(name, create=True)
-            image = art.load_rgb(directory / "current.png")
+            image, sha = self._working(directory, log)
             frame, mpp = log["base"]["frame_color"], log["base"]["mm_per_pixel"]
             out = directory / "preview"
             shutil.rmtree(out, ignore_errors=True)
             out.mkdir(parents=True)
             try:
+                if request.get("op") in ("paint_stroke", "close_gap"):
+                    return self._artwork_preview_drawing(name, request, image, frame, mpp, sha, out)
                 if "regions" in request:
-                    return self._artwork_preview_regions(name, request, image, frame, mpp, log, out)
+                    return self._artwork_preview_regions(name, request, image, frame, mpp, sha, out)
                 if not request.get("color"):
                     mask, selection = art.select_region(image, frame, request.get("at_px"), request.get("box_px"), mpp)
                     stamp = selection["region_sha256"][:12]
@@ -1195,7 +1246,7 @@ class Workspace:
                 after, mask, selection, change = art.plan_edit(image, op, frame, mpp)
             except art.ArtworkError as error:
                 raise AppError(str(error)) from None
-            pid = art.preview_id(log["current_sha256"], op)
+            pid = art.preview_id(sha, op)
             art.save_rgb(art.highlight(image, mask, selection["box_px"]), out / "selection.png")
             art.save_rgb(after, out / "after.png")
             art.save_rgb(art.before_after(image, after, mask), out / "before_after.png")
@@ -1206,8 +1257,44 @@ class Workspace:
                     "notes": ["Artwork edit only: no sheet changes until you plan again from the edited artwork.",
                               "The sheet count is known only after planning; fewer colors do not guarantee fewer sheets."]}
 
+    def _working(self, directory: Path, log: dict[str, Any]) -> tuple[Any, str]:
+        """(image, sha) every selection, preview and new edit works on: the unsaved session's result if
+        there is one, else the saved artwork."""
+
+        from ..core import artwork as art
+
+        session = self._session(directory)
+        try:
+            image = art.session_image(directory, log, session)
+        except art.ArtworkError as error:
+            raise AppError(str(error)) from None
+        return image, session["current_sha256"] if session else log["current_sha256"]
+
+    def _artwork_preview_drawing(self, name: str, request: dict[str, Any], image: Any, frame: str | None, mpp: float,
+                                 sha: str, out: Path) -> dict[str, Any]:
+        """Line, brush (clipped to selected regions) or gap closure: the painted pixels and the result."""
+
+        from ..core import artwork as art
+
+        op = art.check_op(request)
+        after, mask, selection, change = art.plan_edit(image, op, frame, mpp)
+        pid = art.preview_id(sha, op)
+        art.save_rgb(art.highlight(image, mask), out / "selection.png")
+        art.save_rgb(after, out / "after.png")
+        art.save_rgb(art.before_after(image, after, mask), out / "before_after.png")
+        notes = ["Artwork edit only: no sheet changes until you plan again from the edited artwork."]
+        if op["width_mm"] < 1.2:
+            notes.append("Thinner than the 1.2 mm structural width: the planner can only show it through cutouts "
+                         "in front sheets, or planning reports it.")
+        if op.get("clip_regions"):
+            notes.append(f"Painted only inside the {len(op['clip_regions'])} selected region(s); nothing outside changes.")
+        return {"preview_id": pid, "op": op, "selection": selection, "change": change,
+                "stroke_px": selection["stroke_points_px"], "palette_after": art.palette_summary(after, frame, mpp),
+                "images": {k: self.url(name, f"artwork/preview/{k}.png", pid) for k in ("selection", "after", "before_after")},
+                "notes": notes}
+
     def _artwork_preview_regions(self, name: str, request: dict[str, Any], image: Any, frame: str | None, mpp: float,
-                                 log: dict[str, Any], out: Path) -> dict[str, Any]:
+                                 sha: str, out: Path) -> dict[str, Any]:
         from ..core import artwork as art
 
         regions = art.check_regions(request.get("regions"))
@@ -1227,7 +1314,7 @@ class Workspace:
         op = art.check_op({**{k: request[k] for k in ("color", "source", "sampled_at_px") if k in request},
                            "op": "recolor_regions", "regions": regions})
         after, mask, selection, change = art.plan_edit(image, op, frame, mpp)
-        pid = art.preview_id(log["current_sha256"], op)
+        pid = art.preview_id(sha, op)
         art.save_rgb(art.highlight(image, mask, selection["box_px"]), out / "selection.png")
         art.save_rgb(after, out / "after.png")
         art.save_rgb(art.before_after(image, after, mask), out / "before_after.png")
@@ -1246,7 +1333,7 @@ class Workspace:
 
         with self._artwork_lock:
             directory, log, ctx = self._artwork_log(name)
-            image = art.load_rgb(directory / "current.png") if log else self.artwork_basis(name)[2]
+            image = self._working(directory, log)[0] if log else self.artwork_basis(name)[2]
             try:
                 row, col = art.check_point(image, at_px)
             except art.ArtworkError as error:
@@ -1262,6 +1349,7 @@ class Workspace:
 
         op = self._artwork_op(op)
         with self._artwork_lock:
+            self.refuse_if_unsaved(name, "applying a single edit")
             directory, log, _ = self._artwork_log(name)
             if log is None or preview != art.preview_id(log["current_sha256"], op):
                 raise AppError("this preview is out of date (the artwork changed since); preview the edit again")
@@ -1277,6 +1365,7 @@ class Workspace:
         from ..core import artwork as art
 
         with self._artwork_lock:
+            self.refuse_if_unsaved(name, "undoing saved edits")
             directory, log, _ = self._artwork_log(name)
             if not log or not log["edits"]:
                 raise AppError("there are no artwork edits to undo")
@@ -1292,6 +1381,48 @@ class Workspace:
             shutil.rmtree(directory / "preview", ignore_errors=True)
             (directory / "verify.json").unlink(missing_ok=True)
             return {"edits_before": count, "edits_after": len(log["edits"])}
+
+    SESSION_ACTIONS = ("add", "undo", "redo", "discard", "save")
+
+    def artwork_session(self, name: str, action: str, request: Any) -> dict[str, Any]:
+        """The working session: ``add`` one edit ({"op"}; shown at once, not saved), ``undo`` / ``redo``
+        one unsaved edit, ``discard`` all of them, or ``save`` all of them to the edit log together."""
+
+        from ..core import artwork as art
+
+        if action not in self.SESSION_ACTIONS:
+            raise AppError(f"unknown artwork session action {action!r}")
+        with self._artwork_lock:
+            directory, log, _ = self._artwork_log(name, create=action == "add")
+            if log is None:  # nothing edited yet: nothing to undo, redo, save or discard
+                if action == "discard":
+                    return {"discarded": 0, "unsaved": 0, "redo": 0}
+                raise AppError({"redo": "there is no undone artwork change to redo",
+                                "undo": "there is no unsaved artwork change to undo"}.get(
+                                    action, "there are no unsaved artwork changes to save"))
+            try:
+                if action == "add":
+                    op = self._artwork_op((request or {}).get("op") if isinstance(request, dict) else None)
+                    _, entry, _ = art.session_add(directory, op)
+                    out = {"added": entry["index"], "change": entry["change"]}
+                elif action == "undo":
+                    art.session_undo(directory)
+                    out = {}
+                elif action == "redo":
+                    art.session_redo(directory)
+                    out = {}
+                elif action == "discard":
+                    out = {"discarded": art.session_discard(directory)}
+                else:
+                    _, entries = art.session_save(directory)
+                    (directory / "verify.json").unlink(missing_ok=True)
+                    out = {"saved": len(entries), "edits": entries[-1]["index"], "batch": entries[0]["batch"]}
+            except art.ArtworkError as error:
+                raise AppError(str(error)) from None
+            shutil.rmtree(directory / "preview", ignore_errors=True)
+            session = self._session(directory)
+            return {**out, "unsaved": len(session["ops"]) if session else 0,
+                    "redo": len(session["redo"]) if session else 0}
 
     def artwork_verify(self, name: str) -> dict[str, Any]:
         from ..core import artwork as art
@@ -1310,6 +1441,7 @@ class Workspace:
         from ..core import artwork as art
         from ..core.propose import NOT_PLANNED
 
+        self.refuse_if_unsaved(name, "planning")
         with self._artwork_lock:
             directory, log, ctx = self._artwork_log(name)
             if log and log["edits"]:
@@ -1388,6 +1520,7 @@ class Workspace:
             shutil.rmtree(path / "upscale", ignore_errors=True)
             if (path / "artwork").exists():
                 shutil.rmtree(path / "artwork" / "preview", ignore_errors=True)
+                shutil.rmtree(path / "artwork" / "session", ignore_errors=True)  # only redo steps can be left
                 if edits:
                     (path / "artwork").replace(path / "proposal" / "artwork_edits")
                 else:
@@ -1437,14 +1570,31 @@ class Workspace:
             image = self.url(name, origin["file"], current_sha[:12])
         edits = (log or {}).get("edits", [])
         differs = bool(edits) and planned_sha is not None and current_sha != planned_sha
+        session = self._session(directory) if log is not None else None
+        saved_image = image
+        unsaved = None
+        if session is not None:
+            from ..core import artwork as art
+
+            stale = art.session_stale(log, session)
+            ops = session["ops"]
+            unsaved = {"count": len(ops), "redo": len(session["redo"]), "stale": stale,
+                       "started_utc": session["started_utc"], "updated_utc": session.get("updated_utc"),
+                       "ops": [{**{k: e[k] for k in ("op", "from", "to", "selection", "change")},
+                                "from_colors": e.get("from_colors", [e["from"]])} for e in ops]}
+            if not stale:
+                image = self.url(name, "artwork/session/current.png", session["current_sha256"][:12])
+                if ops:
+                    palette = ops[-1]["palette_after"]
         view = {
             "available": True, "stage": origin["stage"], "planned": proposal["status"] != NOT_PLANNED,
             "image": image, "frame_color": proposal["frame_color"],
             "mm_per_pixel": proposal["intake"]["artwork_mm_per_pixel"],
             "current_sha256": current_sha, "planned_sha256": planned_sha,
             "edits": [{**{k: e[k] for k in ("index", "op", "from", "to", "selection", "change", "applied_utc")},
-                       "from_colors": e.get("from_colors", [e["from"]])} for e in edits],
-            "palette": palette, "differs_from_planned": differs,
+                       "from_colors": e.get("from_colors", [e["from"]]), "batch": e.get("batch")} for e in edits],
+            "palette": palette, "differs_from_planned": differs, "saved_image": saved_image,
+            "unsaved": unsaved,
             "base_changed": bool(log and edits and log["base"]["sha256"] != origin["sha256"]),
             "can_replan": proposal["status"] == NOT_PLANNED or differs,
             "planned_from_edited_artwork": proposal.get("artwork_edits"),
@@ -1453,6 +1603,185 @@ class Workspace:
         if verify is not None and log is not None:
             view["verify"] = verify
         return view
+
+    # -- issue inspector ------------------------------------------------------------------
+    def issues(self, name: str) -> dict[str, Any]:
+        """Every located diagnostic of the project (``core/issues.py``) with the images to show it on.
+
+        Sources, each evaluated by its existing check: the review draft's sheet validation (else the
+        selected candidate's), the latest FDM estimate of the draft, and the proposal's artwork-level
+        evidence (a failed closure's obstruction map, unmatched intake regions).  Nothing is re-planned
+        or changed; results are cached per input file state."""
+
+        path, record = self.path(name), self.record(name)
+        proposal = _read_json(path / "proposal" / "proposal.json")
+        if proposal is None:
+            raise AppError("no proposal yet; import the image first")
+        review_manifest = path / "review" / MANIFEST_NAME
+        estimate_file = path / "printability" / "printability.json"
+        stamp = lambda f: (f.stat().st_mtime_ns, f.stat().st_size) if f.is_file() else None  # noqa: E731
+        key = (name, stamp(path / "proposal" / "proposal.json"), stamp(review_manifest), stamp(estimate_file),
+               stamp(path / "draft" / "state.json"))
+        cached = self._issue_cache.get(name)
+        if cached and cached[0] == key:
+            result = cached[1]
+        else:
+            result = self._compute_issues(name, path, record, proposal, review_manifest, estimate_file)
+            self._issue_cache[name] = (key, result)
+        artwork = self._artwork_view(name, path, proposal)
+        edited = bool(artwork.get("available") and (artwork.get("differs_from_planned") or (artwork.get("unsaved") or {}).get("count")))
+        out = {**result, "sources": [dict(src) for src in result["sources"]]}
+        for src in out["sources"]:
+            if src["id"] in ("proposal", "candidate") and edited:
+                src["stale"] = True
+                src["stale_reason"] = "the artwork was edited after this proposal; plan again to check the edited artwork"
+        return out
+
+    def _compute_issues(self, name: str, path: Path, record: dict[str, Any], proposal: dict[str, Any],
+                        review_manifest: Path, estimate_file: Path) -> dict[str, Any]:
+        from ..core import issues as iss
+        from ..core.artwork import load_rgb
+        from ..core.intake import IntakeConfig
+        from ..core.model import StackGrid, load_stack
+        from ..core.propose import NOT_PLANNED
+
+        cfg = proposal["planning_config"]
+        grid = StackGrid.for_planner(cfg["outer_sheet_mm"], cfg["scale"])
+        size = grid.outer_sheet_mm
+        outer = [0.0, 0.0, size, size]
+        inner = [round(grid.perimeter_pixels * grid.mm_per_pixel, 6), round(grid.perimeter_pixels * grid.mm_per_pixel, 6),
+                 round(size - grid.perimeter_pixels * grid.mm_per_pixel, 6), round(size - grid.perimeter_pixels * grid.mm_per_pixel, 6)]
+        issues: list[dict[str, Any]] = []
+        unlocalized: list[dict[str, Any]] = []
+        sources: list[dict[str, Any]] = []
+        images: list[dict[str, Any]] = []
+        sheets: list[dict[str, Any]] = []
+        notice = None
+        target_rel = "proposal/intake/target.png"
+        stack = None
+        if review_manifest.is_file() and (path / "draft" / "state.json").is_file():
+            stack = review.load_project(self.review_dir(name))
+            draft = _read_json(path / "draft" / "state.json")
+            dstamp = draft["manifest_sha256"][:12] + str(int((path / "draft" / "state.json").stat().st_mtime))
+            base = "draft/previews"
+            front = self.url(name, f"{base}/assembled_front.png", dstamp)
+            sheet_url = lambda export: self.url(name, f"{base}/sheets/{export}.png", dstamp)  # noqa: E731
+            sources.append({"id": "validation", "label": "Sheet validation of the review draft", "stale": False,
+                            "status": draft["validation"]["status"]})
+            if (path / "review" / "target.png").is_file():
+                target_rel = "review/target.png"
+        elif proposal.get("selected"):
+            stack = load_stack(path / "proposal" / "candidates" / proposal["selected"] / "stack")
+            base = "proposal/selected/previews"
+            pstamp = int((path / "proposal" / "proposal.json").stat().st_mtime)
+            front = self.url(name, f"{base}/assembled_front.png", pstamp)
+            sheet_url = lambda export: self.url(name, f"{base}/sheets/{export}.png", pstamp)  # noqa: E731
+            sources.append({"id": "candidate", "label": f"Sheet validation of the proposed candidate {proposal['selected']}",
+                            "stale": False, "status": "PASS"})
+        if stack is not None:
+            exports = stack.export_names()
+            count = len(stack.sheets)
+            for order, (sheet, export) in enumerate(zip(stack.sheets, exports)):
+                sheets.append({"id": sheet.id, "export_name": export, "color": sheet.color,
+                               "layer_from_front": count - order, "image": sheet_url(export)})
+            images.append({"key": "front", "label": "Front view (assembled)", "url": front, "extent_mm": outer})
+            issues += iss.sheet_issues(stack)
+        estimate = _read_json(estimate_file) if stack is not None and review_manifest.is_file() else None
+        current = estimate is not None and estimate.get("manifest_sha256") == file_sha256(review_manifest)
+        if current:
+            located, other = iss.fdm_issues(estimate)
+            issues += located
+            unlocalized += other
+            sources.append({"id": "fdm_estimate", "label": f"FDM estimate ({estimate['process']['name']})",
+                            "stale": False, "status": estimate["status"], "checked_utc": estimate.get("checked_utc")})
+        elif stack is not None:
+            # No current saved estimate: the same geometry check (assess_printability) runs on the shown
+            # sheets, with the process of the last estimate if there is one, else the generic default.
+            from ..core.printkit import PrintProcess, assess_printability
+
+            process = PrintProcess(**estimate["process"]) if estimate is not None else PrintProcess()
+            report = assess_printability(stack, process)
+            located, other = iss.fdm_issues(report, source="geometry_check")
+            issues += located
+            unlocalized += other
+            sources.append({"id": "geometry_check", "stale": False, "status": report["status"],
+                            "label": f"Geometry check of these sheets ({process.name})",
+                            "process_source": process.source if estimate is None else "the last printability estimate"})
+            if estimate is not None:
+                sources.append({"id": "fdm_estimate", "label": f"Saved FDM estimate ({estimate['process']['name']})",
+                                "stale": True, "status": estimate["status"], "checked_utc": estimate.get("checked_utc"),
+                                "stale_reason": "the sheets changed after this estimate; the locations shown come from the "
+                                                "geometry check of the current sheets. Run the printability estimate again "
+                                                "to update the saved report"})
+        # Artwork-level evidence of the proposal.
+        m = proposal["intake"]
+        flags = proposal.get("flags", [])
+        codes = {f["code"] for f in flags}
+        if "UNMATCHED_COLOR_REGIONS" in codes and (path / "proposal" / "intake" / "unmatched_regions.png").is_file():
+            mask = load_rgb(path / "proposal" / "intake" / "unmatched_regions.png")[..., 0] > 127
+            found = iss.unmatched_issues(mask, grid, IntakeConfig().unmatched_min_area_mm2)
+            issues += found
+            if not found:
+                unlocalized.append({"source": "intake", "code": "UNMATCHED_COLOR_REGIONS", "severity": "WARN",
+                                    "text": "Raised by the intake, but the saved map (intake/unmatched_regions.png) holds no "
+                                            "region of at least the minimum area, so there is no location to show."})
+                codes.discard("UNMATCHED_COLOR_REGIONS")
+        details = proposal.get("intake_details", [])
+        if "INTAKE_DETAILS_CHANGED" in codes and details:
+            issues += iss.intake_detail_issues(details, proposal.get("detail_decisions", {}), grid)
+        blocked = None
+        if not proposal.get("selected"):
+            blocked = next((c for c in proposal.get("candidates", []) if c.get("obstruction_map")), None)
+        if blocked is not None:
+            obstruction_file = path / "proposal" / "candidates" / blocked["name"] / "obstruction.png"
+            if obstruction_file.is_file():
+                obstruction = load_rgb(obstruction_file)[..., 0] > 127
+                target = load_rgb(path / "proposal" / "intake" / "target.png")
+                issues += iss.obstruction_issues(obstruction, target, grid, m["structural_width_mm"], blocked["name"])
+        if proposal["status"] != NOT_PLANNED:
+            sources.append({"id": "proposal", "label": "Proposal (intake and planner)", "stale": False,
+                            "status": proposal["status"]})
+        if stack is None:
+            notice = ("No valid sheets were generated, so sheet-level locations are unavailable. Artwork-level "
+                      "locations from the proposal are shown.") if proposal["status"] != NOT_PLANNED else \
+                     "No sheets are planned yet; only artwork-level diagnostics exist."
+        images.append({"key": "artwork", "label": "Artwork (flat color)", "url": self.url(name, target_rel,
+                       int((path / target_rel).stat().st_mtime)), "extent_mm": inner})
+        kinds = {i["kind"] for i in issues}
+        located_flags = {"UNMATCHED_COLOR_REGIONS": {"unmatched_color_region"}, "NO_VALID_CANDIDATE": {"planner_blocked_feature"},
+                         "INTAKE_DETAILS_CHANGED": {"intake_detail_changed"}}
+        noted = {u["code"] for u in unlocalized if u["source"] == "intake"}
+        for f in flags:
+            if kinds & located_flags.get(f["code"], set()) or f["code"] in noted:
+                continue  # located above (or explained above)
+            if f["severity"] in ("BLOCKER", "WARN"):
+                unlocalized.append({"source": "proposal", "code": f["code"], "severity": f["severity"], "text": f["message"]})
+        for c in proposal.get("candidates", []):
+            if c.get("status") == "INVALID":
+                unlocalized.append({"source": "proposal", "code": f"candidate {c['name']} INVALID", "severity": "WARN",
+                                    "text": "; ".join(c.get("validation_failures") or [])})
+        pstamp = int((path / "proposal" / "proposal.json").stat().st_mtime)
+        for issue in issues:
+            if issue["kind"] == "intake_detail_changed" and issue["details"].get("image"):
+                issue["details"]["image_url"] = self.url(name, f"proposal/{issue['details']['image']}", pstamp)
+        checks = None
+        if stack is not None:  # the sheet checks that ran, with their thresholds (for "no issues on this layer")
+            from ..core.validation import minimum_width_mm
+
+            proc = (estimate if current else report)["process"]
+            checks = {"geometry_source": next(s["label"] for s in sources if s["id"] in ("fdm_estimate", "geometry_check")),
+                      "structural_width_mm": minimum_width_mm(), "min_opening_mm": proc["min_opening_mm"],
+                      "nozzle_diameter_mm": proc["nozzle_diameter_mm"],
+                      "min_positive_feature_mm": proc["min_positive_feature_mm"], "line_width_mm": proc["line_width_mm"]}
+        draft_state = _read_json(path / "draft" / "state.json") if review_manifest.is_file() else None
+        reviewed = draft_state is not None and stack is not None
+        return {"grid": {"outer_sheet_mm": size, "mm_per_pixel": grid.mm_per_pixel,
+                         "perimeter_pixels": grid.perimeter_pixels, "artwork_pixels": grid.artwork_pixels},
+                "issues": iss.number(issues, grid), "unlocalized": unlocalized, "sources": sources,
+                "images": images, "sheets": sheets, "notice": notice, "computed_utc": _now(),
+                "has_review": review_manifest.is_file(), "checks": checks,
+                "basis": f"draft:{draft_state['updated_utc']}" if reviewed else f"candidate:{proposal.get('selected')}",
+                "sheet_source": None if stack is None else "review" if reviewed else "candidate"}
 
     # -- state for the UI --------------------------------------------------------------
     def state(self, name: str) -> dict[str, Any]:
@@ -1477,6 +1806,8 @@ class Workspace:
         estimate = _read_json(path / "printability" / "printability.json")
         if estimate is not None:
             estimate["stale"] = estimate.get("manifest_sha256") != current_sha
+            for feature in estimate["features"]:
+                feature.pop("outline_mm", None)  # outlines are served by the issue inspector only
             estimate["map_urls"] = [self.url(name, f"printability/{m}") for m in estimate["maps"]]
             state["printability"] = estimate
         state["kits"] = [{**self._kit_view(name, path, row["id"], current_sha), "created_utc": row.get("created_utc")}

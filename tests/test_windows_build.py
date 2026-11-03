@@ -21,6 +21,7 @@ import time
 import urllib.request
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 import test_l4_app as l4
@@ -127,6 +128,55 @@ def test_packaged_artwork_recolor_browser(exe_app):
 
     client, workspace = exe_app
     recolor.test_browser_artwork_panel((client, workspace, None))
+
+
+def test_packaged_artwork_editor_curve_fill_restart_and_replan(exe_app):
+    """Artwork editor in the frozen app over HTTP: a curve splits the sail, Fill one part, export blocked,
+    restart the exe (saved log verified), undo, re-apply, explicit re-plan keeps the earlier attempt."""
+
+    import test_artwork_paint as paint
+
+    client, workspace = exe_app
+    paint.test_curve_splits_the_sail_fill_one_part_export_blocked_reload_and_replan((client, workspace, None))
+
+
+def test_packaged_saved_strokes_from_the_earlier_build_replay_unchanged(exe_app, tmp_path):
+    """A log with strokes saved before ``stroke_raster`` existed verifies in the frozen app with its old pixels."""
+
+    import shutil
+
+    import test_artwork_paint as paint
+    from layerforge_l1.core import artwork as art
+
+    client, workspace = exe_app
+    name = paint._import(client)
+    base = f"/api/projects/{name}/artwork"
+    line = {"op": "paint_stroke", "points_px": [[200, 150], [260, 210]], "width_mm": 0.3, "color": "#000000",
+            "source": "palette", "stroke_raster": 1}
+    preview = client.ok("POST", f"{base}/preview", line)
+    client.ok("POST", f"{base}/apply", {"op": preview["op"], "preview_id": preview["preview_id"]})
+    folder = workspace / name / "artwork"
+    saved = art.load_rgb(folder / "current.png")
+    log_file = folder / "edits.json"
+    log = l4.json.loads(log_file.read_text(encoding="utf-8"))
+    log["edits"][0]["op"].pop("stroke_raster")  # the form the 2026-11-01 16:11 build wrote
+    log_file.write_text(l4.json.dumps(log, indent=2), encoding="utf-8")
+    _, client = l4.start(workspace)  # restart the exe on the same folder
+    assert client.ok("POST", f"{base}/verify", {})["replay_identical"]
+    assert client.ok("POST", f"{base}/undo", {}) == {"edits_before": 1, "edits_after": 0}
+    assert np.array_equal(art.replay(folder, art.read_log(folder)), art.load_rgb(folder / "base.png"))
+    assert not np.array_equal(saved, art.load_rgb(folder / "current.png"))
+
+
+def test_packaged_issue_inspector_locations_thresholds_and_refresh(exe_app, tmp_path):
+    """Issue inspector in the frozen app over HTTP: known defects on two layers located by the validation and
+    the geometry check with the configured thresholds, a saved estimate's process, re-check after a layer
+    edit, a valid candidate with no sheet issue and intake findings on the artwork only; reading changes nothing."""
+
+    import test_issue_inspector as inspector
+
+    inspector.test_sheet_findings_are_located_with_the_configured_thresholds_and_refresh(exe_app, tmp_path / "a")
+    inspector.test_candidate_sheets_are_checked_and_intake_warnings_stay_on_the_artwork(exe_app, tmp_path / "b")
 
 
 def _launch(args: list[str], local_appdata: Path, cwd: Path) -> subprocess.CompletedProcess:

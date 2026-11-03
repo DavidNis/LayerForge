@@ -8,15 +8,18 @@ and return a job id at once; the page polls ``/api/jobs/<id>`` for progress.
     GET  /api/projects                          project list
     POST /api/projects?filename=&scale=&...     body = image bytes -> project + L1 proposal job
     GET  /api/projects/<p>                      project state (+ active or latest job)
+    GET  /api/projects/<p>/issues               issue inspector: located diagnostics and the images to show them on
     POST /api/projects/<p>/propose              re-run the L1 proposal (before a review exists)
     POST /api/projects/<p>/artwork/preview      {"at_px", "box_px"?, "color"?, "source"?} -> region / recolor preview
     POST /api/projects/<p>/artwork/sample       {"at_px"} -> eyedropper color
     POST /api/projects/<p>/artwork/apply        {"op", "preview_id"} -> one artwork recolor, saved
     POST /api/projects/<p>/artwork/undo         {} or {"keep": n} -> undo last / revert artwork edits
     POST /api/projects/<p>/artwork/verify       replay the artwork edit log from its base
+    POST /api/projects/<p>/artwork/session/<a>  a = add {"op"} | undo | redo | discard | save: unsaved working session
     POST /api/projects/<p>/artwork/replan       plan sheets from the edited artwork (job; keeps the attempt)
     POST /api/projects/<p>/review               {"candidate"} -> start the L2 review
     POST /api/projects/<p>/edit                 {"op": {...}} -> one L2 edit, saved and validated
+    POST /api/projects/<p>/edit/check           {"op": {...}} -> dry run: change kind + validation (not saved)
     POST /api/projects/<p>/undo                 {} or {"keep": n} -> undo last / revert to n edits
     POST /api/projects/<p>/verify               replay the edit log from the base
     POST /api/projects/<p>/printability         {"process"} -> L3 estimate of the current draft
@@ -109,6 +112,7 @@ class Handler(BaseHTTPRequestHandler):
         self._send(status, json.dumps(value).encode("utf-8"), "application/json")
 
     def _error(self, status: int, message: str, **extra: Any) -> None:
+        self._drain_body()
         self._json({"error": {"message": message, **extra}}, status)
 
     def _file(self, path: Path) -> None:
@@ -119,7 +123,24 @@ class Handler(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length") or 0)
         if length > limit:
             raise AppError(f"request body is larger than {limit // (1024 * 1024)} MB")
+        self._body_read = True
         return self.rfile.read(length) if length else b""
+
+    def _drain_body(self) -> None:
+        """Read a request body the reply does not need (an error before the body was read): closing a socket
+        with unread data resets it on Windows, and the client could lose the reply. Too large: just close."""
+
+        if getattr(self, "_body_read", False) or self.command != "POST":
+            return
+        self._body_read = True
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            length = -1
+        if 0 < length <= MAX_UPLOAD_BYTES:
+            self.rfile.read(length)
+        elif length:
+            self.close_connection = True
 
     def _json_body(self) -> dict[str, Any]:
         raw = self._body()
@@ -148,16 +169,21 @@ class Handler(BaseHTTPRequestHandler):
         url = urlparse(self.path)
         parts = [unquote(p) for p in url.path.split("/") if p]
         try:
-            route(parts, parse_qs(url.query))
-        except JobConflict as error:
-            self._error(409, str(error))
-        except AppError as error:
-            self._error(404 if str(error).startswith("no ") else 400, str(error))
-        except Exception as error:  # noqa: BLE001 - report instead of dropping the connection
-            import traceback
+            try:
+                route(parts, parse_qs(url.query))
+            except ConnectionError:
+                raise
+            except JobConflict as error:
+                self._error(409, str(error))
+            except AppError as error:
+                self._error(404 if str(error).startswith("no ") else 400, str(error))
+            except Exception as error:  # noqa: BLE001 - report instead of dropping the connection
+                import traceback
 
-            traceback.print_exc()
-            self._error(500, describe_error(error)["message"], hint=describe_error(error).get("hint"))
+                traceback.print_exc()
+                self._error(500, describe_error(error)["message"], hint=describe_error(error).get("hint"))
+        except ConnectionError:  # the client left (page closed or reloaded) before the reply was written:
+            self.close_connection = True  # nobody to answer; not a server error, so no 500 and no traceback
 
     def _get(self, parts: list[str], query: dict[str, list[str]]) -> None:
         ws = self.app.workspace
@@ -179,6 +205,11 @@ class Handler(BaseHTTPRequestHandler):
             job = self.app.jobs.active(parts[2]) or self.app.jobs.latest(parts[2])
             state["job"] = job.to_json() if job else None
             self._json(state)
+        elif len(parts) == 4 and parts[:2] == ["api", "projects"] and parts[3] == "issues":
+            active = self.app.jobs.active(parts[2])
+            if active is not None:  # a running job may be replacing the stack or the estimate
+                raise JobConflict(f"'{active.kind}' is still {active.status} for this project; inspect when it has finished")
+            self._json(ws.issues(parts[2]))
         elif len(parts) == 6 and parts[:2] == ["api", "projects"] and parts[3] == "kits" and parts[5] == "zip":
             data = ws.kit_zip(parts[2], parts[4])
             self._send(200, data, "application/zip",
@@ -214,6 +245,8 @@ class Handler(BaseHTTPRequestHandler):
                 raise JobConflict(f"'{active.kind}' is still {active.status} for this project; delete it when it has finished")
             self._json(ws.delete_project(name))
             return
+        if action == "resize" and len(parts) == 5 and parts[4] in ("search", "preview", "retry"):
+            ws.refuse_if_unsaved(name, "a physical resize")  # it plans the saved artwork: refused now
         if action == "propose" and len(parts) == 4:
             decisions = body.get("detail_decisions")
             if decisions is not None:
@@ -261,11 +294,23 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 self._json(ws.artwork_verify(name))
             return
+        elif action == "artwork" and len(parts) == 6 and parts[4] == "session":
+            active = app.jobs.active(name)
+            if active is not None:  # a running job reads or replaces the artwork
+                raise JobConflict(f"'{active.kind}' is still {active.status} for this project; edit the artwork when it has finished")
+            self._json(ws.artwork_session(name, parts[5], body))
+            return
         elif action == "artwork" and len(parts) == 5 and parts[4] == "replan":
             ws.check_artwork_replan(name)  # nothing to plan, or a log that does not replay: refused now
             job = app.submit("artwork_replan", name, partial(ws.artwork_replan, name))
         elif action == "review" and len(parts) == 4:
             job = app.submit("start_review", name, partial(ws.start_review, name, str(body.get("candidate", ""))))
+        elif action == "edit" and len(parts) == 5 and parts[4] == "check":
+            active = app.jobs.active(name)
+            if active is not None:  # a running job may be writing the draft
+                raise JobConflict(f"'{active.kind}' is still {active.status} for this project; check when it has finished")
+            self._json(ws.check_edit(name, body.get("op")))
+            return
         elif action == "edit" and len(parts) == 4:
             job = app.submit("edit", name, partial(ws.apply_edit, name, ws.check_op(body.get("op"))))
         elif action == "undo" and len(parts) == 4:

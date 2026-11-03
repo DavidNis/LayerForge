@@ -143,6 +143,17 @@ def with_default_precision(op: dict[str, Any]) -> dict[str, Any]:
     return {**op, "precision": op.get("precision", "vector")} if shaped else op
 
 
+def check_edit(project: Path, op: dict[str, Any]) -> dict[str, Any]:
+    """Dry run: what one edit would change and whether the result validates; nothing is saved."""
+
+    project = Path(project)
+    stack = load_project(project)
+    op = with_default_precision(op)
+    edited, change = apply_edit(stack, op, project)
+    validation = validate_stack(edited)
+    return {"op": op, "change": change, "validation_status": validation["status"], "failures": validation["failures"]}
+
+
 def apply_to_project(project: Path, op: dict[str, Any]) -> tuple[SheetStack, dict[str, Any]]:
     """Apply one edit to the saved project, validate, log and save it (even if invalid)."""
 

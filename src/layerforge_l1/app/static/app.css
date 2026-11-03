@@ -368,6 +368,12 @@ section.kit-card { padding: 0; overflow: hidden; }
 .art-panel .segmented .tool-btn { min-height: 30px; }
 .art-panel .icon-btn { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; padding: 0; }
 .art-toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.art-width { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
+.art-width input { width: 64px; }
+.art-shape-fields { display: flex; flex-wrap: wrap; gap: 12px; font-size: 13px; }
+.art-shape-fields label { display: inline-flex; align-items: center; gap: 6px; }
+.art-shape-fields input { width: 72px; }
+.warn-text { color: var(--warn, #b26a00); }
 .art-panel .art-zoom { display: flex; align-items: center; justify-content: center; gap: 6px; flex-wrap: wrap; }
 .art-zoom-label { min-width: 84px; text-align: center; font-weight: 600; font-size: 13px; font-variant-numeric: tabular-nums; }
 .art-side { gap: 14px; }
@@ -470,3 +476,46 @@ details.section.subtle > .section-body { padding: 4px 0 0 18px; }
 button.primary.large, .button.large { padding: 9px 18px; min-height: 40px; font-size: 14.5px; }
 .review-bar-actions .primary { display: inline-flex; align-items: center; min-height: 32px; padding: 5px 14px; }
 .grid2 > .panel + .panel { margin-top: 0; }
+
+/* Line / Curve connector editor */
+.stroke-editor { display: flex; flex-direction: column; gap: 8px; }
+.stroke-fields { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; }
+.stroke-fields .field { min-width: 0; }
+.stroke-fields input[type=number] { width: 90px; }
+.stroke-fields div.field { display: flex; flex-direction: column; gap: 4px; }
+.stroke-fields div.field > span { font-size: 12px; color: var(--muted); }
+/* Artwork editor working session: one bar with the unsaved state, Undo / Redo, Discard and Save. */
+.art-savebar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+.art-savebar.dirty { border-color: var(--warn); background: var(--warn-bg); }
+.art-savebar.confirm { border-color: var(--bad); }
+.art-savebar .row { gap: 6px; }
+.unsaved-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--warn); margin-right: 4px; vertical-align: middle; }
+.flip { display: inline-flex; transform: scaleX(-1); }
+.history li.unsaved { opacity: 0.85; font-style: italic; }
+/* Issue inspector: the image with located issues beside a compact, filterable list. */
+.insp-grid { display: grid; grid-template-columns: minmax(0, 3fr) minmax(280px, 2fr); gap: 16px; align-items: start; }
+@media (max-width: 900px) { .insp-grid { grid-template-columns: 1fr; } }
+.insp-filters { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.insp-filters select { width: 100%; font-size: 13px; }
+.insp-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.insp-chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 999px;
+  background: var(--panel, #fff); font: inherit; font-size: 13px; cursor: pointer; }
+.insp-chip .swatch { width: 12px; height: 12px; border-radius: 3px; }
+.insp-chip.active { border-color: var(--accent, #2f5bd8); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent, #2f5bd8) 25%, transparent); font-weight: 600; }
+.insp-count { min-width: 18px; padding: 0 5px; border-radius: 9px; color: #fff; font-size: 11px; font-weight: 700; line-height: 18px; text-align: center; }
+.insp-ok { color: var(--ok, #1b8a4b); font-size: 12px; }
+.insp-no { display: inline-block; min-width: 20px; height: 20px; padding: 0 4px; border-radius: 10px; background: #555; color: #fff;
+  font-size: 11px; font-weight: 700; line-height: 20px; text-align: center; flex: none; }
+.insp-card .insp-no { background: #333; }
+.insp-crop { max-width: 100%; image-rendering: pixelated; border: 1px solid var(--line); border-radius: 6px; }
+.ok-text { color: var(--ok, #1b8a4b); }
+.insp-list { list-style: none; margin: 0; padding: 0; max-height: 300px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; }
+.insp-list li { border-bottom: 1px solid var(--line); }
+.insp-list li:last-child { border-bottom: none; }
+.insp-list li.active { background: var(--soft, #eef2fb); }
+.insp-list li.stale { opacity: 0.6; }
+.insp-row { display: flex; align-items: center; gap: 8px; width: 100%; border: none; background: none; padding: 6px 8px; text-align: left; cursor: pointer; font: inherit; }
+.insp-row-title { flex: 1; }
+.sev-dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+.insp-card .kv { margin: 6px 0; }
