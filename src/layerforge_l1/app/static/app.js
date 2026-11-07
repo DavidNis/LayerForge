@@ -571,7 +571,7 @@ function proposalView() {
   if (!p) {
     return `<div class="panel stack">
       <h2>Proposal</h2>
-      <p class="muted">${busy() ? "The L1 proposal is running: color intake, the approved planner for each candidate, validation, and a STEP/STL export of the selected candidate that is reopened and checked." : "No proposal yet."}</p>
+      <p class="muted">${busy() ? "The L1 proposal is running: color intake, the approved planner for each candidate, validation, and an STL export of the selected candidate that is reopened and checked. STEP files are made and verified with the print kit." : "No proposal yet."}</p>
       ${busy() ? "" : `<button class="primary" data-action="propose">Run the proposal</button>`}
       <figure style="max-width:280px"><img class="img" src="${esc(ui.state.source_url)}" alt="source image"><figcaption>Source image as uploaded</figcaption></figure>
     </div>`;
@@ -598,7 +598,7 @@ function proposalView() {
   const blockers = (p.flags || []).filter((f) => f.severity === "BLOCKER");
   const notes = (p.flags || []).filter((f) => f.severity !== "BLOCKER");
   const warnings = notes.filter((f) => f.severity === "WARN").length;
-  const cadLine = p.cad ? `<p class="small muted" style="margin:0">CAD check of the selected candidate: reopened STL ${p.cad.revalidation_pass ? "PASS" : "FAIL"}, stack mismatch ${fmt(p.cad.stack_mismatch_px)} px, STEP single solids ${p.cad.all_step_valid_single_solid ? "yes" : "no"}, watertight STL ${p.cad.all_stl_watertight_single_component ? "yes" : "no"}.</p>` : "";
+  const cadLine = p.cad ? `<p class="small muted" style="margin:0">CAD check of the selected candidate: reopened STL ${p.cad.revalidation_pass ? "PASS" : "FAIL"}, stack mismatch ${fmt(p.cad.stack_mismatch_px)} px, ${p.cad.step_verification === "PENDING_PRINT_KIT" ? "STEP verified with the print kit" : `STEP single solids ${p.cad.all_step_valid_single_solid ? "yes" : "no"}`}, watertight STL ${p.cad.all_stl_watertight_single_component ? "yes" : "no"}.</p>` : "";
   const reviewAction = !sel ? "" : reviewing
     ? `<a class="button" href="#/${encodeURIComponent(ui.name)}/review" data-action="tab" data-tab="review">Open the editor →</a><span class="small muted">Reviewing <strong>${esc(reviewing)}</strong></span>`
     : `<button class="primary large" data-action="start-review" data-candidate="${esc(sel.name)}" ${busy() ? "disabled" : ""}>Review this candidate</button>`;
@@ -608,13 +608,14 @@ function proposalView() {
         <div class="plan-figure"><strong>${fmt(sel.sheet_count)} sheets</strong> <span class="muted">· ${(p.palette || []).length} colors</span></div>
         <div class="row" title="Colors front to back">${(sel.front_to_back_colors || []).map((h) => swatch(h, true)).join("")}<span class="small muted">front → back</span></div>
         <div class="small muted">Candidate <strong>${esc(sel.name)}</strong> · ${fmt(sel.source_regions_split_across_sheets)} split region(s) · ${fmt(sel.reconstruction_mismatched_pixels)} px mismatch</div>
+        ${p.cad && p.cad.step_verification === "PENDING_PRINT_KIT" ? `<div class="small muted" data-testid="step-pending">STEP check: done when you build the print kit.</div>` : ""}
         <div class="row">${reviewAction}</div>
       </div></div>`
     : `<div class="row"><h4 style="margin:0">Palette</h4>${(p.palette || []).map((h) => swatch(h, true)).join("")}</div>`;
   return `<div class="panel stack">
       <div class="spread">
         <h2>Plan ${badge(ready ? "ok" : notPlanned ? "neutral" : "warn", ready ? "Ready for review" : notPlanned ? "Artwork prepared · not planned yet" : "Needs your decision")}</h2>
-        <span class="muted small">Automatic proposal · ${fmt(p.seconds, 1)} s${p.artwork_edits ? ` · planned from artwork you edited (${p.artwork_edits.region_recolors} artwork edit${p.artwork_edits.region_recolors === 1 ? "" : "s"})` : ""} ${infoTip("No manual layer plan is used: the sheets are proposed automatically, validated, exported to STEP/STL, reopened and checked.")}</span>
+        <span class="muted small">Automatic proposal · ${fmt(p.seconds, 1)} s${p.artwork_edits ? ` · planned from artwork you edited (${p.artwork_edits.region_recolors} artwork edit${p.artwork_edits.region_recolors === 1 ? "" : "s"})` : ""} ${infoTip("No manual layer plan is used: the sheets are proposed automatically, validated, exported to STL, reopened and checked. STEP files are exported and verified when you build the print kit.")}</span>
       </div>
       ${notPlanned ? `<div class="banner info">The flat-color artwork is ready; no sheets are planned yet. Edit the artwork in the <strong>Artwork editor</strong> below if needed, then choose <strong>Plan sheets from this artwork</strong>.</div>` : ""}
       ${p.artwork_check ? artworkCheck(p.artwork_check) : ""}

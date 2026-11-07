@@ -19,8 +19,11 @@ Files are named by ``SheetStack.export_names()`` (current order and color).
 
 from __future__ import annotations
 
+import hashlib
 import json
+import threading
 import time
+from collections import OrderedDict
 from pathlib import Path
 from typing import Any
 
@@ -39,11 +42,57 @@ DEFAULT_SIMPLIFY_MM = 0.03
 MAX_MEAN_BOUNDARY_DEVIATION_MM = 1e-3
 STL_TOLERANCE_MM = 0.02
 STL_ANGULAR_TOLERANCE = 0.2
+# Validity check of each reopened STEP file: OCCT's BRepCheck_Analyzer with geometric controls, run
+# with its parallel option (same checks, same statuses; identical on 40 of the 62 golden STEP layers,
+# performance Step 3).  False restores the serial ``cq.Shape.isValid``.
+STEP_CHECK_PARALLEL = True
+
+
+def step_is_valid(shape: Any) -> bool:
+    """BRepCheck validity of a CadQuery shape (``cq.Shape.isValid``, optionally multi-threaded)."""
+
+    if not STEP_CHECK_PARALLEL:
+        return bool(shape.isValid())
+    from OCP.BRepCheck import BRepCheck_Analyzer
+
+    return bool(BRepCheck_Analyzer(shape.wrapped, True, True).IsValid())
+
+
+# Traced outlines are reused (performance Step 5): a kit traces each sheet for the export, the
+# revalidation and the printability estimate.  The key is the mask's exact content (shape, dtype, bytes) and
+# both parameters, so only an identical trace is reused; shapely geometries are immutable.
+# False traces every time.
+TRACE_CACHE = True
+_TRACE_CACHE_SIZE = 64
+_trace_cache: OrderedDict[tuple, BaseGeometry] = OrderedDict()
+_trace_lock = threading.Lock()
+
+
+def clear_cache() -> None:
+    with _trace_lock:
+        _trace_cache.clear()
 
 
 def mask_to_geometry(mask: np.ndarray, mm_per_pixel: float, simplify_mm: float):
     """Polygons whose edges follow pixel edges (not pixel centres)."""
 
+    if not TRACE_CACHE:
+        return _trace(mask, mm_per_pixel, simplify_mm)
+    raw = np.ascontiguousarray(mask)
+    key = (raw.shape, raw.dtype.str, hashlib.sha256(raw.tobytes()).hexdigest(), float(mm_per_pixel), float(simplify_mm))
+    with _trace_lock:
+        if key in _trace_cache:
+            _trace_cache.move_to_end(key)
+            return _trace_cache[key]
+    geometry = _trace(mask, mm_per_pixel, simplify_mm)
+    with _trace_lock:
+        _trace_cache[key] = geometry
+        while len(_trace_cache) > _TRACE_CACHE_SIZE:
+            _trace_cache.popitem(last=False)
+    return geometry
+
+
+def _trace(mask: np.ndarray, mm_per_pixel: float, simplify_mm: float):
     contours, hierarchy = cv2.findContours(
         mask.astype(np.uint8), cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE
     )
@@ -113,9 +162,30 @@ def _to_subpixels(coords: Any, grid: StackGrid) -> np.ndarray:
     return np.round(np.stack([u, v], axis=-1) * 16 - 8).astype(np.int32)
 
 
-def _downsample(image: np.ndarray, grid: StackGrid) -> np.ndarray:
+def _downsample_reference(image: np.ndarray, grid: StackGrid) -> np.ndarray:
+    """The original majority rule (kept to test ``_downsample`` against)."""
+
     n, s = grid.outer_pixels, SUPERSAMPLE
     return image.reshape(n, s, n, s).sum((1, 3)) >= (s * s) / 2
+
+
+def _downsample(image: np.ndarray, grid: StackGrid) -> np.ndarray:
+    """Majority of each s x s block of a 0/1 uint8 raster (same result as ``_downsample_reference``).
+
+    The block sums are built from s row slices, then s column slices, in uint8: at most s * s = 16,
+    so nothing overflows; this avoids numpy's strided multi-axis reduction (performance Step 5).
+    """
+
+    n, s = grid.outer_pixels, SUPERSAMPLE
+    rows = image.reshape(n * s, n, s)
+    across = rows[:, :, 0].copy()
+    for k in range(1, s):
+        across += rows[:, :, k]
+    blocks = across.reshape(n, s, n)
+    total = blocks[:, 0].copy()
+    for k in range(1, s):
+        total += blocks[:, k]
+    return total >= (s * s) / 2
 
 
 def rasterize_geometry(geometry: BaseGeometry, grid: StackGrid) -> np.ndarray:
@@ -202,15 +272,22 @@ def export_stack(
     *,
     simplify_mm: float = DEFAULT_SIMPLIFY_MM,
     progress: Any = None,
+    step: bool = True,
 ) -> dict[str, Any]:
-    """Write one STEP and one STL per sheet, reopen both, write ``cad_manifest.json``."""
+    """Write one STEP and one STL per sheet, reopen both, write ``cad_manifest.json``.
+
+    ``step=False`` writes and reopens the STL files only (same solids, same STL); the STEP
+    export and its read-back are left to a later export (the print kit).  STEP fields are then
+    ``None`` and the manifest records ``"step_exported": false``.
+    """
 
     import cadquery as cq
     import trimesh
 
     output = Path(output)
     (output / "stl").mkdir(parents=True, exist_ok=True)
-    (output / "step").mkdir(parents=True, exist_ok=True)
+    if step:
+        (output / "step").mkdir(parents=True, exist_ok=True)
     started = time.perf_counter()
     rows = []
     names = stack.export_names()
@@ -219,11 +296,12 @@ def export_stack(
         solid, geometry = build_sheet_solid(stack, index, simplify_mm)
         t_trace = time.perf_counter()
         step_path, stl_path = output / "step" / f"{name}.step", output / "stl" / f"{name}.stl"
-        cq.exporters.export(solid, str(step_path), exportType="STEP")
+        if step:
+            cq.exporters.export(solid, str(step_path), exportType="STEP")
         cq.exporters.export(solid, str(stl_path), exportType="STL",
                             tolerance=STL_TOLERANCE_MM, angularTolerance=STL_ANGULAR_TOLERANCE)
         t_export = time.perf_counter()
-        step_shape = cq.importers.importStep(str(step_path)).val()
+        step_shape = cq.importers.importStep(str(step_path)).val() if step else None
         mesh = trimesh.load_mesh(stl_path, file_type="stl", process=True)
         mm_px = stack.grid.mm_per_pixel
         mask_area = float(sheet.retained.sum()) * mm_px**2
@@ -241,9 +319,9 @@ def export_stack(
             "polygons": len(parts),
             "holes": sum(len(p.interiors) for p in parts),
             "vertices": sum(len(p.exterior.coords) + sum(len(r.coords) for r in p.interiors) for p in parts),
-            "step_solids": len(step_shape.Solids()),
-            "step_valid": bool(step_shape.isValid()),
-            "step_volume_mm3": round(float(step_shape.Volume()), 4),
+            "step_solids": len(step_shape.Solids()) if step else None,
+            "step_valid": step_is_valid(step_shape) if step else None,
+            "step_volume_mm3": round(float(step_shape.Volume()), 4) if step else None,
             "stl_triangles": int(len(mesh.faces)),
             "stl_watertight": bool(mesh.is_watertight),
             "stl_components": len(mesh.split(only_watertight=False)),
@@ -252,7 +330,8 @@ def export_stack(
             "traced_area_vs_mask_pct": round(100 * (geometry.area - mask_area) / mask_area, 4),
             "volume_vs_area_x_thickness_pct": round(100 * (mesh.volume - expected_volume) / expected_volume, 4),
             "expected_volume_mm3": round(float(expected_volume), 4),
-            "step_volume_vs_expected_pct": round(100 * (step_shape.Volume() - expected_volume) / expected_volume, 4),
+            "step_volume_vs_expected_pct": round(100 * (step_shape.Volume() - expected_volume) / expected_volume, 4)
+            if step else None,
             "seconds_trace": round(t_trace - t0, 2),
             "seconds_cad_export": round(t_export - t_trace, 2),
             "seconds_readback": round(time.perf_counter() - t_export, 2),
@@ -270,6 +349,7 @@ def export_stack(
         "simplify_mm": simplify_mm,
         "stl_tolerance_mm": STL_TOLERANCE_MM,
         "stl_angular_tolerance_rad": STL_ANGULAR_TOLERANCE,
+        **({} if step else {"step_exported": False}),
         "units": "mm",
         "assembly_back_to_front": [
             {
@@ -277,7 +357,7 @@ def export_stack(
                 "sheet_id": sheet.id,
                 "color": sheet.color,
                 "stl": f"stl/{name}.stl",
-                "step": f"step/{name}.step",
+                "step": f"step/{name}.step" if step else None,
                 "thickness_mm": sheet.thickness_mm,
                 "assembled_z0_mm": z,
                 **({"rim": dict(sheet.rim)} if sheet.rim is not None else {}),

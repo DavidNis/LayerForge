@@ -20,6 +20,10 @@ openings under 0.8 mm are counted as a diagnostic only, as before.
 
 from __future__ import annotations
 
+import copy
+import hashlib
+import threading
+from collections import OrderedDict
 from typing import Any
 
 import cv2
@@ -161,9 +165,69 @@ def reconstruction(stack: SheetStack, retained_masks: list[np.ndarray] | None = 
     return result
 
 
+# Reports of genuinely unchanged stacks are reused (performance Step 5): the app validates the same
+# stack when a candidate is proposed, when its review starts and when its kit is built.  The key covers
+# every input ``validate_stack`` reads - grid, target, frame color, and per sheet its id, color,
+# thickness, rim, both masks and exact geometry - plus the validator parameters and functions.  A hit
+# returns a copy of the stored report.  False validates every time.
+VALIDATION_CACHE = True
+_CACHE_SIZE = 16
+_cache: OrderedDict[str, dict[str, Any]] = OrderedDict()
+_cache_lock = threading.Lock()
+
+
+def clear_cache() -> None:
+    with _cache_lock:
+        _cache.clear()
+
+
+def validation_key(stack: SheetStack) -> str:
+    """Content hash of everything that can change the ``validate_stack`` report."""
+
+    import shapely
+
+    digest = hashlib.sha256()
+
+    def add(*parts: Any) -> None:
+        for part in parts:
+            if isinstance(part, np.ndarray):
+                raw = np.ascontiguousarray(part)
+                data = f"array{raw.shape}{raw.dtype.str}".encode() + raw.tobytes()
+            else:
+                data = repr(part).encode()
+            digest.update(len(data).to_bytes(8, "little") + data)
+
+    grid = stack.grid
+    add("validate_stack v1", grid.outer_pixels, grid.perimeter_pixels, grid.outer_sheet_mm, grid.scale,
+        grid.poc_config(), DEFAULT_OPTIMIZATION_CONFIG, OPENING_DIAGNOSTIC_MM, VECTOR_AREA_TOLERANCE_MM2,
+        *(id(f) for f in (audit_edge_connectivity, audit_connection_width, validate_sheet_mask,
+                          vector_sheet_checks, reconstruction, narrow_openings, cutout_hole_count)),
+        stack.frame_color, stack.target_rgb, len(stack.sheets))
+    for sheet in stack.sheets:
+        add(sheet.id, sheet.color, sheet.thickness_mm, sorted(sheet.rim.items()) if sheet.rim is not None else None,
+            sheet.retained, sheet.visible, None if sheet.geometry is None else shapely.to_wkb(sheet.geometry))
+    return digest.hexdigest()
+
+
 def validate_stack(stack: SheetStack) -> dict[str, Any]:
     """Run every check; ``status`` is PASS only if all gate checks pass."""
 
+    if not VALIDATION_CACHE:
+        return _validate_stack(stack)
+    key = validation_key(stack)
+    with _cache_lock:
+        if key in _cache:
+            _cache.move_to_end(key)
+            return copy.deepcopy(_cache[key])
+    report = _validate_stack(stack)
+    with _cache_lock:
+        _cache[key] = copy.deepcopy(report)
+        while len(_cache) > _CACHE_SIZE:
+            _cache.popitem(last=False)
+    return report
+
+
+def _validate_stack(stack: SheetStack) -> dict[str, Any]:
     grid = stack.grid
     sheets = []
     for order, sheet in enumerate(stack.sheets):

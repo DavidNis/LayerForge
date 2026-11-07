@@ -891,3 +891,46 @@ FDM thresholds remain generic assumptions until a print calibrates them).
     of that candidate (the existing job) and then opens the editor there.
   - Staleness: issues carry the basis they were computed for (draft update time or candidate); after a layer edit
     the old locations are drawn grey/dashed with a "re-checking" banner until the new result arrives.
+
+- 2026-11-07 Performance Step 2: the proposal no longer exports or verifies STEP; the print kit does (user approved).
+  - OBSERVED_IN_FILE (golden baselines, 5 projects): the print kit's CAD files were identical to the proposal's in
+    every project, and STEP read-back (importStep + isValid) was 82-89% of each CAD stage, so the proposal repeated
+    the kit's most expensive work.
+  - DESIGN_CHOICE: `export_stack(step=False)` writes and reopens the STL only (same solids, same STL bytes);
+    `ProposalConfig.export_step` (default False) controls it; True reproduces the earlier proposal byte for byte
+    (verified on all 5 golden baselines). The proposal records `cad.step_verification = PENDING_PRINT_KIT`,
+    `all_step_valid_single_solid = null`, and an INFO flag STEP_VERIFICATION_PENDING; the Plan screen says
+    "STEP check: done when you build the print kit". Kit export, STEP read-back and every kit verdict are unchanged.
+  - Not changed: planner, candidate selection, intake, STL previews and pixel revalidation, kit.
+- 2026-11-07 Performance Step 3: the print kit's STEP validity check runs OCCT's BRepCheck_Analyzer in parallel mode.
+  - OBSERVED (scripts/perf_step3_check.py, golden kit STEP files): 40 of 62 layers (Oscariko, US, vaporion, 10 of
+    15 turtle) compared; verdict and every per-subshape status (incl. statuses in parent context) identical; 3
+    defective shapes reported invalid by both modes with identical statuses. Check time 976 s serial vs 229 s
+    parallel (4.3x, on battery power); the remaining 22 layers (5 turtle, 17 dog) were not compared (stopped by user).
+  - DESIGN_CHOICE: `cad.step_is_valid` (geometric controls on, `theIsParallel=True`); `cad.STEP_CHECK_PARALLEL =
+    False` restores the serial `cq.Shape.isValid`. Same checks, same verdict field; geometry and exports unchanged.
+  - OBSERVED, not changed: STEP import heals some defects (a bow-tie face, an open shell, a vertex moved 3 mm all
+    reopen as valid), so the read-back validity check alone does not catch them; reported to the user.
+- 2026-11-07 Performance Step 5: three small clean-ups, each measured separately (scripts/perf_step5_check.py on the
+  Oscariko golden kit, 10 sheets, 1152 px grid; AC power; one run per state). All 46 output hashes/flags (outlines
+  as WKB, rasters, validation, STL revalidation, printability) identical before and after each change, and the
+  revalidation and printability equal the golden kit files.
+  - Downsample: `cad._downsample` sums the 4x4 blocks with uint8 slice additions (max 16, no overflow) instead of
+    numpy's strided multi-axis sum; `_downsample_reference` keeps the original rule and the tests compare both
+    (random rasters, every block count 0..16 incl. the 8/16 tie, real outlines). 186 -> 41 ms per call; one
+    tracing pass 1.9 -> 0.7 s; STL revalidation 20.7 -> 14.0 s; printability 3.9 -> 2.1 s.
+  - Traced outlines: `cad.mask_to_geometry` reuses an outline (in-process LRU, 64 entries, thread-safe) only for
+    an identical mask (shape, dtype, sha256 of the bytes) and identical mm/pixel and simplification. A kit traced
+    each sheet three times (export, revalidation retrace, printability); the retrace now rasterizes the outline
+    that was actually extruded. Revalidation 14.0 -> 10.6 s, printability 2.1 -> 1.1 s. `TRACE_CACHE = False`
+    traces every time.
+  - Validation reports: `validate_stack` reuses a report (copy; in-process LRU, 16 entries) when
+    `validation_key` matches: grid (4 fields + PocConfig), DEFAULT_OPTIMIZATION_CONFIG, opening/area tolerances,
+    the identity of each validator function, target RGB bytes, frame color, and per sheet id, color, thickness,
+    rim, retained and visible bytes and exact geometry WKB. Tests: the key changes with each of these (and with
+    order and sheet count); a saved and reloaded stack (incl. a vector sheet) has the same key; a failing edit is
+    never answered with a stored PASS. The app validates the same stack at proposal, review start and kit build;
+    a repeated validation of an unchanged stack 12.5 -> 0.75 s (mostly reloading the masks). `VALIDATION_CACHE =
+    False` validates every time. The first validation of a stack is unchanged (about 11 s here).
+  - Not changed: planner, candidate selection, validators, Final Review, masks, geometry, exports.
+  - Open issue recorded in TASKS.md (not addressed): STEP import auto-repairs some defects (Step 3 finding).

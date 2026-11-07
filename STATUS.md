@@ -996,3 +996,47 @@ follow the light-blue body). Not user approved; no CAD exported.
   Rebuilt dist\LayerForge\LayerForge.exe and dist\LayerForge-0.1.0-win64.zip (2026-11-03 20:00, SHA-256
   3c8fa022f8be10a10a0c887b31a2c06c0b3b722b9889bb588123437b08662bb3; static files byte-identical to src).
   Packaged tests NOT run (user: rebuild only, no tests).
+
+- 2026-11-06 — Performance audit (diagnosis only, no code changed). Evidence and scripts: artifacts/perf_audit_v1/.
+  Dog, clean runs: packaged exe proposal 1048 s (planning 4 candidates 611 s, CAD 402 s); print kit 516 s
+  (CAD again 447 s). STEP read-back (importStep + isValid) is 82% of every CAD stage; planner time is
+  dominated by full-grid support checks (unsupported_pixels 457 s of 475 s). The same proposal in the app
+  earlier today took 3838 s on the loaded machine (cause not verified). Parallel tests: 4 candidates 1.2-1.3x,
+  4-process CAD 1.4x (4-core laptop); OCCT parallel BRepCheck 1.9x on one layer, same verdict.
+
+- 2026-11-07 — Performance Step 0 complete (baselines only; no application code changed). Tools:
+  scripts/perf_baseline.py (run / compare / --resume-kit), scripts/perf_mem_guard.py. Golden outputs (private,
+  git-ignored): artifacts/perf_v1/golden/{oscariko,us,vaporion,turtle,dog}. Determinism: two Oscariko runs
+  identical; a one-pixel mask change is detected; kit-only resume identical to a full run. All 5: every candidate
+  validation PASS, proposal CAD revalidation pass, kit CAD_VALID, proposal and kit CAD files identical.
+  Totals (proposal + kit): Oscariko 169 s, US 444 s, vaporion 723 s, turtle 796 s, dog 1442 s (dog kit resumed
+  in a separate PowerShell process after Claude Code stopped the background run). Peak 720-1131 MB.
+
+- 2026-11-07 — Performance Step 2 (defer STEP export + verification to the print kit), awaiting approval.
+  Files: core/cad.py (export_stack step=), core/propose.py (ProposalConfig.export_step, flag), core/commands.py
+  (--no-cad help), app/static/app.js (Plan screen wording), tests/test_l1_propose.py (STEP pending + restore test);
+  scripts/perf_baseline.py (--export-step), scripts/perf_audit_step2.py. Source suite: 267 passed / 0 failed in
+  37 files (one per process; before the last one-line change, after which test_l1_propose re-ran: 9 passed).
+  Rebuilt dist\LayerForge\LayerForge.exe (09:49) and dist\LayerForge-0.1.0-win64.zip (09:50, SHA-256
+  56be76353ee21d2169c9add38e22dde85242750fe0afa61be57bdd0a10d0bf2f); packaged tests 9 PASS.
+  Benchmark (same build, AC power, back to back per project, before = export_step=True): proposal
+  Oscariko 107->89 s, US 263->170, vaporion 349->104, turtle 523->229, dog 918->598 (sum 2161->1189 s, 1.82x);
+  kit unchanged. Golden comparison: before runs IDENTICAL for all 5; after runs differ only in the allowed
+  STEP-only fields/files (audit PASS for all 5).
+
+- 2026-11-07 — Performance Step 3 (parallel exact STEP validity check in the kit), awaiting approval.
+  Files: core/cad.py (step_is_valid, STEP_CHECK_PARALLEL fallback), tests/test_step_check.py (3 tests),
+  scripts/perf_step3_check.py. Targeted tests: test_step_check 3, test_l0_core 27, test_l3_print_kit 8,
+  test_l2_editor 22 passed. Rebuilt dist (exe 13:11, zip 13:13, SHA-256
+  91b1de6c732d7cbbf21f5b7a62b499e4adad638add727d0bdcc8a0fcee8a0665); packaged smoke tests 4 PASS (info, API
+  workflow incl. kit export, startup/ports, stop during job). Golden-layer comparison: 40/62 identical (see DECISIONS).
+
+- 2026-11-07 — Performance Step 5 (small clean-ups), awaiting approval. Files: core/cad.py (`_downsample`,
+  `_downsample_reference`; `TRACE_CACHE`, `clear_cache`, `_trace`), core/validation.py (`VALIDATION_CACHE`,
+  `validation_key`, `clear_cache`, `_validate_stack`), tests/test_perf_cleanups.py (7 tests),
+  scripts/perf_step5_check.py + perf_step5_compare.py; Step 3 comment corrected (40 of 62 layers).
+  Targeted tests: test_perf_cleanups 7, test_step_check 3, test_l0_core 27, test_l2_editor 22,
+  test_l3_print_kit 8 (67 passed); test_l4_app 13 + test_review_layers 2 (15 passed). Rebuilt dist (exe 16:23,
+  zip 16:24, SHA-256 fa63e715f33015689eb484083376f7418ff0ccc7bd27d0ee21c4a85f4926853f); packaged smoke tests
+  4 PASS. Benchmark (Oscariko golden kit, 10 sheets, AC power, one run each; artifacts/perf_v1/step5/): kit-like
+  sequence 50.0 -> 24.8 s, all 46 output hashes/flags identical to before and to the golden kit files.

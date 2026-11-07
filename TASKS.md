@@ -344,3 +344,15 @@ No complete UI/server, arbitrary photographic depth estimation, frame design, gl
   extended (line end drag + typed angle, curve control drag, fill of the cut-off sail part, curved gap).
 - [ ] Not done: test_l4_app and packaged tests not run (2 GB free memory); exe/zip not rebuilt; Hebrew guide not
   updated; Brush is the only region-restricted tool (Line/Curve are not clipped to a selection).
+
+## Performance optimization (2026-11-06 .. 2026-11-07)
+
+- [x] Step 0 golden baselines (5 projects); Step 2 STEP deferred to the print kit; Step 3 parallel exact STEP check.
+- [x] Step 5 small clean-ups: faster exact raster downsample, reuse of traced outlines, reuse of validation reports
+  of unchanged stacks (`tests/test_perf_cleanups.py`, `scripts/perf_step5_check.py`); awaiting user approval.
+- [ ] Steps 6-7 (planner optimizations): only after explicit user approval.
+- [ ] Open issue, for later investigation (found in Step 3, not addressed): the STEP reader auto-repairs some
+  defects on import. A bow-tie face, an open shell and a vertex moved 3 mm in the STEP text all reopen as valid,
+  so the kit's STEP read-back validity check (importStep + BRepCheck) alone would not catch them. The kit also
+  checks solid count, volume vs area x thickness, and the reopened STL raster against the planned masks.
+  Pre-existing; no change made.

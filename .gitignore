@@ -51,3 +51,6 @@ prompts/
 
 # Derived from third-party reference artwork: private use only, not published.
 artifacts/l1_van_gogh_v1/
+
+# Performance baselines (scripts/perf_baseline.py): outputs derived from private user projects.
+artifacts/perf_v1/

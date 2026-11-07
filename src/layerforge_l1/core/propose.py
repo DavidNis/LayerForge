@@ -3,7 +3,8 @@
     load_image -> prepare_target (intake.py)
     -> plan_stack once per beam score     [approved planner, unchanged]
     -> validate_stack per candidate       [existing validators]
-    -> export_stack + revalidate_cad for the selected candidate
+    -> export_stack (STL; STEP is exported and verified by the print kit) + revalidate_cad
+       for the selected candidate
     -> generate_previews from the reopened STL
     -> proposal.json with flags for every interpretation the user must review
 
@@ -42,6 +43,11 @@ class ProposalConfig:
     # Each existing beam score yields one candidate; the planner itself is unchanged.
     beam_scores: tuple[str, ...] = ("area", "colors")
     export_cad: bool = True
+    # STEP export + STEP read-back of the selected candidate.  Off by default: the print kit exports
+    # the same solids to STEP and verifies every file, so the proposal checks the reopened STL only
+    # (previews and pixel revalidation are derived from it either way).  True restores the full
+    # proposal-time STEP export.
+    export_step: bool = False
     # When planning needed local cell refinement, also plan these wider refinements (extra
     # neighbor rings, -1 = whole artwork) with the first beam score, as extra candidates, so
     # sheet count and seams can be compared; images that plan without refinement skip this.
@@ -289,25 +295,35 @@ def propose(
             from .preview import generate_previews
 
             cad_dir = output / "selected" / "cad"
-            manifest = export_stack(stack, cad_dir, progress=progress)
+            manifest = export_stack(stack, cad_dir, progress=progress, step=config.export_step)
             check, stl_masks = revalidate_cad(stack, cad_dir, progress=progress)
             _write(cad_dir / "cad_revalidation.json", check)
             previews = generate_previews(stack, output / "selected" / "previews", stl_masks, "reopened STL")
             result["cad"] = {
                 "revalidation_pass": check["pass"],
                 "stack_mismatch_px": check["stack_mismatch_px"],
-                "all_step_valid_single_solid": all(r["step_valid"] and r["step_solids"] == 1 for r in manifest["layers"]),
+                # None: STEP is exported and verified when the print kit is built (``export_step``).
+                "all_step_valid_single_solid": all(r["step_valid"] and r["step_solids"] == 1 for r in manifest["layers"])
+                if config.export_step else None,
                 "all_stl_watertight_single_component": all(
                     r["stl_watertight"] and r["stl_components"] == 1 for r in manifest["layers"]),
                 "assembled_px_diff_from_planned": previews["assembled_px_diff_from_planned"],
                 "source_comparison_mismatched_pixels": previews.get("source_comparison_mismatched_pixels"),
+                # Only when deferred, so ``export_step=True`` writes exactly the earlier proposal.json.
+                **({} if config.export_step else {"step_verification": "PENDING_PRINT_KIT"}),
             }
-            cad_ok = (result["cad"]["revalidation_pass"] and result["cad"]["all_step_valid_single_solid"]
+            cad_ok = (result["cad"]["revalidation_pass"]
+                      and (result["cad"]["all_step_valid_single_solid"] or not config.export_step)
                       and result["cad"]["all_stl_watertight_single_component"]
                       and result["cad"]["assembled_px_diff_from_planned"] == 0)
             if not cad_ok:
                 flags.append(_flag("CAD_CHECK_FAILED", "BLOCKER", "Exported CAD does not reproduce the proposal.",
                                    **result["cad"]))
+            if not config.export_step:
+                flags.append(_flag(
+                    "STEP_VERIFICATION_PENDING", "INFO",
+                    "STEP files are exported and verified (reopened, one valid solid per sheet) when you build the "
+                    "print kit. This plan was checked from its reopened STL files."))
         else:
             from .preview import generate_previews
 

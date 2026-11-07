@@ -96,15 +96,43 @@ def test_proposal_is_automatic_valid_and_cad_derived(proposal) -> None:
     assert core.validate_stack(stack)["status"] == "PASS"
     assert stack.provenance["provenance"] == "auto-proposed"
     cad = result["cad"]
-    assert cad["revalidation_pass"] and cad["all_step_valid_single_solid"] and cad["all_stl_watertight_single_component"]
+    assert cad["revalidation_pass"] and cad["all_stl_watertight_single_component"]
     assert cad["stack_mismatch_px"] == 0 and cad["assembled_px_diff_from_planned"] == 0
     assert cad["source_comparison_mismatched_pixels"] == 0
-    assert len(list((out / "selected" / "cad" / "step").glob("*.step"))) == 6
+    # STEP is exported and verified by the print kit, not by the proposal.
+    assert cad["step_verification"] == "PENDING_PRINT_KIT" and cad["all_step_valid_single_solid"] is None
+    assert "STEP_VERIFICATION_PENDING" in {f["code"] for f in result["flags"]}
+    assert len(list((out / "selected" / "cad" / "stl").glob("*.stl"))) == 6
+    assert not (out / "selected" / "cad" / "step").exists()
+    manifest = json.loads((out / "selected" / "cad" / "cad_manifest.json").read_text(encoding="utf-8"))
+    assert manifest["step_exported"] is False and all(r["step_valid"] is None for r in manifest["layers"])
     assert (out / "selected" / "previews" / "assembled_front.png").is_file()
     codes = {f["code"] for f in result["flags"]}
     assert "DEPTH_ORDER_IS_STRUCTURAL" in codes and "NO_VALID_CANDIDATE" not in codes
     assert {row["color"] for row in result["color_topology"]} == set(result["palette"])
     assert json.loads((out / "proposal.json").read_text(encoding="utf-8"))["status"] == READY
+
+
+def test_proposal_step_export_can_be_restored(dev_jpeg, proposal, tmp_path) -> None:
+    """``export_step=True`` brings back the proposal-time STEP export and read-back; the STL files,
+    the pixel revalidation and the previews are the same as without it."""
+
+    out, first = proposal
+    config = ProposalConfig(planning=FAST.planning, beam_scores=("area",) if first["selected"] == "beam_area" else ("colors",),
+                            export_step=True)
+    second = propose(dev_jpeg, tmp_path, config=config)
+    assert second["selected"] == first["selected"]
+    cad = second["cad"]
+    assert "step_verification" not in cad and cad["all_step_valid_single_solid"] is True
+    assert "STEP_VERIFICATION_PENDING" not in {f["code"] for f in second["flags"]}
+    assert len(list((tmp_path / "selected" / "cad" / "step").glob("*.step"))) == 6
+    for stl in sorted((out / "selected" / "cad" / "stl").glob("*.stl")):
+        assert stl.read_bytes() == (tmp_path / "selected" / "cad" / "stl" / stl.name).read_bytes()
+    a = json.loads((out / "selected" / "cad" / "cad_revalidation.json").read_text(encoding="utf-8"))
+    b = json.loads((tmp_path / "selected" / "cad" / "cad_revalidation.json").read_text(encoding="utf-8"))
+    assert a == b
+    for png in sorted((out / "selected" / "previews").rglob("*.png")):
+        assert png.read_bytes() == (tmp_path / "selected" / "previews" / png.relative_to(out / "selected" / "previews")).read_bytes()
 
 
 def test_proposal_is_reproducible(dev_jpeg, proposal, tmp_path) -> None:

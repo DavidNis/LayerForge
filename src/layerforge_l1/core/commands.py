@@ -78,7 +78,7 @@ def add_parsers(commands: Any) -> None:
     pro.add_argument("--thickness-mm", type=float, default=PlanningConfig.thickness_mm)
     pro.add_argument("--max-colors", type=int, default=12)
     pro.add_argument("--min-color-mm2", type=float, default=2.0)
-    pro.add_argument("--no-cad", action="store_true", help="skip STEP/STL export of the selected candidate")
+    pro.add_argument("--no-cad", action="store_true", help="skip the STL export and CAD check of the selected candidate (STEP is exported by the print kit)")
 
     edit = commands.add_parser("stack-edit", help="L2: review and edit a saved sheet stack (project directory)")
     steps = edit.add_subparsers(dest="edit_command", required=True)
