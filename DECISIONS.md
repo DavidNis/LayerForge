@@ -951,3 +951,28 @@ FDM thresholds remain generic assumptions until a print calibrates them).
     (beam_area_refine_all). Timing: Oscariko planning 98.4 / 96.0 s off vs 72.4 / 72.8 s on (alternating runs,
     -25%); dog one pair 1293 s off vs 701 s on (-46%). Peak working set 266 -> 267 MB (Oscariko), 371 -> 389 MB (dog).
     The CPU ran at base clock without turbo during these runs, so absolute times are 2-3x the golden ones.
+- 2026-11-07 Performance Step 7: support checks reuse intermediate results (prototype, then integrated).
+  - OBSERVED (scripts/perf_step7_profile.py, 200 captured Oscariko states, 1152 px grid): 77.6 ms per
+    `unsupported_pixels`; 60% in four full-grid connected-component passes (`_anchored` x3 + final orphan check);
+    the bridge and cut repair loops ran once each and repaired nothing in all 200 states.
+  - DESIGN (src/layerforge_l1/support_reuse.py): exact reuse rules with preconditions and the original
+    computation as fallback. R1: first bridge check orphans = erode(support) & ~A (A = anchored covered core;
+    closing is extensive for a point-symmetric kernel, checked); R2: the first cut check reuses the bridge loop's
+    last check when support is unchanged; R3: the final orphan check of support|visible labels only the new core
+    pixels (a new component is an orphan iff it is not 4-adjacent to the fully anchored core and has no perimeter
+    pixel; requires the last check to have found no orphans and core containment, else full check); plus a memo
+    of covered_mask for the same covered cells. No assumption that only changed pixels change support.
+  - OBSERVED: bit-identical support masks, orphan cores and unsupported pixels on the 200 real states and in 9
+    tests (narrow bridges at the width threshold, a bridge removal disconnecting a distant island, diagonal-only
+    contact, enclosed cutouts with islands and spokes, frame contact, random shapes for 4 footprint sizes, random
+    cell sets of the bow-face planner, asymmetric kernel disabling R1, 78 cuts / 4 bridges / R3 after 52 cuts).
+    Support-check time 118 -> 63 ms (1.87x, alternating). Planning only, prototype patched in by the harness:
+    Oscariko 80.3 -> 40.9 s and 55.1 -> 32.4 s (alternating pairs), 46/46 candidate files identical; dog 287 s
+    with 168/168 candidate files identical and the same selection (no controlled dog baseline). Peak memory
+    unchanged (Oscariko 266 MB; dog 410 MB vs 389 MB in the Step 6 run).
+  - INTEGRATED (user approved): `RevealPlanner.unsupported_pixels` uses `support_reuse.ReuseChecks` when
+    `reveal_planner.SUPPORT_REUSE` is True; False runs the original, kept as `_unsupported_pixels` (also the
+    reference of every test). `structural_support`, `sheet_mask`, the search, scores, refinement and elimination
+    are unchanged. Oscariko planning only, alternating: 100.2 / 90.2 s off vs 56.5 / 48.6 s on (about 1.8x); peak
+    267 vs 266 MB; all 46 candidate files, scores, validation and the selection identical to golden. Other
+    projects not run (user instruction).

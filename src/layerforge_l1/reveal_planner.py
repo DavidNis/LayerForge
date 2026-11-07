@@ -303,6 +303,10 @@ REFINEMENT_ROUNDS: tuple[tuple[float, float, int], ...] = ((1.2, 0.3, 0), (1.2, 
 # and reused; outside it, or with SHARE_EVALUATIONS = False, every evaluation is computed.  Search
 # order, scores and tie-breaking are untouched.
 SHARE_EVALUATIONS = True
+# Support checks reuse intermediate results (performance Step 7, ``support_reuse``): bit-identical
+# results with fewer full-grid connected-component passes; each reuse has a precondition and falls
+# back to the full computation.  False runs the original ``_unsupported_pixels``.
+SUPPORT_REUSE = True
 _shared_reveals: ContextVar[dict | None] = ContextVar("shared_reveals", default=None)
 
 
@@ -354,6 +358,7 @@ class RevealPlanner:
         self.perimeter = self.perimeter | self.cells_mask(self.start_covered)
         self.colors = sorted(int(v) for v in np.unique(self.cell_color[~self.start_covered]))
         self._physics_key: str | None = None
+        self._support_checks: Any = None  # support_reuse.ReuseChecks, created on first use
 
     def cells_mask(self, cells: np.ndarray) -> np.ndarray:
         lookup = np.zeros(self.cell_count + 1, dtype=bool)
@@ -367,8 +372,23 @@ class RevealPlanner:
     def unsupported_pixels(
         self, covered_cells: np.ndarray, reveal: np.ndarray
     ) -> np.ndarray:
-        """Visible pixels of ``reveal`` that the sheet cannot support."""
+        """Visible pixels of ``reveal`` that the sheet cannot support.
 
+        With ``SUPPORT_REUSE`` the check runs in ``support_reuse`` (same result, fewer full-grid
+        connectivity passes); otherwise, or as its reference, ``_unsupported_pixels``.
+        """
+
+        if not SUPPORT_REUSE:
+            return self._unsupported_pixels(covered_cells, reveal)
+        if self._support_checks is None:
+            from .support_reuse import ReuseChecks
+
+            self._support_checks = ReuseChecks(self)
+        return self._support_checks.unsupported_pixels(covered_cells, reveal)
+
+    def _unsupported_pixels(
+        self, covered_cells: np.ndarray, reveal: np.ndarray
+    ) -> np.ndarray:
         visible = self.cells_mask(reveal)
         covered = self.covered_mask(covered_cells) | visible
         support = structural_support(covered, self.perimeter, self.kernel)

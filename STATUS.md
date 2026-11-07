@@ -1052,3 +1052,13 @@ follow the light-blue body). Not user approved; no CAD exported.
   Targeted tests: test_shared_evaluations 4, test_reveal_planner, test_refinement_and_details, test_l1_propose,
   test_l0_core: 50 passed. Rebuilt dist (exe 18:37, zip 18:38, SHA-256
   c8e1d38b309eede5c90e0af10f6eafeb91a3923bfd3ceb642ab1250e7d664c5c); packaged smoke tests 4 PASS. Not committed.
+
+- 2026-11-07 — Step 6 committed: 5adc6e5 on perf/steps-2-3-5 (after 15a3ee7); checked in a clean worktree (15 passed).
+- 2026-11-07 — Performance Step 7 (support reuse) integrated behind `reveal_planner.SUPPORT_REUSE`. Files:
+  reveal_planner.py (switch, `_unsupported_pixels` = original), src/layerforge_l1/support_reuse.py,
+  tests/test_support_reuse.py (10), scripts/perf_step7_states.py, perf_step7_profile.py, perf_step7_compare.py,
+  perf_step6_plan.py (--no-support-reuse). Targeted tests: test_support_reuse, test_shared_evaluations,
+  test_reveal_planner, test_connectivity_repair, test_refinement_and_details, test_l1_propose, test_l0_core:
+  61 passed. Oscariko planning only (only project run): 100.2 / 90.2 s -> 56.5 / 48.6 s, identical to golden.
+  Rebuilt dist (exe 20:07, zip 20:08, SHA-256 3bfa064c966e052b0eb34be0282939419894d3417bd926087d7967c83434770b;
+  support_reuse bundled); packaged smoke tests 4 PASS.

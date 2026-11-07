@@ -1,6 +1,6 @@
 """Performance Step 6 check: planning only (intake, every candidate, validation), compared with the golden run.
 
-    python scripts/perf_step6_plan.py <project name> <out dir> [--count-calls] [--no-share]
+    python scripts/perf_step6_plan.py <project name> <out dir> [--count-calls] [--no-share] [--no-support-reuse]
 
 Runs ``propose`` with the project's golden settings (artifacts/perf_v1/projects.json) and
 ``export_cad=False``: no CAD, previews or kit.  Records planning time per candidate, the whole-run
@@ -139,6 +139,10 @@ class CallCounter:
 def main() -> None:
     name, out = sys.argv[1], Path(sys.argv[2])
     count = "--count-calls" in sys.argv
+    if "--no-support-reuse" in sys.argv:  # the support checks before Step 7
+        import layerforge_l1.reveal_planner as reveal_planner
+
+        reveal_planner.SUPPORT_REUSE = False
     if "--no-share" in sys.argv:  # the implementation before Step 6
         import layerforge_l1.reveal_planner as reveal_planner
 
@@ -183,6 +187,7 @@ def main() -> None:
     report = {
         "project": name,
         "share_evaluations": "--no-share" not in sys.argv,
+        "support_reuse": "--no-support-reuse" not in sys.argv,
         "planning_seconds_all_candidates": round(seconds["plan_stack"], 1),
         "proposal_seconds_without_cad": round(total, 1),
         "candidates": [{k: c.get(k) for k in ("name", "status", "sheet_count", "planning_seconds")}
