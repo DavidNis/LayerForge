@@ -21,9 +21,12 @@ existing validator is reused unchanged to check the planner's output.
 
 from __future__ import annotations
 
+import hashlib
 import time
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Iterator
 
 import cv2
 import numpy as np
@@ -293,6 +296,31 @@ def refine_cells(
 REFINEMENT_ROUNDS: tuple[tuple[float, float, int], ...] = ((1.2, 0.3, 0), (1.2, 0.3, 1), (0.8, 0.1, 1), (0.8, 0.1, 2))
 
 
+# Shared evaluations (performance Step 6): candidates of one proposal (beam scores, wider
+# refinements) build separate planners over the same cells and repeat many ``maximal_reveal``
+# evaluations (the closure, the first beam depth, common later states).  Inside
+# ``shared_evaluations()`` each result is kept by content (planner physics, covered cells, color)
+# and reused; outside it, or with SHARE_EVALUATIONS = False, every evaluation is computed.  Search
+# order, scores and tie-breaking are untouched.
+SHARE_EVALUATIONS = True
+_shared_reveals: ContextVar[dict | None] = ContextVar("shared_reveals", default=None)
+
+
+@contextmanager
+def shared_evaluations(store: dict | None = None) -> Iterator[None]:
+    """Share ``maximal_reveal`` results between planners inside the block, in ``store`` (a dict the
+    caller keeps to share across several blocks; new if omitted).  A nested block uses the outer store."""
+
+    if _shared_reveals.get() is not None:
+        yield
+        return
+    token = _shared_reveals.set({} if store is None else store)
+    try:
+        yield
+    finally:
+        _shared_reveals.reset(token)
+
+
 class RevealPlanner:
     """Front-to-back sheet planner over a fixed cell decomposition."""
 
@@ -325,6 +353,7 @@ class RevealPlanner:
         )
         self.perimeter = self.perimeter | self.cells_mask(self.start_covered)
         self.colors = sorted(int(v) for v in np.unique(self.cell_color[~self.start_covered]))
+        self._physics_key: str | None = None
 
     def cells_mask(self, cells: np.ndarray) -> np.ndarray:
         lookup = np.zeros(self.cell_count + 1, dtype=bool)
@@ -352,11 +381,44 @@ class RevealPlanner:
             bad = visible & cv2.dilate(orphan.astype(np.uint8), self.kernel).astype(bool)
         return bad
 
+    def physics_key(self) -> str:
+        """Hash of everything ``maximal_reveal`` reads besides its arguments (computed once)."""
+
+        if self._physics_key is None:
+            digest = hashlib.sha256()
+            for array in (self.cell_map, self.cell_color, self.perimeter, self.kernel):
+                raw = np.ascontiguousarray(array)
+                digest.update(f"{raw.shape}{raw.dtype.str}".encode() + raw.tobytes())
+            digest.update(repr(self.nub_steps).encode())
+            self._physics_key = digest.hexdigest()
+        return self._physics_key
+
     def maximal_reveal(
         self, covered_cells: np.ndarray, color: int
     ) -> tuple[np.ndarray, int]:
-        """Greatest fixpoint of supportable uncovered cells of one color."""
+        """Greatest fixpoint of supportable uncovered cells of one color.
 
+        Inside ``shared_evaluations`` a result is reused for the same planner physics, the same
+        covered cells and the same color (the function reads nothing else); the reused result is
+        the one the computation returned.
+        """
+
+        shared = _shared_reveals.get() if SHARE_EVALUATIONS else None
+        if shared is None:
+            return self._maximal_reveal(covered_cells, color)
+        key = (self.physics_key(), covered_cells.shape, covered_cells.dtype.str,
+               np.packbits(covered_cells).tobytes(), int(color))
+        found = shared.get(key)
+        if found is not None:
+            bits, size, iterations = found
+            return np.unpackbits(bits, count=size).astype(bool), iterations
+        reveal, iterations = self._maximal_reveal(covered_cells, color)
+        shared[key] = (np.packbits(reveal), reveal.size, iterations)
+        return reveal, iterations
+
+    def _maximal_reveal(
+        self, covered_cells: np.ndarray, color: int
+    ) -> tuple[np.ndarray, int]:
         candidate = (~covered_cells) & (self.cell_color == color)
         iterations = 0
         while candidate.any():

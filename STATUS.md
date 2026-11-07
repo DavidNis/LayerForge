@@ -1040,3 +1040,15 @@ follow the light-blue body). Not user approved; no CAD exported.
   zip 16:24, SHA-256 fa63e715f33015689eb484083376f7418ff0ccc7bd27d0ee21c4a85f4926853f); packaged smoke tests
   4 PASS. Benchmark (Oscariko golden kit, 10 sheets, AC power, one run each; artifacts/perf_v1/step5/): kit-like
   sequence 50.0 -> 24.8 s, all 46 output hashes/flags identical to before and to the golden kit files.
+
+- 2026-11-07 — Performance checkpoint: branch perf/steps-2-3-5, commit 15a3ee7 (Steps 2, 3, 5 only; the earlier
+  uncommitted UI/intake work stays uncommitted in the working tree). Checked in a clean worktree: 18 tests passed.
+
+- 2026-11-07 — Performance Step 6 (shared planner evaluations between candidates), awaiting approval. Files:
+  reveal_planner.py (`SHARE_EVALUATIONS`, `shared_evaluations`, `RevealPlanner.physics_key`, `_maximal_reveal`),
+  core/propose.py (one store per proposal), tests/test_shared_evaluations.py (4 tests), scripts/perf_step6_plan.py.
+  Planning-only comparison with golden: Oscariko 46/46 and dog 168/168 candidate files identical, same selection.
+  Planning time: Oscariko 97 -> 73 s (-25%), dog 1293 -> 701 s (-46%); peak memory +1 MB / +18 MB.
+  Targeted tests: test_shared_evaluations 4, test_reveal_planner, test_refinement_and_details, test_l1_propose,
+  test_l0_core: 50 passed. Rebuilt dist (exe 18:37, zip 18:38, SHA-256
+  c8e1d38b309eede5c90e0af10f6eafeb91a3923bfd3ceb642ab1250e7d664c5c); packaged smoke tests 4 PASS. Not committed.

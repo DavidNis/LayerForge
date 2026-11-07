@@ -27,6 +27,7 @@ from PIL import Image
 
 from .intake import IntakeConfig, load_image, prepare_target, use_edited_target
 from .model import StackGrid, save_stack
+from ..reveal_planner import shared_evaluations
 from .planning import PlanningConfig, PlanningError, plan_stack
 from .validation import validate_stack
 
@@ -185,6 +186,8 @@ def propose(
 
     candidates = []
     stacks = {}
+    # Planner evaluations repeated by several candidates are computed once (reveal_planner.shared_evaluations).
+    shared: dict = {}
     runs = [(f"beam_{score}", score, 0) for score in config.beam_scores] if config.plan else []
     index = 0
     while index < len(runs):
@@ -195,8 +198,9 @@ def propose(
             row["refinement_extra_rings"] = extra
         t0 = time.perf_counter()
         try:
-            stack, report = plan_stack(prepared["target_rgb"],
-                                       replace(planning, beam_score=score, refinement_extra_rings=extra), name=name)
+            with shared_evaluations(shared):
+                stack, report = plan_stack(prepared["target_rgb"],
+                                           replace(planning, beam_score=score, refinement_extra_rings=extra), name=name)
         except PlanningError as error:
             row.update(status="PLANNING_FAILED", reason=str(error),
                        planner_report={k: v for k, v in error.report.items() if k != "reveal_config"})
@@ -236,6 +240,7 @@ def propose(
             runs[1:1] = [(f"beam_{score}_refine_{'all' if e < 0 else f'{e}rings'}", score, e)
                          for e in config.refinement_alternatives]
 
+    del shared
     valid = [c for c in candidates if c["status"] == "VALID"]
     selected = min(valid, key=lambda c: (c["sheet_count"], c["source_regions_split_across_sheets"],
                                          c.get("seam_length_mm", 0.0))) if valid else None

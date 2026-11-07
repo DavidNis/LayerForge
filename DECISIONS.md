@@ -934,3 +934,20 @@ FDM thresholds remain generic assumptions until a print calibrates them).
     False` validates every time. The first validation of a stack is unchanged (about 11 s here).
   - Not changed: planner, candidate selection, validators, Final Review, masks, geometry, exports.
   - Open issue recorded in TASKS.md (not addressed): STEP import auto-repairs some defects (Step 3 finding).
+- 2026-11-07 Performance Step 6: candidates of one proposal share repeated planner evaluations.
+  - OBSERVED (scripts/perf_step6_plan.py --count-calls, Oscariko, planning only): candidates build separate
+    planners over the same cells; 136 of 648 `maximal_reveal` calls repeated an identical evaluation (118 of them
+    from an earlier candidate: the closure, the first beam depth, common later states), 20.2 s of ~82 s planning.
+    `eliminate_sheets` repeats were negligible (0.5 s) and are not shared.
+  - DESIGN_CHOICE: `RevealPlanner.maximal_reveal` reuses a result inside `reveal_planner.shared_evaluations(store)`;
+    the key is the planner physics (sha256 of cell map, cell colors, perimeter incl. frame cells, width kernel, nub
+    steps: everything the evaluation reads besides its arguments), the exact covered-cell bits and the color. The
+    stored value is exactly the computed result (bit-packed). `propose` keeps one store per proposal and wraps each
+    `plan_stack` call; the store is dropped after the candidate loop; a ContextVar keeps app jobs (threads) apart.
+    `reveal_planner.SHARE_EVALUATIONS = False` computes every evaluation. The search, scores, tie-breaking,
+    refinement, elimination and the physical rules are unchanged.
+  - OBSERVED, planning only, compared with the golden run: Oscariko all 46 candidate files, scores, flags and the
+    selection identical; dog all 168 candidate files identical, 4 candidates VALID, same selection
+    (beam_area_refine_all). Timing: Oscariko planning 98.4 / 96.0 s off vs 72.4 / 72.8 s on (alternating runs,
+    -25%); dog one pair 1293 s off vs 701 s on (-46%). Peak working set 266 -> 267 MB (Oscariko), 371 -> 389 MB (dog).
+    The CPU ran at base clock without turbo during these runs, so absolute times are 2-3x the golden ones.
