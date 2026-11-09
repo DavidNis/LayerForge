@@ -154,15 +154,23 @@ def check_edit(project: Path, op: dict[str, Any]) -> dict[str, Any]:
     return {"op": op, "change": change, "validation_status": validation["status"], "failures": validation["failures"]}
 
 
-def apply_to_project(project: Path, op: dict[str, Any]) -> tuple[SheetStack, dict[str, Any]]:
-    """Apply one edit to the saved project, validate, log and save it (even if invalid)."""
+def apply_to_project(project: Path, op: dict[str, Any], stack: SheetStack | None = None,
+                     base: SheetStack | None = None,
+                     annotate: Callable[[], dict[str, Any]] | None = None) -> tuple[SheetStack, dict[str, Any]]:
+    """Apply one edit to the saved project, validate, log and save it (even if invalid).
+
+    ``stack`` / ``base``: the saved draft and its base when the caller already loaded them (they are
+    read only).  ``annotate``: extra keys for the logged op (not used by replay), asked for after the
+    edit is applied and validated, just before saving."""
 
     project = Path(project)
-    stack = load_project(project)
+    stack = load_project(project) if stack is None else stack
     op = _store_operand(with_default_precision(op), project)
     edited, change = apply_edit(stack, op, project)
     validation = validate_stack(edited)
-    base = load_base(project)
+    base = load_base(project) if base is None else base
+    if annotate is not None:
+        op = {**op, **annotate()}
     entry = {
         "index": len(stack.review["edits"]) + 1,
         "op": op,
@@ -174,6 +182,91 @@ def apply_to_project(project: Path, op: dict[str, Any]) -> tuple[SheetStack, dic
     edited.review["current"] = _summary(edited, validation, base)
     _save(edited, project)
     return edited, entry
+
+
+def widened_so_far(stack: SheetStack, project: Path) -> dict[str, np.ndarray]:
+    """Per sheet id, the material every logged ``widen_openings`` edit of the draft removed."""
+
+    from .editing import region_mask
+
+    ids = {s.id for s in stack.sheets}
+    out: dict[str, np.ndarray] = {}
+    for entry in stack.review["edits"]:
+        if entry["op"].get("op") != "widen_openings":
+            continue
+        for sheet_id, ref in entry["op"]["removed"].items():
+            if sheet_id in ids:
+                mask = region_mask(stack, {"mask": ref}, project)
+                out[sheet_id] = out[sheet_id] | mask if sheet_id in out else mask
+    return out
+
+
+def widen_project(project: Path, automatic: bool = False, config: Any = None,
+                  measure: Callable[[SheetStack], dict[str, Any]] | None = None,
+                  stack: SheetStack | None = None, base: SheetStack | None = None,
+                  ) -> tuple[SheetStack | None, dict[str, Any] | None, dict[str, Any]]:
+    """Widen the narrow cutouts of the saved draft into hidden material (``widening.py``) and log
+    the result as one ``widen_openings`` edit; returns (stack, log entry, widening report).
+
+    The removed material of each sheet is stored as a mask operand, so replay, undo and verify
+    subtract exactly the same pixels.  Nothing is logged when the widening changes nothing, is
+    restored by its final checks, or the draft does not validate (stack and entry are then None).
+    ``measure`` (optional, e.g. the printability geometry check) summarizes the draft before and
+    after; it does not influence the result and runs alongside the widening and the logging.
+    Earlier widenings in the log are passed on (``widened_so_far``): a repeated run only widens what
+    edits made new.  ``stack`` / ``base``: already loaded draft and base (read only)."""
+
+    from concurrent.futures import ThreadPoolExecutor
+
+    from .widening import APPLIED, WideningConfig, widen_openings
+
+    project = Path(project)
+    stack = load_project(project) if stack is None else stack
+    pool = ThreadPoolExecutor(2) if measure is not None else None
+    try:
+        before = pool.submit(measure, stack) if pool else None  # independent of the widening: runs meanwhile
+        widened, report = widen_openings(stack, config or WideningConfig(), widened_so_far(stack, project))
+        if report["status"] != APPLIED:
+            return None, None, report
+        after = pool.submit(measure, widened) if pool else None
+        return _log_widening(project, stack, base, widened, report, automatic, before, after)
+    finally:
+        if pool is not None:
+            pool.shutdown(wait=False, cancel_futures=True)
+
+
+def _log_widening(project: Path, stack: SheetStack, base: SheetStack | None, widened: SheetStack,
+                  report: dict[str, Any], automatic: bool, before: Any, after: Any,
+                  ) -> tuple[SheetStack, dict[str, Any], dict[str, Any]]:
+    """Store the removed masks as operands and log them as one ``widen_openings`` edit."""
+    import io
+
+    from PIL import Image
+
+    from .widening import removed_masks
+
+    removed = {}
+    for sheet_id, mask in sorted(removed_masks(stack, widened).items()):
+        buffer = io.BytesIO()
+        Image.fromarray(mask.astype(np.uint8) * 255).save(buffer, format="PNG")
+        data = buffer.getvalue()
+        name = OPERANDS_DIR / f"{hashlib.sha256(data).hexdigest()[:16]}.png"
+        (project / name).parent.mkdir(parents=True, exist_ok=True)
+        if not (project / name).exists():
+            (project / name).write_bytes(data)
+        removed[sheet_id] = name.as_posix()
+    summary = {k: report[k] for k in ("removed_px", "removed_mm2", "spots", "rejected", "local_checks",
+                                      "full_sheet_fallbacks", "seconds")}
+    summary["rejected_spots"] = report["rejected_spots"]
+
+    def annotate() -> dict[str, Any]:
+        if before is not None:
+            summary["before"], summary["after"] = before.result(), after.result()
+        return {"summary": summary}
+
+    op = {"op": "widen_openings", "automatic": bool(automatic), "config": report["config"], "removed": removed}
+    edited, entry = apply_to_project(project, op, stack, base, annotate)
+    return edited, entry, report
 
 
 def revert(project: Path, keep: int) -> tuple[SheetStack, dict[str, Any]]:
@@ -234,8 +327,8 @@ def verify_project(project: Path) -> dict[str, Any]:
     }
 
 
-def inspect_project(project: Path) -> dict[str, Any]:
-    stack = load_project(project)
+def inspect_project(project: Path, stack: SheetStack | None = None) -> dict[str, Any]:
+    stack = load_project(project) if stack is None else stack
     return {
         "name": stack.name,
         "status": stack.review["current"],
@@ -249,16 +342,17 @@ def inspect_project(project: Path) -> dict[str, Any]:
     }
 
 
-def preview_project(project: Path, output: Path, against: str = "base") -> dict[str, Any]:
+def preview_project(project: Path, output: Path, against: str = "base", stack: SheetStack | None = None,
+                    base: SheetStack | None = None) -> dict[str, Any]:
     """Previews of the current (possibly invalid) draft plus a change map."""
 
     from .preview import generate_previews
 
     project, output = Path(project), Path(output)
-    stack = load_project(project)
+    stack = load_project(project) if stack is None else stack
     edits = stack.review["edits"]
     if against == "base":
-        before = load_base(project)
+        before = load_base(project) if base is None else base
     elif against == "previous":
         before = replay(project, max(len(edits) - 1, 0))
     else:

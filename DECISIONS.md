@@ -1143,3 +1143,90 @@ FDM thresholds remain generic assumptions until a print calibrates them).
   structural connection rule only. Not changed without approval. All measurements use the planning grid pitch
   (aperture mm / artwork pixels = outer mm / outer pixels); the card states the position within the aperture.
 
+## D-V3-042 | 2026-11-08 | Cutout widening into hidden material (post-planning, optional, logged edit)
+
+- Context (OBSERVED, Chupa investigation): many risky cutouts under 0.8 mm in intermediate layers sit next to
+  material that layers in front already hide; removing that material cannot change the front view.
+- Decision: `core/widening.py` `widen_openings(stack)`. Per raster sheet: narrow = opening minus its opening by
+  a 0.8 mm disk; candidates = (opening dilated by 0.35 mm = 2 px at 0.1736 mm/px) & hidden material (not
+  visible on this sheet, not perimeter, not frame, covered by a sheet in front) & within (grow + 3 px) of a
+  narrow part. DESIGN_CHOICE (requirement 4): added pixels that no 0.8 mm disk reaches in the widened opening
+  and that are not next to the existing narrow part are kept as material (they would only form new tips).
+  Spots (8-connected) are removed largest first; each must keep the sheet validator's pass criterion
+  (one 4-neighbour component, every 1.2 mm structural core connected to the perimeter): first a windowed
+  local check (sufficient condition: new core/material pieces reach the window ring or perimeter, anchors
+  connected before stay connected, no anchor changes), whole-sheet check only when the window cannot decide.
+  Failing spots stay material. Final gate: full `validate_stack` (incl. reconstruction) + identical visible
+  masks, front view, sheet ids/order/colors/thickness/rims, material only removed, perimeter complete;
+  otherwise the original sheets are returned (`RESTORED_ORIGINAL`). Invalid plans and vector-geometry sheets
+  are not widened.
+- Integration: a logged review edit `widen_openings` whose operands are the removed-pixel masks (replay, undo,
+  verify subtract exactly those pixels; masks reaching visible/perimeter/frame/uncovered material are refused).
+  App: project setting `widen_openings` (default ON; checkbox beside "Review this candidate"); when on, the
+  reviewed candidate is widened as edit 1 when the review starts (only that candidate; before any edit, CAD
+  export or kit). Never re-applied automatically after manual edits: the "Cutout widening" panel shows what was
+  done (removed area, spots kept, risky cutouts before -> after with the default process) and offers "Widen
+  again" (refused when the last edit already is a widening). `POST /api/projects/<p>/widen`; CLI
+  `stack-edit widen`. Issue decisions are re-checked by the existing geometry fingerprints.
+- Not changed: planner, depth assignment, candidate selection, validators, the printability checker and its
+  small-residue filter, thresholds (0.8 mm opening, 1.2 mm structural width), the proposal.
+- Performance: `SheetStack.frame_mask()` returns at once when there is no frame color (same result; it indexed
+  the whole target, ~1 s per call, several calls per edit).
+- Evidence (Chupa scratch copy; original hashed unchanged): 106 -> 20 risky cutouts, 27 -> 19 places, narrowest
+  0.444 -> 0.463 mm, 14 layers, validation PASS, 0 px reconstruction / visible / front-view differences,
+  replay identical, print kit CAD_VALID (14 single valid STEP solids, watertight STL, 0 px read-back
+  differences). Physical printability NOT verified.
+- Amendment (2026-11-08, review feedback):
+  - Repeated widening: a run receives every earlier widening of the draft (`review.widened_so_far`, the logged
+    masks). Openings are measured and grown as they were before those widenings, and pixels an earlier
+    widening removed are never candidates again (still open: done; material again: put back by an edit). A
+    re-run on unchanged sheets is NO_CHANGE (the rejected spots are tried again and fail again: removing
+    material never restores connectivity or width); after edits only what the edits made new is widened; a
+    widened opening is never grown a second time; undo/revert drop the record with the edit.
+  - Existing projects: `widen_openings` missing from the project record means "not chosen"; such projects
+    are never widened automatically (the review-start checkbox starts unticked; the choice made when the
+    review starts is saved). New projects default to on. Existing reviews and their history are untouched;
+    "Widen narrow cutouts" stays available in the review.
+  - Performance (results unchanged): loaded stacks are passed on instead of reloaded (start, widen, log,
+    refresh); the planned sheets' geometry check starts while the review is created; geometry-check reports
+    are shared by content between the widening summary and the issue inspector (in-flight checks shared);
+    `SheetStack.target_labels()` is memoized by target content (copies returned). The final `validate_stack`
+    of the widened sheets and the exact-reconstruction gate are unchanged.
+  - Found while validating on other projects and fixed: (a) the growth could reach hidden pixels that touch
+    an opening only at a corner or lie past visible material; removing them made a new separate 1 px hole
+    (vaporion: an UNSUPPORTED 0.169 mm "opening may close"). Removed material must now join an opening edge
+    to edge (4-connected), and the final gate also requires that no sheet gains a separate cutout.
+    (b) A spot refused early can pass once later spots are removed (thinning hidden material until its
+    structural core vanishes removes an orphan core), so a second run on unchanged sheets still found
+    something (US). Refused spots are retried in further passes until a pass accepts none; the result is a
+    fixed point and a re-run on unchanged sheets is NO_CHANGE.
+- Amendment (2026-11-08, final audit before commit; user-approved feature, default ON for new projects):
+  - Finding: widening could leave hidden material narrower than the 1.2 mm structural width. The structural
+    rule (`audit_connection_width`) only requires every 1.2 mm core to reach the perimeter; it allows thin
+    material hanging off a core. Measured with the checker's own thin-part measure at 1.2 mm on the traced
+    geometry, before -> after: Chupa 0 -> 3 new parts, Oscariko 0 -> 4 (one RISK at the default 0.84 mm, partly
+    visible), turtle_on_leaf 2 new, US 3 new, vaporion 1 new (0.75-1.17 mm2 each); visible components without a
+    structural core ("thin decorative" warnings) US 3 -> 4, vaporion 2 -> 4.
+  - Fix (widening only; validators, checker and thresholds unchanged): every spot must also pass
+    `_ThinGuard`: material a disk of the 1.2 mm structural kernel cannot reach (opening of the material without
+    the perimeter band, as the checker measures it) may not appear or grow by w**2/4 or more in any region
+    (thin pixels within 1 px of each other are one region), and no visible component may lose its structural
+    core. Windowed check, whole sheet when a region reaches the window edge. The allowance is half the checker's
+    own w**2/2 corner-rounding floor because traced CAD outlines of small thin parts measured up to ~1.5x their
+    raster area. The final gate repeats the whole-sheet count (`no_new_thin_material`).
+  - Result (scratch copies; traced geometry, checker measure at 1.2 mm): 0 new thin parts on all five projects;
+    thin decorative warnings unchanged; unsupported openings 0 -> 0 everywhere; validation PASS, 0 px
+    reconstruction mismatch. Cost: a few more spots kept as material: risky cutouts Chupa 106 -> 22 (was 20),
+    Oscariko 7 -> 6, turtle_on_leaf 28 -> 16 (was 12), US 29 -> 12 (was 11), vaporion 49 -> 13.
+  - Explained measurement differences: some RISK slots report a smaller width after widening (e.g. Oscariko
+    0.638 -> 0.463 mm). No cutout pixel became narrower (local opening width at every original cutout pixel
+    is equal or larger: material is only removed). The checker reports the inscribed width of the *residue*
+    piece of a slot (the part a 0.8 mm disk cannot reach); widening consumes most of that piece and the small
+    remainder has a smaller inscribed disk. One Chupa slot (0.463 mm) appears as "new" because its residue grew
+    from 0.299 to 0.329 mm2, crossing the checker's 0.32 mm2 reporting floor; it existed before.
+  - Thresholds clarified (OBSERVED in code; nothing changed): 1.2 mm = the defined minimum retained-material
+    width = structural connection width (0.8 nominal + 0.2 vectorization + 0.2 CAD safety), enforced by the
+    validators as connectivity of 1.2 mm cores and now also by widening as "no new thinner material". 0.8 mm =
+    cutout threshold (`PrintProcess.min_opening_mm`). 0.84 mm = `PrintProcess.min_positive_feature_mm`, the
+    generic FDM estimate's thin-material RISK level (2 x the 0.42 mm line width, ASSUMPTION, D-V3 L3 print
+    kit); it reports thin material, it does not validate structure. Physical suitability open until a print.

@@ -96,6 +96,9 @@ def add_parsers(commands: Any) -> None:
     app.add_argument("--op-file", type=Path, default=None, help="JSON file with one edit dict")
     app.add_argument("op", nargs="?", default=None)
     app.add_argument("params", nargs="*", default=[])
+    wid = steps.add_parser("widen", help="widen narrow cutouts into hidden material (logged as one edit)")
+    wid.add_argument("--project", type=Path, required=True)
+    wid.add_argument("--report", type=Path, default=None)
     und = steps.add_parser("undo", help="drop the last edit(s) by replaying the rest from the base")
     und.add_argument("--project", type=Path, required=True)
     und.add_argument("--steps", type=int, default=1)
@@ -286,6 +289,9 @@ def _edit(args: argparse.Namespace, progress: Callable[..., None]) -> int:
     elif command == "apply":
         stack, entry = review.apply_to_project(args.project, _edit_op(args))
         report = {"edit": entry, "status": stack.review["current"]}
+    elif command == "widen":
+        stack, entry, report = review.widen_project(args.project)
+        report = {"widening": report, "edit": entry, "status": stack.review["current"] if stack else None}
     elif command in ("undo", "revert"):
         keep = None if command == "undo" else args.to
         stack, _ = review.undo(args.project, args.steps) if keep is None else review.revert(args.project, keep)

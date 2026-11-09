@@ -317,7 +317,12 @@ class Handler(BaseHTTPRequestHandler):
             ws.check_artwork_replan(name)  # nothing to plan, or a log that does not replay: refused now
             job = app.submit("artwork_replan", name, partial(ws.artwork_replan, name))
         elif action == "review" and len(parts) == 4:
-            job = app.submit("start_review", name, partial(ws.start_review, name, str(body.get("candidate", ""))))
+            widen = ws.check_widening_choice(body.get("widen_openings"))
+            job = app.submit("start_review", name, partial(ws.start_review, name, str(body.get("candidate", "")),
+                                                           widen_openings=widen))
+        elif action == "widen" and len(parts) == 4:
+            ws.check_widen(name)  # no review, or nothing changed since the last widening: refused now
+            job = app.submit("widen", name, partial(ws.widen, name))
         elif action == "edit" and len(parts) == 5 and parts[4] == "check":
             active = app.jobs.active(name)
             if active is not None:  # a running job may be writing the draft

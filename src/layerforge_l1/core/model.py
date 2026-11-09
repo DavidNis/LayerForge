@@ -30,6 +30,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -152,6 +153,10 @@ class StackGrid:
         return cls.for_planner(outer_sheet_mm, outer_pixels // base)
 
 
+_TARGET_LABELS: dict[tuple, tuple[np.ndarray, list[str]]] = {}
+_TARGET_LABELS_LOCK = threading.Lock()
+
+
 @dataclass
 class Sheet:
     """One printed sheet: a single filament color and its retained material."""
@@ -258,12 +263,26 @@ class SheetStack:
 
         if self.target_rgb is None:
             return None
-        labels, palette = exact_index(self.target_rgb)
-        return embed(labels.astype(np.int16), self.grid.poc_config(), -1), [hex_color(c) for c in palette]
+        # Memo by content (performance): the same reviewed target is indexed by every validation, edit
+        # and inspector view of a project (~1.5 s at 1024 px).  Callers get their own copies.
+        target = np.ascontiguousarray(self.target_rgb)
+        key = (hashlib.sha256(target.tobytes()).hexdigest(), target.shape, target.dtype.str, self.grid.poc_config())
+        with _TARGET_LABELS_LOCK:
+            found = _TARGET_LABELS.get(key)
+        if found is None:
+            labels, palette = exact_index(self.target_rgb)
+            found = (embed(labels.astype(np.int16), self.grid.poc_config(), -1), [hex_color(c) for c in palette])
+            with _TARGET_LABELS_LOCK:
+                _TARGET_LABELS[key] = found
+                while len(_TARGET_LABELS) > 4:
+                    _TARGET_LABELS.pop(next(iter(_TARGET_LABELS)))
+        return found[0].copy(), list(found[1])
 
     def frame_mask(self) -> np.ndarray:
         """Artwork-grid pixels of the frame color (solid on every sheet, never visible)."""
 
+        if self.frame_color is None:  # same result, without indexing the whole target (~1 s at 1024 px)
+            return np.zeros((self.grid.outer_pixels,) * 2, dtype=bool)
         found = self.target_labels()
         if found is None or self.frame_color is None:
             return np.zeros((self.grid.outer_pixels,) * 2, dtype=bool)

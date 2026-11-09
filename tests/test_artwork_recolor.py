@@ -373,7 +373,7 @@ def test_review_artwork_edit_blocks_export_until_replanned_or_undone(app):
     client, workspace, _ = app
     name = _import(client)
     state = client.state(name)
-    client.run(name, "review", {"candidate": state["proposal"]["selected"]})
+    client.run(name, "review", {"candidate": state["proposal"]["selected"], "widen_openings": False})  # no edit before the artwork edit
     state = client.state(name)
     sheets_before = len(state["draft"]["sheets"])
     manifest_before = (workspace / name / "review" / "sheet_stack.json").read_bytes()

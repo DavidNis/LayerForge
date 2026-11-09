@@ -149,12 +149,17 @@ try {
   await shot("02_proposal");
   step("proposal ready", { hash: await evaluate("location.hash") });
 
-  // 2. start the review with the selected candidate
+  // 2. start the review with the selected candidate (cutout widening switched off: this drive checks the
+  //    editor on the sheets as planned; the widening has its own tests)
+  if (!(await evaluate(`document.querySelector('[data-testid="widen-choice"]')?.checked === true`))) throw new Error("cutout widening should be on by default");
+  await evaluate(`document.querySelector('[data-testid="widen-choice"]').click()`);
+  await waitFor(`document.querySelector('[data-testid="widen-choice"]')?.checked === false`, "widening switched off");
   await clickText("button", "Review this candidate");
   await waitFor(`document.querySelectorAll('[data-testid="layer-row"]').length > 1 && ${idle}`, "review editor", 180000);
   const layers = await evaluate(`[...document.querySelectorAll('[data-testid="layer-row"]')].map((e) => e.querySelector(".name").innerText)`);
   results.layers_front_to_back = layers;
   await shot("03_review");
+  if (!(await evaluate(`/off/.test(document.querySelector('[data-testid="widening-panel"] summary')?.innerText || "")`))) throw new Error("widening panel should say off");
   step("review started", { layers });
 
   // 3a. Review Layers has no sheet-geometry tools.  Projects can still hold geometry edits (made by the

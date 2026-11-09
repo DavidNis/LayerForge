@@ -29,6 +29,8 @@ import shutil
 import stat
 import threading
 import zipfile
+from collections import OrderedDict
+from concurrent.futures import Future
 from dataclasses import asdict, fields
 from datetime import datetime, timezone
 from pathlib import Path
@@ -225,6 +227,57 @@ def process_from(values: dict[str, Any] | None):
     return PrintProcess(**data)
 
 
+# Geometry-check reports (``assess_printability``) of the sheets shown, shared by the widening summary and
+# the issue inspector: right after a review starts both check the same sheets.  The key is the content
+# hash ``validate_stack`` uses (grid, target, frame, and per sheet id, color, thickness, rim, masks, exact
+# geometry - everything the check reads) plus the process; reports are only read, never changed.  A check
+# still running is shared too (a second caller waits for it instead of checking the same sheets again).
+_GEOMETRY_CHECKS: "OrderedDict[tuple[str, str], Future]" = OrderedDict()
+_GEOMETRY_CHECKS_LOCK = threading.Lock()
+
+
+def geometry_check(stack: Any, process: Any) -> dict[str, Any]:
+    from ..core.printkit import assess_printability
+    from ..core.validation import validation_key
+
+    key = (validation_key(stack), repr(sorted(asdict(process).items())) + str(id(assess_printability)))
+    with _GEOMETRY_CHECKS_LOCK:
+        entry = _GEOMETRY_CHECKS.get(key)
+        owner = entry is None
+        if owner:
+            entry = _GEOMETRY_CHECKS[key] = Future()
+            while len(_GEOMETRY_CHECKS) > 4:
+                _GEOMETRY_CHECKS.popitem(last=False)
+        else:
+            _GEOMETRY_CHECKS.move_to_end(key)
+    if owner:
+        try:
+            entry.set_result(assess_printability(stack, process))
+        except BaseException as error:
+            with _GEOMETRY_CHECKS_LOCK:
+                if _GEOMETRY_CHECKS.get(key) is entry:
+                    del _GEOMETRY_CHECKS[key]
+            entry.set_exception(error)
+            raise
+    return entry.result()
+
+
+def prefetch_geometry_check(stack_dir: Path) -> None:
+    """Start the default-process geometry check of a saved stack in the background (errors are left to
+    the caller that needs the report, which then checks again)."""
+
+    def run() -> None:
+        from ..core.model import load_stack
+        from ..core.printkit import PrintProcess
+
+        try:
+            geometry_check(load_stack(stack_dir), PrintProcess())
+        except Exception:  # noqa: BLE001 - only a head start; the real caller reports errors
+            pass
+
+    threading.Thread(target=run, name="geometry-check-prefetch", daemon=True).start()
+
+
 def passing_validation(stack: Any) -> dict[str, Any]:
     """Summary of a draft ``apply_to_project`` validated as PASS (per-check details not recomputed)."""
 
@@ -371,6 +424,7 @@ class Workspace:
             out["outer_mm"] = float(settings.get("outer_mm", 225.0))
             out["thickness_mm"] = float(settings.get("thickness_mm", 1.6))
             out["max_colors"] = int(settings.get("max_colors", 12))
+            out["widen_openings"] = settings.get("widen_openings", True) is not False
         except (TypeError, ValueError) as error:
             raise AppError(f"invalid proposal setting: {error}") from None
         if out["scale"] not in SCALES:
@@ -838,7 +892,75 @@ class Workspace:
                 "after": check.get("after", {}).get("counts")}
 
     # -- 2. review / edit (L2) -----------------------------------------------------------
-    def start_review(self, name: str, candidate: str, progress: Callable[..., None]) -> dict[str, Any]:
+    @staticmethod
+    def widening_enabled(record: dict[str, Any]) -> bool | None:
+        """Cutout widening when a review starts: the project's choice.  None for projects created before
+        the option existed: never applied automatically until the user chooses (the review-start choice
+        is saved)."""
+
+        value = record["proposal_settings"].get("widen_openings")
+        return value if isinstance(value, bool) else None
+
+    @staticmethod
+    def check_widening_choice(value: Any) -> bool | None:
+        if value is not None and not isinstance(value, bool):
+            raise AppError("widen_openings must be true or false")
+        return value
+
+    @staticmethod
+    def opening_risks(stack: Any) -> dict[str, Any]:
+        """Risky cutouts of a stack as the issue inspector reports them (geometry check, default process)."""
+
+        from ..core import issue_review as rv
+        from ..core import issues as iss
+        from ..core.printkit import PrintProcess
+
+        process = PrintProcess()
+        located, _ = iss.fdm_issues(geometry_check(stack, process), source="geometry_check")
+        risky = iss.number([i for i in located if i["severity"] in ("RISK", "UNSUPPORTED")
+                            and rv.ROLES.get(i["kind"]) == "opening"], stack.grid)
+        rv.assign_keys(risky)
+        rv.group_by_location(risky, stack.grid)
+        widths = [i["measured"]["value"] for i in risky if (i.get("measured") or {}).get("value") is not None]
+        return {"risky_cutouts": len(risky), "places": len({i["group"] for i in risky}),
+                "narrowest_mm": min(widths, default=None), "process": process.name}
+
+    def _widen(self, name: str, automatic: bool, progress: Callable[..., None],
+                stack: Any = None, base: Any = None) -> dict[str, Any]:
+        """``stack`` / ``base``: the saved draft and its base when already loaded (read only)."""
+
+        progress("WIDENING_CUTOUTS", automatic=automatic)
+        project = self.review_dir(name)
+        before = review.load_project(project) if stack is None else stack
+        stack, entry, report = review.widen_project(project, automatic=automatic, measure=self.opening_risks,
+                                                    stack=before, base=base)
+        result = {k: report.get(k) for k in ("status", "reason", "removed_mm2", "spots", "rejected", "seconds")}
+        if entry is None:
+            return result
+        change = {"action": "widen", "index": entry["index"], "op": {"op": "widen_openings", "automatic": automatic},
+                  "change": entry["change"], "validation_status": entry["validation_status"],
+                  "failures": entry["failures"], "widening": entry["op"]["summary"]}
+        validation = passing_validation(stack) if entry["validation_status"] == "PASS" else None
+        self.refresh_draft(name, before, progress, change, validation, stack=stack, base=base)
+        current = stack.review["current"]
+        return {**result, "edit": entry["index"], "draft_status": current["status"], "printable": current["printable"]}
+
+    def widen(self, name: str, progress: Callable[..., None]) -> dict[str, Any]:
+        """Explicit run on the current draft (e.g. after layer edits); logged as one edit."""
+
+        self.check_widen(name)
+        return self._widen(name, False, progress)
+
+    def check_widen(self, name: str) -> None:
+        project = self.path(name) / "review"
+        if not (project / MANIFEST_NAME).is_file():
+            raise AppError("start a review first; cutouts are widened on the reviewed sheets")
+        edits = review.load_project(project).review["edits"]
+        if edits and edits[-1]["op"].get("op") == "widen_openings":
+            raise AppError("the cutouts were just widened and nothing changed since; edit the layers or undo first")
+
+    def start_review(self, name: str, candidate: str, progress: Callable[..., None],
+                     widen_openings: bool | None = None) -> dict[str, Any]:
         path, record = self.path(name), self.record(name)
         proposal = _read_json(path / "proposal" / "proposal.json")
         if proposal is None:
@@ -851,31 +973,49 @@ class Workspace:
         if (path / "review").exists():
             raise AppError("a review already exists for this project")
         progress("REVIEW_STARTING", candidate=candidate)
-        _, validation = review.start_review(path / "proposal" / "candidates" / candidate / "stack", path / "review")
+        if self.widening_enabled({"proposal_settings": {**record["proposal_settings"],
+                                                        **({} if widen_openings is None else {"widen_openings": widen_openings})}}):
+            # The widening summary needs the planned sheets' risky cutouts: checked while the review is created.
+            prefetch_geometry_check(path / "proposal" / "candidates" / candidate / "stack")
+        planned, validation = review.start_review(path / "proposal" / "candidates" / candidate / "stack", path / "review")
         record["candidate"] = candidate
+        if widen_openings is not None:
+            record["proposal_settings"]["widen_openings"] = widen_openings
         self._save_record(name, record)
-        return self.refresh_draft(name, None, progress, validation=validation)
+        # The saved draft is the planned candidate and also the review base: passed on, not reloaded.
+        if not (self.widening_enabled(record) and validation["status"] == "PASS"):
+            return self.refresh_draft(name, None, progress, validation=validation, stack=planned, base=planned)
+        # Post-planning step on the reviewed candidate only, before any edit, CAD export or kit; logged
+        # as edit 1, so undo restores the planned sheets.  Never applied automatically after edits.
+        widened = self._widen(name, True, progress, stack=planned, base=planned)
+        if widened.get("edit"):
+            return {"status": widened.pop("draft_status"), "printable": widened.pop("printable"), "widening": widened}
+        progress("WIDENING_NOT_APPLIED", status=widened["status"])
+        result = self.refresh_draft(name, None, progress, {"action": "widen", "widening": widened}, validation,
+                                    stack=planned, base=planned)
+        return {**result, "widening": widened}
 
     def refresh_draft(self, name: str, before: Any, progress: Callable[..., None],
                       change: dict[str, Any] | None = None,
-                      validation: dict[str, Any] | None = None) -> dict[str, Any]:
+                      validation: dict[str, Any] | None = None, stack: Any = None, base: Any = None) -> dict[str, Any]:
         """Re-derive the cached validation, inspection and previews of the saved draft.
 
         ``validation`` is the ``validate_stack`` report of the saved draft when the
-        caller already has it; ``None`` runs the validators again.
+        caller already has it; ``None`` runs the validators again.  ``stack`` / ``base``:
+        the saved draft and its base when the caller already holds them (not reloaded).
         """
 
         path = self.path(name)
         project = path / "review"
-        stack = review.load_project(project)
+        stack = review.load_project(project) if stack is None else stack
         if validation is None:
             progress("VALIDATING")
             validation = validate_stack(stack)
-        inspection = review.inspect_project(project)
+        inspection = review.inspect_project(project, stack)
         progress("PREVIEWING")
         previews = path / "draft" / "previews"
         shutil.rmtree(previews, ignore_errors=True)
-        report = review.preview_project(project, previews, "base")
+        report = review.preview_project(project, previews, "base", stack, base)
         if before is not None:
             report["changes_vs_previous"] = write_change_image(before, stack, previews / "changes_vs_previous.png")
         state = {
@@ -1858,10 +1998,10 @@ class Workspace:
         elif stack is not None:
             # No current saved estimate: the same geometry check (assess_printability) runs on the shown
             # sheets, with the process of the last estimate if there is one, else the generic default.
-            from ..core.printkit import PrintProcess, assess_printability
+            from ..core.printkit import PrintProcess
 
             process = PrintProcess(**estimate["process"]) if estimate is not None else PrintProcess()
-            report = assess_printability(stack, process)
+            report = geometry_check(stack, process)
             located, other = iss.fdm_issues(report, source="geometry_check")
             issues += located
             unlocalized += other
@@ -2149,6 +2289,20 @@ class Workspace:
                          "changes_vs_previous": previews.get("changes_vs_previous"),
                          "mask_source": previews.get("mask_source")},
             "last_change": draft.get("last_change"),
+            "widening": self._widening_view(name, draft),
+        }
+
+    def _widening_view(self, name: str, draft: dict[str, Any]) -> dict[str, Any]:
+        edits = draft["inspection"]["edits"]
+        runs = [e for e in edits if e["op"].get("op") == "widen_openings"]
+        last = runs[-1] if runs else None
+        return {
+            "enabled": self.widening_enabled(self.record(name)),
+            "last": None if last is None else {"index": last["index"], "automatic": bool(last["op"].get("automatic")),
+                                                "summary": last["op"].get("summary")},
+            "runs": len(runs),
+            "edits_after": len(edits) - last["index"] if last else None,
+            "can_run": draft["validation"]["status"] == "PASS" and not (edits and edits[-1]["op"].get("op") == "widen_openings"),
         }
 
     def _kit_view(self, name: str, path: Path, kit_id: str, current_sha: str | None) -> dict[str, Any]:

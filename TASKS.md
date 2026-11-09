@@ -368,3 +368,16 @@ No complete UI/server, arbitrary photographic depth estimation, frame design, gl
 - [x] Thresholds clarified (user, 2026-11-08): 1.2 mm stays the minimum retained-material width, 0.8 mm the cutout
   threshold; the 0.84 mm FDM estimate level is unchanged. Physical suitability revisited after a print.
 - [ ] Physical print test still pending.
+
+## Cutout widening into hidden material (2026-11-08, D-V3-042)
+
+- [x] `core/widening.py` (local checks + whole-sheet fallback + final gate), `widen_openings` edit with mask
+  operands, review start step (setting, default on), "Cutout widening" panel with re-run, `POST widen`,
+  `stack-edit widen`, tests/test_widening.py (12).
+- [x] Chupa regression on a scratch copy (106 -> 20 risky cutouts; kit CAD_VALID); original unchanged.
+- [x] User approved the implementation (2026-11-08); default ON for new projects.
+- [x] Final audit: no new thin material below 1.2 mm (`_ThinGuard` + gate), no new unsupported cutouts.
+- [ ] Commit per feature (plan awaiting approval), then rebuild exe/zip and run packaged tests.
+- [x] Review round: performance (+19.3 s -> +11.8 s on Chupa), idempotent repeated widening, no automatic
+  widening of existing projects, edge-connected removal + "no new cutout" gate; validated on 5 projects.
+- [ ] Physical print test (pending).

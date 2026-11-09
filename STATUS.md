@@ -1168,3 +1168,36 @@ follow the light-blue body). Not user approved; no CAD exported.
   bundled static files byte-identical to src. Packaged tests (one per process): info/static, issue inspector,
   API workflow, browser workflow, startup/ports, stop during a job: 6 PASS. Not run: the 3 artwork-editor packaged tests.
 
+- 2026-11-08 — Cutout widening into hidden material (D-V3-042). State: READY_FOR_USER_TEST (implementation review).
+  Not committed, exe/zip not rebuilt. Files: core/widening.py (new), core/editing.py (op), core/review.py
+  (`widen_project`), core/model.py (`frame_mask` early return), core/commands.py (`stack-edit widen`),
+  app/workspace.py, app/server.py, app/static/app.js; tests/test_widening.py (new, 12); test_l4_app.py,
+  test_issue_inspector.py, test_artwork_recolor.py, e2e/drive_app.mjs start their reviews with widening off.
+  Tests PASS: test_widening 12, test_l0_core, test_l2_editor, test_issue_review, test_l1_propose, test_l4_app
+  (35 incl. browser), test_artwork_paint/recolor/session, test_issue_inspector, test_review_layers.
+  Chupa (scratch copy, review started through Workspace.start_review): risky cutouts 106 -> 20 (27 -> 19 places),
+  narrowest 0.444 -> 0.463 mm, 569.8 mm2 hidden material removed at 559 spots, 6 spots kept for strength,
+  validation PASS, 0 px differences, replay identical; print kit CAD_VALID. Review start 9.0 s -> 18.8 s
+  (widening search + local checks 0.7 s, final validation gate ~4.5 s, risk summary ~2.7 s, edit logging).
+- 2026-11-08 — Cutout widening, review round (D-V3-042 amendment). Not committed, exe/zip not rebuilt.
+  Performance: loaded stacks passed on instead of reloaded; planned sheets' geometry check started while the
+  review is created; geometry-check reports shared by content with the issue inspector; target labels memoized.
+  Chupa, cold caches, medians of 3 on the same machine state: review start off 12.5 s, previous widening
+  31.8 s (+19.3), now 24.3 s (+11.8); issue inspector right after 9.4 / 7.5 / 4.2 s. The final validation of
+  the widened sheets and the reconstruction gate are unchanged.
+  Repeated widening is idempotent (earlier widenings are passed on; refused spots retried to a fixed point);
+  existing projects (no setting) are never widened automatically. Fixed: removed material must join an
+  opening edge to edge (vaporion had gained a 1 px UNSUPPORTED hole); the gate rejects new separate cutouts.
+  Validated on scratch copies of Oscariko, turtle_on_leaf (rim edits), US, vaporion and Chupa (originals hashed
+  unchanged): risky cutouts 7->6, 28->12, 29->11, 49->13, 106->20; validation PASS, 0 px reconstruction /
+  visible / front-view differences, replay identical, re-run NO_CHANGE, after a manual hidden slot only that
+  slot widened, exact-vector sheets skipped; print kits CAD_VALID (single valid STEP solids, watertight STL,
+  0 px read-back differences) for all five.
+- 2026-11-08 — Cutout widening final audit (user approved the feature; default ON for new projects, explicit
+  choice for existing ones). Found: widening could leave new hidden material narrower than 1.2 mm (1-4 small
+  parts per project, measured on the traced geometry with the checker's thin-part measure at 1.2 mm) and remove
+  the structural core of some thin visible parts. Fixed in core/widening.py (`_ThinGuard` per spot + gate check
+  `no_new_thin_material`); validators, checker, thresholds unchanged. After: 0 new thin parts and unchanged
+  thin-decorative warnings on Chupa, Oscariko, turtle_on_leaf, US, vaporion; unsupported openings 0 -> 0;
+  risky cutouts 106->22, 7->6, 28->16, 29->12, 49->13. Smaller reported slot widths explained (residue-piece
+  measure; no cutout pixel narrower). tests/test_widening.py +2 tests.

@@ -79,7 +79,7 @@ def _prepare_sheets(client, image: bytes, printability: bool = False) -> tuple[s
 
     name = client.ok("POST", "/api/projects?filename=sailboat_red_spot.png&scale=1", raw=image)["project"]
     client.wait({"id": client.state(name)["job"]["id"]})
-    client.run(name, "review", {"candidate": client.state(name)["proposal"]["selected"]})
+    client.run(name, "review", {"candidate": client.state(name)["proposal"]["selected"], "widen_openings": False})  # sheets as planned
     sheets = client.state(name)["draft"]["sheets"]
     front, second = sheets[-1]["id"], sheets[-2]["id"]
     for sheet, op, shape in ((front, "subtract", SLOT), (front, "add", DISC), (front, "add", NECK["disc"]),

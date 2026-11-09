@@ -54,3 +54,18 @@ artifacts/l1_van_gogh_v1/
 
 # Performance baselines (scripts/perf_baseline.py): outputs derived from private user projects.
 artifacts/perf_v1/
+
+# Evaluation evidence for the 2026-11 features (screenshots and measurements of the user's own
+# projects and artwork, incl. the Chupa investigation): private, not published.
+artifacts/artwork_fit_v1/
+artifacts/artwork_fit_v2/
+artifacts/artwork_recolor_v1/
+artifacts/chupa_cutout_investigation_v1/
+artifacts/issue_inspector_v2/
+artifacts/issue_review_v1/
+artifacts/perf_audit_v1/
+artifacts/review_layers_v1/
+artifacts/speckle_cleanup_v1/
+
+# Hebrew textbook build output (includes a headless-browser profile).
+docs/technical/engineering_he/build/

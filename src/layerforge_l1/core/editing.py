@@ -45,7 +45,7 @@ from .model import Sheet, SheetStack, StackError, _read_mask
 PRECISIONS = ("raster", "vector")
 EDIT_OPS = (
     "reorder", "move", "recolor", "thickness", "rim", "add", "subtract", "fill_hole",
-    "remove_island", "bridge", "merge", "split", "accept_artwork",
+    "remove_island", "bridge", "merge", "split", "accept_artwork", "widen_openings",
 )
 NO_MATERIAL = -1
 
@@ -510,6 +510,27 @@ def _apply(stack: SheetStack, op: dict[str, Any], root: Path | None) -> SheetSta
         if stack.frame_color:
             target[frame] = [int(stack.frame_color[i:i + 2], 16) for i in (1, 3, 5)]
         return _rebuild(stack, sheets, target_rgb=target)
+
+    if name == "widen_openings":
+        # The recorded result of ``widening.widen_openings`` (``review.widen_project``): per sheet id, a
+        # mask of the hidden material it removed.  Replay subtracts exactly these pixels and never
+        # searches again; a mask that reaches visible, perimeter or frame material, or material no sheet
+        # in front covers, is refused (it would change the front view).
+        removed = op["removed"]
+        if not isinstance(removed, dict) or not removed:
+            raise EditError("widen_openings needs 'removed': {sheet id: mask}; run it with `stack-edit widen`")
+        shown = stack.composite_sheet_index()
+        fixed = perimeter | stack.frame_mask()
+        for sheet_id in sorted(removed):
+            index = _sheet_index(stack, sheet_id)
+            if sheets[index].geometry is not None:
+                raise EditError(f"{sheet_id} has exact vector geometry; widen_openings works on raster sheets only")
+            mask = region_mask(stack, {"mask": removed[sheet_id]}, root)
+            if (mask & (fixed | sheets[index].visible | (shown <= index))).any():
+                raise EditError(f"widen_openings: the mask for {sheet_id} reaches material that is visible, "
+                                "perimeter or frame, or not covered by a sheet in front")
+            sheets[index].retained = sheets[index].retained & ~mask
+        return _rebuild(stack, sheets)
 
     raise EditError(f"unknown edit op {name!r}; supported: {', '.join(EDIT_OPS)}")
 

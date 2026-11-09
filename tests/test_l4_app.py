@@ -157,8 +157,10 @@ def test_api_workflow_import_review_edit_reload_export(app, tmp_path):
     assert client.call("GET", f"/files/{name}/../../etc/passwd")[0] == 404
     assert client.call("GET", f"/files/{name}/..%2F..%2Fproject.json")[0] in (400, 404)
 
-    # Review the selected candidate.
-    client.run(name, "review", {"candidate": proposal["selected"]})
+    # Review the selected candidate (as planned: cutout widening off; tests/test_widening.py covers it).
+    status, error = client.call("POST", f"/api/projects/{name}/review", {"candidate": proposal["selected"], "widen_openings": "yes"})
+    assert status == 400 and "true or false" in error["error"]["message"]
+    client.run(name, "review", {"candidate": proposal["selected"], "widen_openings": False})
     state = client.state(name)
     draft = state["draft"]
     assert draft["status"]["status"] == "REVIEWED_VALID" and draft["edits"] == []

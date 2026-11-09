@@ -27,6 +27,7 @@ const ui = {
   kitBuildOpen: false, // kit creation form shown via "+ New Print Kit" (always shown before the first kit)
   detailChoices: {},   // intake detail id -> {action, color} chosen but not yet re-run
   cleanupChoice: null, // speckle cleanup on/off chosen but not yet re-run (null: as planned)
+  widenChoice: null, // cutout widening when the review starts (null: the project setting)
   cleanupView: "after", // Color cleanup image: "after" | "before"
   upscaleFactor: 2,    // Upscale & Retry: processing-resolution factor shown
   upscaleApproved: {}, // preview id -> the user approved its visible changes
@@ -215,7 +216,8 @@ function jobLabel(job) {
     resize_search: "Trial planning at larger sheet sizes (no CAD)",
     resize_retry: "Resize & retry (L1 proposal at the new size, then the FDM estimate)",
     upscale_retry: "Upscale & Retry (L1 proposal at the finer resolution)",
-    start_review: "Starting the review",
+    start_review: "Starting the review (and widening narrow cutouts, if on)",
+    widen: "Widening narrow cutouts into hidden material",
     artwork_replan: "Planning sheets from the edited artwork (L1 proposal, validation, CAD check; previous attempt kept)",
     edit: "Applying the edit",
     undo: "Undo / revert (replaying the edit log)",
@@ -588,7 +590,7 @@ function proposalView() {
   const cadLine = p.cad ? `<p class="small muted" style="margin:0">CAD check of the selected candidate: reopened STL ${p.cad.revalidation_pass ? "PASS" : "FAIL"}, stack mismatch ${fmt(p.cad.stack_mismatch_px)} px, ${p.cad.step_verification === "PENDING_PRINT_KIT" ? "STEP verified with the print kit" : `STEP single solids ${p.cad.all_step_valid_single_solid ? "yes" : "no"}`}, watertight STL ${p.cad.all_stl_watertight_single_component ? "yes" : "no"}.</p>` : "";
   const reviewAction = !sel ? "" : reviewing
     ? `<a class="button" href="#/${encodeURIComponent(ui.name)}/review" data-action="tab" data-tab="review">Open the editor →</a><span class="small muted">Reviewing <strong>${esc(reviewing)}</strong></span>`
-    : `<button class="primary large" data-action="start-review" data-candidate="${esc(sel.name)}" ${busy() ? "disabled" : ""}>Review this candidate</button>`;
+    : `<button class="primary large" data-action="start-review" data-candidate="${esc(sel.name)}" ${busy() ? "disabled" : ""}>Review this candidate</button>${widenChoiceBox()}`;
   const summary = sel ? `<div class="plan-summary">
       ${img.assembled_front ? `<img class="img plan-thumb" src="${esc(img.assembled_front)}" alt="assembled front view of the selected plan">` : ""}
       <div class="stack" style="gap:6px">
@@ -847,6 +849,17 @@ function attemptsPanel() {
     <summary><h3>Previous attempts ${badge("neutral", String(attempts.length))}</h3><span class="small muted">archived proposals with their diagnostics and settings</span></summary>
     <div class="section-body"><div class="table-wrap"><table><thead><tr><th>Attempt</th><th>Result</th><th>Candidates</th><th>Retry</th><th>Evidence</th></tr></thead><tbody>${rows}</tbody></table></div></div>
   </details>`;
+}
+
+// Cutout widening when a review starts: the project's choice (on for new projects). Projects from before
+// the option have no choice saved: unticked until the user ticks it (the choice is saved with the review).
+function widenOn() {
+  return ui.widenChoice ?? (ui.state.record?.proposal_settings?.widen_openings === true);
+}
+
+function widenChoiceBox() {
+  return `<label class="small check tip" data-tip="When the review starts, cutouts narrower than 0.8 mm are widened by up to 0.35 mm per side into material that layers in front already hide. The front view, visible shapes and layer count stay the same; it is logged as edit 1 and can be undone.">
+    <input type="checkbox" data-testid="widen-choice" ${widenOn() ? "checked" : ""} ${busy() ? "disabled" : ""}> Widen narrow cutouts into hidden material</label>`;
 }
 
 // Details intake would recolor or erase: original | default intake | as planned, with a choice each.
@@ -2757,6 +2770,7 @@ function reviewView() {
       ${issuesPanel()}
       ${artworkPanel()}
       ${validationPanel()}
+      ${wideningPanel()}
       ${changePanel()}
       ${previewsPanel()}
     </div>
@@ -2924,10 +2938,40 @@ function validationPanel() {
   </details>`;
 }
 
+// Cutout widening (core/widening.py): what the last run did and an explicit re-run after edits.
+function wideningPanel() {
+  const d = ui.state.draft;
+  const w = d.widening;
+  if (!w) return "";
+  const s = w.last?.summary;
+  const c = d.last_change;
+  const notApplied = c && c.action === "widen" && !c.index ? c.widening : null;
+  const risk = s?.before && s?.after
+    ? `Risky cutouts (geometry check, ${esc(s.after.process)}): <strong>${fmt(s.before.risky_cutouts)} → ${fmt(s.after.risky_cutouts)}</strong> at ${fmt(s.before.places)} → ${fmt(s.after.places)} places.` : "";
+  const status = s
+    ? `${badge("ok", "applied")} <span class="small muted">edit #${w.last.index}${w.last.automatic ? ", when the review started" : ""}</span>`
+    : notApplied ? badge("neutral", "not applied") : w.enabled === false ? badge("neutral", "off") : badge("neutral", "not run");
+  const after = s && w.edits_after
+    ? `<p class="small" style="margin:0">${w.edits_after} layer edit${w.edits_after === 1 ? "" : "s"} since. Edits are not widened automatically; running it again widens only narrow cutouts the edits created (already widened cutouts are not widened further).</p>` : "";
+  const reason = notApplied ? `<p class="small muted" style="margin:0">${notApplied.status === "NO_CHANGE" ? "No narrow cutout could be widened into hidden material."
+    : esc(notApplied.reason || notApplied.status)}</p>` : "";
+  const body = s ? `<p class="small" style="margin:0">Removed ${fmt(s.removed_mm2, 1)} mm² of hidden material at ${fmt(s.spots - s.rejected)} places${s.rejected ? `; ${fmt(s.rejected)} kept to keep layers connected and at least 1.2 mm wide` : ""}. ${risk}</p>` : "";
+  return `<details class="panel tight section" data-section="widening" data-testid="widening-panel" ${openAttr("widening", false)}>
+    <summary><h3>Cutout widening</h3>${status}</summary>
+    <div class="section-body stack">
+      <p class="small muted" style="margin:0">Cutouts narrower than 0.8 mm are widened by up to 0.35 mm per side into material that layers in front already hide. The front view, visible shapes, layer order, colors and count stay the same; undo removes it.</p>
+      ${body}${after}${reason}
+      <div class="row"><button class="small" data-action="widen" ${busy() || !w.can_run ? "disabled" : ""} data-testid="widen-run"
+        title="${w.can_run ? "Widen the narrow cutouts of the current layers (logged as one edit)" : "Nothing changed since the last widening, or the layers are invalid"}">${s ? "Widen new cutouts" : "Widen narrow cutouts"}</button></div>
+    </div>
+  </details>`;
+}
+
 function changePanel() {
   const c = ui.state.draft.last_change;
   if (!c) return "";
-  if (c.action !== "edit") {
+  if (c.action === "widen" && !c.index) return "";
+  if (c.action !== "edit" && c.action !== "widen") {
     return `<div class="panel tight section-flat"><h3 style="margin:0">Last action <span class="small muted" style="font-weight:400">${esc(c.action)}: ${c.edits_before} → ${c.edits_after} edits (replayed from the base). Compare with “Changes vs previous”.</span></h3></div>`;
   }
   const [cls, label, text] = CHANGE_KINDS[c.change.kind] || ["neutral", c.change.kind, ""];
@@ -3019,7 +3063,8 @@ function historyPanel() {
   const d = ui.state.draft;
   const items = d.edits.slice().reverse().map((e) => {
     const [cls, label] = CHANGE_KINDS[e.kind] || ["neutral", e.kind];
-    return `<li data-testid="history-item"><span>#${e.index} <strong>${esc(e.op.op)}</strong> ${badge(cls, label)} ${e.validation_status !== "PASS" ? badge("bad", "invalid") : ""}</span>
+    const opName = e.op.op === "widen_openings" ? `widen cutouts${e.op.automatic ? " (automatic)" : ""}` : e.op.op;
+    return `<li data-testid="history-item"><span>#${e.index} <strong>${esc(opName)}</strong> ${badge(cls, label)} ${e.validation_status !== "PASS" ? badge("bad", "invalid") : ""}</span>
       <button class="small ghost" data-action="revert" data-keep="${e.index}" ${busy() || e.index === d.edits.length ? "disabled" : ""} title="Keep edits 1..${e.index}">Revert here</button></li>`;
   }).join("");
   const dis = busy() ? "disabled" : "";
@@ -3544,7 +3589,8 @@ async function onClick(event) {
     case "upscale-retry":
       submit(`${project}/upscale/retry`, { factor: Number(el.dataset.factor), preview_id: el.dataset.preview, approve_changes: Boolean(ui.upscaleApproved[el.dataset.preview]) });
       break;
-    case "start-review": submit(`${project}/review`, { candidate: el.dataset.candidate }); break;
+    case "start-review": submit(`${project}/review`, { candidate: el.dataset.candidate, widen_openings: widenOn() }); break;
+    case "widen": submit(`${project}/widen`, {}); break;
     case "select-sheet": ui.sheet = el.dataset.sheet; ui.marker = null; if (!ui.view.startsWith("changes")) ui.view = "sheet"; render(); break;
     case "view": ui.view = el.dataset.view; render(); break;
     case "cancel-pending": ui.pending = null; render(); break;
@@ -3700,6 +3746,9 @@ function onChange(event) {
     render();
   } else if (el.id === "cleanup-on") {
     ui.cleanupChoice = el.checked;
+    render();
+  } else if (el.dataset.testid === "widen-choice") {
+    ui.widenChoice = el.checked;
     render();
   } else if (el.dataset.detail && el.type === "radio") {
     const p = ui.state.proposal;
