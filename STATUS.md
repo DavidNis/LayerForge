@@ -1237,3 +1237,13 @@ follow the light-blue body). Not user approved; no CAD exported.
   load: panel +991 px, page scrolled +992 px, canvas moved 0.5 px; refresh after zoom/pan/scroll: all kept),
   4 lines saved at exactly the intended pixels. Cold Chupa (draw right after opening): slowest preview 2.4-2.5 s
   -> 1.5-1.8 s; feedback 14-26 ms throughout.
+
+- 2026-11-09 - Simplify tiny tips (D-V3-044). State: READY_FOR_USER_TEST; not committed, exe not rebuilt.
+  Chupa (scratch copy): 14 tips, 187 px (0.0178 %), the 6 three-color junctions kept; applied / saved artwork
+  pixel-identical to the approved experiment, verify replay identical. Server times: suggestion 514 ms first,
+  332 ms again, leaving a tip out 99 ms, apply 78 ms, undo / redo / save / verify 63-115 ms. Tests:
+  test_simplify_tips 8 (synthetic fixture: spikes shortened; whisker, free line, small eye, junction kept;
+  every subset safe; apply / undo / redo / save / replay exact; browser drive tests/e2e/drive_artwork_tips.mjs).
+  Follow-up: one issue check shared by concurrent requests (Chupa cold open: 2 checks -> 1, suggestion ready
+  ~2.3 s sooner); stale planning shown in the card (Chupa: an edit far away -> stale, 371 px, no tip marked;
+  an edit next to the #37 tip -> that tip marked); test_simplify_tips 10 PASS.

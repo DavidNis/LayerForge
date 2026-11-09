@@ -316,6 +316,12 @@ class Workspace:
         self._artwork_planned: dict[str, dict[str, Any]] = {}
         self._basis_sha: dict[tuple[str, int, int], str] = {}  # artwork file stamp -> pixel hash
         self._issue_cache: dict[str, tuple[Any, dict[str, Any]]] = {}  # project -> (input stamps, issues)
+        # A check in progress per (project, input stamps): a second request for the same inputs (the page's
+        # Issues panel and Simplify tiny tips on opening a project) waits for it instead of computing again.
+        self._issue_running: dict[Any, Future] = {}
+        self._issue_lock = threading.Lock()
+        self._tips_cache: dict[str, tuple[Any, dict[str, Any]]] = {}  # project -> (artwork + sites, tip suggestion)
+        self._planned_images: dict[str, tuple[Any, Any]] = {}  # project -> (file stamp, artwork the sheets were planned from)
 
     # -- paths and records -----------------------------------------------------------
     def path(self, name: str) -> Path:
@@ -1585,6 +1591,118 @@ class Workspace:
                               "Nearest-neighbour scaling: every pixel is a copy of an existing one, so no new color appears."],
                     "images": {k: self.url(name, f"artwork/preview/{k}.png", pid) for k in ("after", "before_after", "clipped")}}
 
+    def _tips_basis(self, name: str, image: Any, sha: str, suggestion: dict[str, Any], reach: int) -> tuple[dict[str, Any], set[str]]:
+        """Whether the suggestion's narrow cutouts belong to the artwork shown: the sheets were planned from
+        one artwork; the working artwork (saved and unsaved edits) may differ.  Returns ({"stale", "edited_px"},
+        ids of tips near pixels edited since planning).  The planned image is read only when they differ."""
+
+        import numpy as np
+
+        from ..core import artwork as art
+
+        path, proposal, _, origin = self.artwork_basis(name, load=False)  # pixel hash cached per file stamp
+        planned_sha = self._planned_sha(path, proposal, origin["sha256"])
+        if planned_sha is None or planned_sha == sha:
+            return {"stale": False, "edited_px": 0}, set()
+        file = path / origin["file"]
+        stamp = (str(file), file.stat().st_mtime_ns, file.stat().st_size)
+        cached = self._planned_images.get(name)
+        basis = cached[1] if cached and cached[0] == stamp else art.load_rgb(file)
+        self._planned_images[name] = (stamp, basis)
+        if basis.shape != image.shape:
+            return {"stale": True, "edited_px": None}, {t["id"] for t in suggestion["tips"]}
+        edited = np.any(basis != image, axis=2)
+        near = set()
+        for tip in suggestion["tips"]:
+            r0, c0, r1, c1 = tip["box"]
+            if edited[max(r0 - 2 * reach, 0):r1 + 2 * reach, max(c0 - 2 * reach, 0):c1 + 2 * reach].any():
+                near.add(tip["id"])
+        return {"stale": True, "edited_px": int(edited.sum())}, near
+
+    def _tip_issues(self, name: str) -> list[dict[str, Any]]:
+        """The located issues Simplify tiny tips starts from: the issue inspector's (cached per input files)."""
+
+        return self.issues(name)["issues"]
+
+    def artwork_simplify(self, name: str, request: Any) -> dict[str, Any]:
+        """Simplify tiny tips: ONE conservative suggestion (``core/tips.py``) for the working artwork, at the
+        places where the printability check of the current sheets reported a cutout narrower than the
+        minimum because of the image.  ``exclude`` lists tip ids left out.  Nothing is changed: the returned
+        ``op`` is applied only when the user adds it (``session/add``), as one logged artwork edit."""
+
+        from ..core import artwork as art
+        from ..core import tips as tp
+
+        exclude = request.get("exclude") if isinstance(request, dict) else None
+        if exclude is not None and (not isinstance(exclude, list) or not all(isinstance(x, str) for x in exclude)):
+            raise AppError("exclude must be a list of tip ids")
+        sites = tp.sites_from_issues(self._tip_issues(name))  # outside the lock: the first issue check may take seconds
+        min_width = min((s["min_width_mm"] for s in sites if s.get("min_width_mm")), default=0.8)
+        with self._artwork_lock:
+            directory, log, _ = self._artwork_log(name, create=True)
+            image, sha = self._working(directory, log)
+            frame, mpp = log["base"]["frame_color"], log["base"]["mm_per_pixel"]
+            key = (sha, json.dumps(sites, sort_keys=True), min_width)
+            cached = self._tips_cache.get(name)
+            if cached and cached[0] == key:
+                suggestion = cached[1]
+            else:
+                suggestion = tp.suggest(image, sites, mpp, frame, min_width)
+                self._tips_cache[name] = (key, suggestion)
+            ids = {t["id"] for t in suggestion["tips"]}
+            excluded = sorted(set(exclude or []) & ids, key=lambda i: int(i[1:]))
+            chosen = [t for t in suggestion["tips"] if t["id"] not in excluded]
+            planned, edited_near = self._tips_basis(name, image, sha, suggestion, tp.disc(min_width, mpp).shape[0])
+            out = {"sites": suggestion["sites"], "min_width_mm": min_width, "excluded": excluded, "planned": planned,
+                   "tips": [{**t, "edited_since_planning": t["id"] in edited_near} for t in suggestion["tips"]],
+                   "kept": suggestion["kept"], "op": None, "changed_pixels": 0, "changed_percent": 0.0, "images": {}}
+            if not chosen:
+                return out
+            why = tp.check_selection(image, chosen, mpp, min_width)
+            if why:
+                raise AppError(f"these tips cannot be changed together ({why}); include or exclude another one")
+            try:
+                op = art.check_op({"op": "simplify_tips", "tips": [{k: t[k] for k in ("id", "color", "fill", "pixels")} for t in chosen]})
+                if excluded:  # a changed selection: the picture only; the edit's summary is made when it is added
+                    after, mask, _, _ = art.plan_edit(image, op, frame, mpp, summarize=False)
+                else:  # the whole suggestion (the usual choice): computed once, reused by the add
+                    planned = art.planned_edit(image, op, frame, mpp)
+                    self._artwork_planned[name] = planned
+                    after, mask = planned["after"], planned["mask"]
+            except art.ArtworkError as error:
+                raise AppError(str(error)) from None
+            preview = directory / "preview"
+            shutil.rmtree(preview, ignore_errors=True)
+            preview.mkdir(parents=True)
+            art.save_rgb(after, preview / "after.png", compress_level=1)
+            pid = art.preview_id(sha, op)
+            px = int(mask.sum())
+            out.update(op=op, changed_pixels=px, changed_percent=round(100 * px / mask.size, 4), preview_id=pid,
+                       images={"after": self.url(name, "artwork/preview/after.png", pid)})
+            return out
+            why = tp.check_selection(image, chosen, mpp, min_width)
+            if why:
+                raise AppError(f"these tips cannot be changed together ({why}); include or exclude another one")
+            try:
+                op = art.check_op({"op": "simplify_tips", "tips": [{k: t[k] for k in ("id", "color", "fill", "pixels")} for t in chosen]})
+                planned = art.planned_edit(image, op, frame, mpp)
+            except art.ArtworkError as error:
+                raise AppError(str(error)) from None
+            self._artwork_planned[name] = planned  # the following add reuses it (same op, same pixels)
+            preview = directory / "preview"
+            shutil.rmtree(preview, ignore_errors=True)
+            preview.mkdir(parents=True)
+            art.save_rgb(planned["after"], preview / "after.png", compress_level=1)
+            changes = (planned["after"].astype(np.float32) * 0.35 + 255 * 0.65).astype(np.uint8)
+            changes[planned["mask"]] = (255, 0, 200)  # every changed pixel, on the faded artwork
+            art.save_rgb(changes, preview / "changes.png", compress_level=1)
+            pid = art.preview_id(sha, op)
+            px = int(planned["mask"].sum())
+            out.update(op=op, changed_pixels=px, changed_percent=round(100 * px / planned["mask"].size, 4),
+                       change=planned["change"], preview_id=pid,
+                       images={k: self.url(name, f"artwork/preview/{k}.png", pid) for k in ("after", "changes")})
+            return out
+
     def artwork_sample(self, name: str, at_px: Any) -> dict[str, Any]:
         """Eyedropper: the exact artwork color at a point."""
 
@@ -1882,12 +2000,28 @@ class Workspace:
         stamp = lambda f: (f.stat().st_mtime_ns, f.stat().st_size) if f.is_file() else None  # noqa: E731
         key = (name, stamp(path / "proposal" / "proposal.json"), stamp(review_manifest), stamp(estimate_file),
                stamp(path / "draft" / "state.json"))
-        cached = self._issue_cache.get(name)
+        with self._issue_lock:
+            cached = self._issue_cache.get(name)
+            running = None if cached and cached[0] == key else self._issue_running.get(key)
+            owner = not (cached and cached[0] == key) and running is None
+            if owner:
+                running = self._issue_running[key] = Future()
         if cached and cached[0] == key:
             result = cached[1]
+        elif not owner:
+            result = running.result()  # the same check is already running: its result (or its error)
         else:
-            result = self._compute_issues(name, path, record, proposal, review_manifest, estimate_file)
-            self._issue_cache[name] = (key, result)
+            try:
+                result = self._compute_issues(name, path, record, proposal, review_manifest, estimate_file)
+            except BaseException as error:  # the waiting requests get the same error; nothing is cached
+                with self._issue_lock:
+                    self._issue_running.pop(key, None)
+                running.set_exception(error)
+                raise
+            with self._issue_lock:
+                self._issue_cache[name] = (key, result)
+                self._issue_running.pop(key, None)
+            running.set_result(result)
         artwork = self._artwork_view(name, path, proposal)
         edited = bool(artwork.get("available") and (artwork.get("differs_from_planned") or (artwork.get("unsaved") or {}).get("count")))
         out = {**result, "sources": [dict(src) for src in result["sources"]],

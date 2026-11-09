@@ -40,8 +40,11 @@ ARTWORK_VERSION = "1.0.0"
 COLOR_SOURCES = ("palette", "picker", "eyedropper")
 # Ops: recolor one region / several regions; paint a stroke (straight line, or freehand brush clipped to
 # selected regions); close a contour gap (a straight stroke between two snapped contour ends); fit the
-# composition (enlarge and move the subject inside the artwork aperture, ``fit_composition``).
-OPS = ("recolor_region", "recolor_regions", "paint_stroke", "close_gap", "fit_composition")
+# composition (enlarge and move the subject inside the artwork aperture, ``fit_composition``); simplify tiny
+# tips (``simplify_tips``: the accepted tips of a ``core/tips.py`` suggestion, each with its exact pixels).
+OPS = ("recolor_region", "recolor_regions", "paint_stroke", "close_gap", "fit_composition", "simplify_tips")
+MAX_TIPS = 500
+MAX_TIP_PIXELS = 20000  # all tips of one edit together
 MAX_STROKE_POINTS = 4000
 GAP_SNAP_MM = 2.0
 # A stroke path: "line" (straight segments through the points) or "cubic" Bezier (start, control 1,
@@ -69,10 +72,12 @@ def load_rgb(path: Path) -> np.ndarray:
     return np.array(Image.open(path).convert("RGB"), dtype=np.uint8)  # writable copy
 
 
-def save_rgb(image: np.ndarray, path: Path) -> None:
+def save_rgb(image: np.ndarray, path: Path, compress_level: int | None = None) -> None:
+    """``compress_level`` (0-9) only for temporary preview images: same pixels, written faster."""
+
     path.parent.mkdir(parents=True, exist_ok=True)
     partial = path.with_name(path.name + ".partial.png")
-    Image.fromarray(image).save(partial)
+    Image.fromarray(image).save(partial, **({} if compress_level is None else {"compress_level": compress_level}))
     partial.replace(path)
 
 
@@ -379,6 +384,8 @@ def check_op(op: Any) -> dict[str, Any]:
         raise ArtworkError(f"an artwork edit needs op one of {', '.join(OPS)}")
     if kind == "fit_composition":
         return check_fit_op(op)
+    if kind == "simplify_tips":
+        return check_tips_op(op)
     source = op.get("source", "picker")
     if source not in COLOR_SOURCES:
         raise ArtworkError(f"source must be one of {', '.join(COLOR_SOURCES)}")
@@ -442,6 +449,8 @@ def plan_edit(image: np.ndarray, op: dict[str, Any], frame_hex: str | None, mm_p
 
     if op["op"] == "fit_composition":
         return plan_fit(image, op, frame_hex, mm_per_pixel)
+    if op["op"] == "simplify_tips":
+        return plan_tips(image, op, frame_hex, mm_per_pixel, summarize)
     if op["source"] == "eyedropper":
         row, col = check_point(image, op["sampled_at_px"])
         sampled = hex_color(tuple(int(v) for v in image[row, col]))
@@ -662,6 +671,74 @@ def analyse_composition(image: np.ndarray, frame_hex: str | None, mm_per_pixel: 
     out.update(status="READY", op=_fit_op(box, scale, offset, bg["background"], "auto", margin),
                reason=None)
     return out
+
+
+def check_tips_op(op: dict[str, Any]) -> dict[str, Any]:
+    """``{"op": "simplify_tips", "tips": [{"id", "color", "fill", "pixels": [[row, col], ...]}, ...]}``:
+    each tip's pixels have ``color`` and become ``fill`` (both palette colors, checked when applied)."""
+
+    tips = op.get("tips")
+    if not isinstance(tips, list) or not 0 < len(tips) <= MAX_TIPS:
+        raise ArtworkError(f"simplify_tips needs 1 to {MAX_TIPS} tips")
+    out, total = [], 0
+    for tip in tips:
+        if not isinstance(tip, dict) or not isinstance(tip.get("pixels"), list) or not tip["pixels"]:
+            raise ArtworkError("each tip needs its color, fill and pixels [[row, column], ...]")
+        try:
+            pixels = [[int(q[0]), int(q[1])] for q in tip["pixels"]]
+        except (TypeError, ValueError, IndexError):
+            raise ArtworkError("tip pixels must be [row, column] in artwork pixels") from None
+        color, fill = "#%02X%02X%02X" % parse_hex(tip.get("color")), "#%02X%02X%02X" % parse_hex(tip.get("fill"))
+        if color == fill:
+            raise ArtworkError("a tip's fill must differ from its color")
+        total += len(pixels)
+        out.append({"id": str(tip.get("id") or f"t{len(out) + 1}"), "color": color, "fill": fill, "pixels": pixels})
+    if total > MAX_TIP_PIXELS:
+        raise ArtworkError(f"simplify_tips changes at most {MAX_TIP_PIXELS} pixels")
+    return {"op": "simplify_tips", "tips": out}
+
+
+def plan_tips(image: np.ndarray, op: dict[str, Any], frame_hex: str | None, mm_per_pixel: float,
+              summarize: bool = True) -> tuple[np.ndarray, np.ndarray, dict[str, Any], dict[str, Any] | None]:
+    """(after, changed pixels, selection, change) of accepted tips: every pixel must still have its tip's
+    color (otherwise the artwork changed since the suggestion and nothing is applied)."""
+
+    after = image.copy()
+    mask = np.zeros(image.shape[:2], bool)
+    frame = frame_hex.upper() if frame_hex else None
+    height, width = image.shape[:2]
+    for tip in op["tips"]:
+        rows, cols = np.array(tip["pixels"]).T
+        if rows.min() < 0 or cols.min() < 0 or rows.max() >= height or cols.max() >= width:
+            raise ArtworkError(f"tip {tip['id']} is outside the {height} x {width} artwork")
+        if frame in (tip["color"], tip["fill"]):
+            raise ArtworkError("the frame padding is never changed")
+        if mask[rows, cols].any() or not np.all(image[rows, cols] == np.asarray(parse_hex(tip["color"]), np.uint8)):
+            raise ArtworkError(f"tip {tip['id']} no longer matches the artwork; make the suggestion again")
+        after[rows, cols] = parse_hex(tip["fill"])
+        mask[rows, cols] = True
+    froms = sorted({t["color"] for t in op["tips"]})
+    fills = sorted({t["fill"] for t in op["tips"]})
+    px = int(mask.sum())
+    selection = {"color": froms[0] if len(froms) == 1 else "mixed", "colors": froms, "regions": len(op["tips"]), "items": [],
+                 "pixels": px, "area_mm2": round(px * mm_per_pixel**2, 3), "bbox_px": _bbox(mask), "regions_of_color": None,
+                 "limited_by_box": False, "whole_region_pixels": px, "box_px": None, "region_sha256": mask_sha256(mask)}
+    if not summarize:
+        return after, mask, selection, None
+    inside = artwork_area(image, frame_hex)
+    before_colors = {hex_color(tuple(int(v) for v in c)) for c in unique_colors(image[inside])}
+    after_colors = {hex_color(tuple(int(v) for v in c)) for c in unique_colors(after[inside])}
+    involved = sorted(set(froms) | set(fills))
+    packed_before, packed_after = _packed(image), _packed(after)  # one pass; a color mask is then one comparison
+    value = lambda h: _packed(np.asarray(parse_hex(h), np.uint8))  # noqa: E731
+    change = {"from": selection["color"], "from_colors": froms, "to": fills[0] if len(fills) == 1 else "mixed", "to_colors": fills,
+              "pixels": px, "tips": len(op["tips"]),
+              "palette_size_before": len(before_colors), "palette_size_after": len(after_colors),
+              "colors_removed": sorted(before_colors - after_colors), "colors_added": sorted(after_colors - before_colors),
+              "regions_before": {h: region_count((packed_before == value(h)) & inside) for h in involved},
+              "regions_after": {h: region_count((packed_after == value(h)) & inside) for h in involved},
+              "merged_with_adjacent_regions": 0}
+    return after, mask, selection, change
 
 
 def check_fit_op(op: dict[str, Any]) -> dict[str, Any]:
@@ -985,7 +1062,7 @@ def _entry(image: np.ndarray, op: dict[str, Any], frame: str | None, mpp: float,
     after, mask, selection = planned["after"], planned["mask"], copy.deepcopy(planned["selection"])
     change = copy.deepcopy(planned["change"])
     entry = {"index": index, "op": op, "from": selection["color"],
-             "from_colors": selection.get("colors", [selection["color"]]), "to": op["color"],
+             "from_colors": selection.get("colors", [selection["color"]]), "to": op.get("color", change["to"]),
              "region_sha256": mask_sha256(mask), "selection": {**{k: selection[k] for k in (
                  "pixels", "area_mm2", "bbox_px", "regions_of_color", "limited_by_box", "whole_region_pixels")},
                  "regions": selection.get("regions", 1)},

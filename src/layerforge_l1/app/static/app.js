@@ -40,6 +40,7 @@ const ui = {
   planLater: false,     // import: stop after intake so artwork colors can be edited before planning
   art: freshArt(),      // artwork recolor panel (flat-color target, not a sheet)
   fit: freshFit(),      // Fit artwork to canvas card (inside the Artwork editor)
+  tips: freshTips(),    // Simplify tiny tips suggestion (inside the Artwork editor)
   insp: freshInsp(),    // issue inspector: selection, filters, view and zoom
   inspA: { zoom: null, pan: [0, 0], panning: null },  // issue inspector: processed-image view (follows insp)
   inspPad: null,        // the processed image padded to the sheet extent ({src, url}) for the inspector
@@ -203,7 +204,7 @@ function afterJob(job) {
     ui.inspPendingEdit = null;
     if (pending && ui.state.draft) setTimeout(() => inspEditLayer(pending), 0);
   }
-  if (job.kind === "artwork_replan") { setTab("proposal"); ui.art = freshArt(); ui.fit = freshFit(); }
+  if (job.kind === "artwork_replan") { setTab("proposal"); ui.art = freshArt(); ui.fit = freshFit(); ui.tips = freshTips(); }
   if (job.kind === "kit") { setTab("kit"); ui.kitBuildOpen = false; }
   if (job.kind === "printability") setTab("printability");
 }
@@ -257,6 +258,7 @@ async function route() {
     ui.job = null;
     ui.art = freshArt();
     ui.fit = freshFit();
+    ui.tips = freshTips();
     ui.insp = freshInsp();
     ui.inspA = { zoom: null, pan: [0, 0], panning: null };
     ui.issues = null;
@@ -981,6 +983,7 @@ function artworkCheck(c) {
 }
 
 const swatches = (hexes) => (hexes || []).map((h) => swatch(h)).join(" ");
+const toSwatches = (e) => (e.to === "mixed" ? swatches(e.change?.to_colors) : swatch(e.to));  // a tips edit fills with several colors
 
 // Icons for the Artwork colors panel: 16 px line drawings in the current text color.
 const svg = (body) => `<svg class="icon" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${body}</svg>`;
@@ -989,6 +992,7 @@ const ICON = {
   box: svg('<rect x="4" y="4" width="16" height="16" rx="1" stroke-dasharray="3 3"/>'),
   pipette: svg('<path d="M4 20l1.5-4.5L14 7l3 3-8.5 8.5z"/><path d="M13 6l1-1a2.1 2.1 0 0 1 3 0l2 2a2.1 2.1 0 0 1 0 3l-1 1"/><path d="M12 5l7 7"/>'),
   close: svg('<path d="M6 6l12 12M18 6L6 18"/>'),
+  tips: svg('<path d="M4 20 L12 4 L20 20"/><path d="M9.5 11h5" stroke-dasharray="2 2"/>'),
   fit: svg('<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>'),
   undo: svg('<path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/>'),
   check: svg('<path d="M5 12l5 5 9-10"/>'),
@@ -1016,6 +1020,7 @@ function artOpLabel(op) {
   if (op.op === "close_gap") return `Close gap ${w}${op.path === "cubic" ? " (curved)" : ""}`;
   if (op.op === "paint_stroke") return op.clip_regions ? `Brush ${w} in ${op.clip_regions.length} region(s)` : `${op.path === "cubic" ? "Curve" : "Line"} ${w}`;
   if (op.op === "recolor_regions") return `Recolor ${op.regions.length} region${op.regions.length === 1 ? "" : "s"}`;
+  if (op.op === "simplify_tips") return `Simplify ${op.tips.length} tiny tip${op.tips.length === 1 ? "" : "s"}`;
   if (op.op === "fit_composition") return `Fit artwork to canvas ${+(op.scale * 100).toFixed(1)} %${op.mode === "manual" ? " (manual)" : ""}`;
   return "Fill";
 }
@@ -1042,6 +1047,74 @@ function bentControls(a, b, bulge = 0.2) {
   const d = [b[0] - a[0], b[1] - a[1]];
   const n = [-d[1] * bulge, d[0] * bulge];
   return [clampPx([a[0] + d[0] / 3 + n[0], a[1] + d[1] / 3 + n[1]]), clampPx([a[0] + (2 * d[0]) / 3 + n[0], a[1] + (2 * d[1]) / 3 + n[1]])];
+}
+
+// Simplify tiny tips: one suggestion from the server (nothing changes until Apply, which adds it as one
+// logged edit). The artwork view above shows the result, the artwork as it is, or every changed pixel.
+const TIPS_HIDDEN = ["a stair-step of the edge, not a tip", "cut by the search window, not a whole tip"];
+function tipsCard() {
+  const t = ui.tips;
+  const r = t.result;
+  const head = `<div class="art-selection-head"><strong>Simplify tiny tips</strong>
+      <button class="art-clear" data-action="art-tips-close" data-testid="art-tips-close">${ICON.close}<span>Cancel</span></button></div>`;
+  if (!r) {
+    return `<div class="subpanel art-tips" data-testid="art-tips">${head}
+      <p class="small ${t.error ? "no" : "muted"}" style="margin:0" data-testid="art-tips-status">${t.error ? esc(t.error) : "Finding tiny tips…"}</p></div>`;
+  }
+  const dis = busy() || ui.artPending ? "disabled" : "";
+  const n = r.tips.length;
+  const chosen = n - r.excluded.length;
+  const shownKept = r.kept.filter((k) => !TIPS_HIDDEN.includes(k.why_kept));
+  const issueNo = (ids) => ids.map((i) => `#${Number(i.replace(/\D/g, ""))}`);
+  const kept = shownKept.length ? `<details class="small" data-testid="art-tips-kept"><summary>${shownKept.length} place${shownKept.length === 1 ? "" : "s"} left unchanged</summary>
+      <ul class="tips-list">${shownKept.map((k) => `<li><span>${swatch(k.color)} ${esc(k.why_kept)} <span class="muted">(issue ${issueNo(k.issues).slice(0, 2).join(", ")})</span></span>
+        <button class="small link" data-action="art-tips-show" data-box="${k.box.join(",")}">Show</button></li>`).join("")}</ul></details>` : "";
+  if (!n) {
+    return `<div class="subpanel art-tips" data-testid="art-tips">${head}
+      <p class="small" style="margin:0" data-testid="art-tips-status">${r.sites ? `No tiny tip can be shortened safely at the ${r.sites} place${r.sites === 1 ? "" : "s"} where the artwork causes a narrow cutout.` : "The printability check of the planned sheets found no narrow cutout caused by the artwork."}</p>
+      ${r.planned?.stale ? '<p class="small warn-text" style="margin:0" data-testid="art-tips-stale">The artwork has changed since the sheets were planned. Plan again to check it.</p>' : ""}${kept}</div>`;
+  }
+  const view = (v, label) => `<button class="tool-btn ${t.view === v ? "active" : ""}" data-action="art-tips-view" data-view="${v}" data-testid="art-tips-view-${v}" aria-pressed="${t.view === v}">${label}</button>`;
+  const rows = r.tips.map((tip, i) => {
+    const on = !r.excluded.includes(tip.id);
+    return `<li data-testid="art-tip" class="${on ? "" : "muted"}"><label><input type="checkbox" data-action="art-tips-toggle" data-tip="${tip.id}" data-testid="art-tip-check" ${on ? "checked" : ""} ${dis}>
+        <strong>${i + 1}</strong> ${swatch(tip.color)} → ${swatch(tip.fill)} <span class="muted">${fmt(tip.pixels_count)} px · issue ${issueNo(tip.issues)[0]}${tip.edited_since_planning ? " · edited here since planning" : ""}</span></label>
+      <button class="small link" data-action="art-tips-show" data-box="${tip.box.join(",")}" data-testid="art-tip-show">Show</button></li>`;
+  }).join("");
+  // The narrow cutouts come from the planned sheets; after artwork edits they describe the earlier artwork.
+  const stale = r.planned?.stale ? `<p class="small warn-text" style="margin:0" data-testid="art-tips-stale">Based on the cutouts found in the sheets planned before your latest edits${r.planned.edited_px ? ` (${fmt(r.planned.edited_px)} px changed since)` : ""}. Plan again to check the result.</p>` : "";
+  return `<div class="subpanel art-tips" data-testid="art-tips">${head}
+    <p class="small" style="margin:0" data-testid="art-tips-summary"><strong>${chosen} of ${n} tip${n === 1 ? "" : "s"}</strong> · ${fmt(r.changed_pixels)} px (${fmt(r.changed_percent, 3)} %) would change ${infoTip(`Found where the printability check of the planned sheets reports cutouts narrower than ${fmt(r.min_width_mm, 2)} mm caused by the artwork; every change is checked against the artwork shown. Each tip is filled with the one color around it; the palette and every color area stay as they are. Nothing changes until you apply; then it is one edit you can undo. Whether the cutouts improve is known only after you plan again.`)}</p>
+    ${stale}
+    <div class="segmented" role="group" aria-label="Show">${view("after", "After")}${view("before", "Before")}${view("changes", "Changes")}</div>
+    <ul class="tips-list" data-testid="art-tips-list">${rows}</ul>
+    ${kept}
+    ${t.error ? `<p class="small no" style="margin:0" data-testid="art-tips-error">${esc(t.error)}</p>` : ""}
+    <div class="row"><button class="primary small" data-action="art-tips-apply" data-testid="art-tips-apply" ${chosen && r.op && !dis ? "" : "disabled"}>${ICON.check}<span>Apply ${chosen} change${chosen === 1 ? "" : "s"}</span></button></div>
+  </div>`;
+}
+
+async function tipsPreview(exclude) {
+  const t = ui.tips;
+  if (!artBegin(t.result ? "Updating the suggestion…" : "Finding tiny tips…")) return;
+  let result = null, failed = null;
+  try {
+    result = await artworkCall("simplify", { exclude });
+  } catch (err) {
+    failed = err;
+  } finally {
+    artEnd();
+  }
+  if (ui.tips !== t) return;  // closed meanwhile
+  if (failed) t.error = failed.message || String(failed);  // the shown selection stays as it was
+  else Object.assign(t, { result, exclude: result.excluded, error: null });
+  render();
+}
+
+async function tipsApply() {
+  const op = ui.tips.result?.op;
+  if (!op) return;
+  if (await artworkAdd(op)) { ui.tips = freshTips(); render(); }
 }
 
 // Angle (degrees, counter-clockwise from "right", screen up = +) and length (mm) of a straight shape.
@@ -1110,6 +1183,11 @@ const brushNote = (s) => (s.mode === "brush" ? '<p class="small" data-testid="ar
 // Plan sheets from this artwork); the sheet size and perimeter never change.
 function freshFit() {
   return { open: false, result: null, manual: null, drag: null, loading: false, error: null, seq: 0, acceptLoss: false };
+}
+// Simplify tiny tips: the server's suggestion, the tips the user left out, and what the artwork view shows
+// (the result "after", the current artwork "before", or "changes": every changed pixel in magenta).
+function freshTips() {
+  return { open: false, result: null, exclude: [], view: "after", error: null };
 }
 const fitSize = (n, s) => Math.max(1, Math.floor(n * s + 1e-9));
 const FIT_MIN_PX = 8;  // the subject never shrinks below this many artwork pixels on its shorter side
@@ -1327,7 +1405,9 @@ function fitCard() {
   if (!f.open) {
     return `<div class="subpanel art-fit closed" data-testid="art-fit">
       <div class="row"><button class="tool-btn" data-action="art-fit-open" data-testid="art-fit-open" ${off}>${ICON.fit}<span>Fit artwork to canvas</span></button>
-      ${infoTip("Enlarge and centre the subject inside the same artwork area. Drag it to move it; drag the bottom-left handle to resize it (proportions kept). Exact pixel copies, no new colors; the sheet size does not change, and sheets are planned only when you choose Plan sheets from this artwork.")}</div></div>`;
+      ${infoTip("Enlarge and centre the subject inside the same artwork area. Drag it to move it; drag the bottom-left handle to resize it (proportions kept). Exact pixel copies, no new colors; the sheet size does not change, and sheets are planned only when you choose Plan sheets from this artwork.")}
+      <button class="tool-btn" data-action="art-tips-open" data-testid="art-tips-open" ${ui.state.proposal?.status === "ARTWORK_READY_NOT_PLANNED" ? 'disabled title="Available once sheets are planned: it starts from the printability check of the planned sheets"' : off}>${ICON.tips}<span>Simplify tiny tips</span></button>
+      ${infoTip("Suggests shortening tiny pointed tips of color areas where the printability check of the current sheets found cutouts narrower than the minimum because of the artwork. Each tip is filled with the one color around it; tips between two other colors and small details are left alone. You see every change before anything is applied, can leave out any of them, and apply them as one undoable edit.")}</div></div>`;
   }
   const r = f.result;
   const an = r?.analysis;
@@ -1385,7 +1465,9 @@ function artworkPanel() {
   const sel = s.selection?.selection;
   const shape = s.draw && SHAPE_KINDS.includes(s.draw.kind) ? s.draw : null;
   const pv = shape && isDrawOp(s.preview?.op) ? s.preview : null;
-  const image = pv ? pv.images.after : s.selection ? s.selection.images.selection : a.image;
+  const tipsShown = ui.tips.open && ui.tips.result;
+  const image = tipsShown ? (ui.tips.view === "after" && ui.tips.result.images.after ? ui.tips.result.images.after : a.image)
+    : pv ? pv.images.after : s.selection ? s.selection.images.selection : a.image;
   const canPick = (sel || painting) && !busy() && !ui.artPending ? "" : "disabled";
   const u = a.unsaved || { count: 0, redo: 0, ops: [] };
   const savedDis = u.count || busy() ? "disabled" : "";  // the saved history waits for Save / Discard
@@ -1416,7 +1498,8 @@ function artworkPanel() {
       ${s.box ? `<button class="tool-btn" data-action="art-clear-box" data-testid="art-clear-box">${ICON.close}<span>Clear box</span></button>` : ""}
     </div>`;
   const zoom = zoomBar("art");
-  const hint = s.mode === "eyedropper" ? "Click the artwork to sample a color."
+  const hint = ui.tips.open ? "Simplify tiny tips: Show zooms to a tip; zoom and pan work; drawing waits until you apply or cancel."
+    : s.mode === "eyedropper" ? "Click the artwork to sample a color."
     : s.mode === "line" ? (shape ? "Drag an end point to adjust · drag elsewhere for a new line." : "Drag from the start to the end of the line.")
     : s.mode === "curve" ? (shape ? "Drag the end or control points to adjust · drag elsewhere for a new curve." : "Drag from the start to the end of the curve.")
     : s.mode === "brush" ? (s.regions.length ? "Drag to paint inside the selection · Shift+Click adds or removes regions." : "Click the region to paint in first.")
@@ -1463,7 +1546,7 @@ function artworkPanel() {
   const v = a.verify;
   const history = `<div class="stack" style="gap:6px">
       <h4 style="margin:0">Artwork edits ${badge("neutral", String(edits.length))} ${infoTip("Saved edits are kept with the project and reloaded after a restart; Save Changes adds the unsaved ones together. A multi-region recolor is one edit.")}</h4>
-      ${edits.length || u.ops.length ? `<ul class="history small" data-testid="art-history">${u.ops.slice().reverse().map((e) => `<li class="unsaved" data-testid="art-history-unsaved"><span>${badge("warn", "unsaved")} ${esc(artOpLabel(e.op))} ${swatches(e.from_colors)} → ${swatch(e.to)} ${fmt(e.selection.pixels)} px</span></li>`).join("")}${edits.slice().reverse().map((e) => `<li><span>#${e.index} ${esc(artOpLabel(e.op))} ${swatches(e.from_colors)} → ${swatch(e.to)} ${fmt(e.selection.pixels)} px${!isDrawOp(e.op) && (e.selection.regions || 1) > 1 ? ` · ${e.selection.regions} regions` : ""}${!isDrawOp(e.op) && e.selection.limited_by_box ? " (box)" : ""} · ${esc(ART_SOURCES[e.op.source] || e.op.source)}${e.change.merged_with_adjacent_regions ? " · merged" : ""}</span>
+      ${edits.length || u.ops.length ? `<ul class="history small" data-testid="art-history">${u.ops.slice().reverse().map((e) => `<li class="unsaved" data-testid="art-history-unsaved"><span>${badge("warn", "unsaved")} ${esc(artOpLabel(e.op))} ${swatches(e.from_colors)} → ${toSwatches(e)} ${fmt(e.selection.pixels)} px</span></li>`).join("")}${edits.slice().reverse().map((e) => `<li><span>#${e.index} ${esc(artOpLabel(e.op))} ${swatches(e.from_colors)} → ${toSwatches(e)} ${fmt(e.selection.pixels)} px${!isDrawOp(e.op) && e.op.op !== "simplify_tips" && (e.selection.regions || 1) > 1 ? ` · ${e.selection.regions} regions` : ""}${!isDrawOp(e.op) && e.selection.limited_by_box ? " (box)" : ""} · ${esc(ART_SOURCES[e.op.source] || e.op.source)}${e.change.merged_with_adjacent_regions ? " · merged" : ""}</span>
           <button class="small ghost tip" data-action="art-undo" data-keep="${e.index}" ${e.index === edits.length ? "disabled" : savedDis} data-tip="Keep edits 1..${e.index}">Revert here</button></li>`).join("")}</ul>` : '<p class="small muted" style="margin:0">No artwork edits.</p>'}
       <div class="row"><button class="tool-btn" data-action="art-undo" data-testid="art-undo" ${edits.length ? savedDis : "disabled"}>${ICON.undo}<span>Undo last saved</span></button>
         <button class="tool-btn" data-action="art-undo" data-keep="0" ${edits.length > 1 ? savedDis : "disabled"}>Revert all</button>
@@ -1489,7 +1572,7 @@ function artworkPanel() {
       <p class="small muted" style="margin:0">Edit the flat-color artwork: recolor and fill regions, draw lines and curves (they split regions), close contour gaps, paint inside a region. Sheets change only when you plan again. ${infoTip("The uploaded image is never changed and no sheet is edited here. Examples: unify two skin tones, change a necklace, or change one leg only with the Box tool.")}</p>
       ${banners}
       ${savebar}
-      ${fitCard()}
+      ${ui.tips.open ? "" : fitCard()}
       <div class="grid2">
         <div class="stack" style="gap:8px">
           ${tools}
@@ -1500,7 +1583,7 @@ function artworkPanel() {
           ${zoom}
           <span class="small muted coords" id="art-coords">${esc(hint)}</span>
         </div>
-        <div class="stack art-side">${callout}${shape ? shapeCard(shape, a.mm_per_pixel, pv) : artworkSelectionCard(sel, s)}${colors}</div>
+        <div class="stack art-side">${ui.tips.open ? tipsCard() : `${callout}${shape ? shapeCard(shape, a.mm_per_pixel, pv) : artworkSelectionCard(sel, s)}${colors}`}</div>
       </div>
       <div class="grid2">
         <div class="stack" style="gap:6px"><h4 style="margin:0">Palette now ${badge("neutral", `${palette.length} colors`)} ${infoTip("One filament color per sheet; the planner decides how many sheets these colors need.")}</h4>
@@ -1737,6 +1820,25 @@ function drawArtOverlay() {
     ctx.stroke();
     ctx.restore();
   }
+  const tips = ui.tips.open && ui.tips.result ? ui.tips.result.tips : [];
+  tips.forEach((t, i) => {  // each proposed tip: its box and number (left out: grey, dashed)
+    const out = ui.tips.exclude.includes(t.id);
+    const [r0, c0, r1, c1] = t.box;
+    const pad = 3 * dpr;
+    if (!out && ui.tips.view === "changes") {
+      ctx.fillStyle = "#ff00c8";
+      for (const [r, c] of t.pixels) ctx.fillRect(ox + c * sx, oy + r * sy, Math.max(sx, 1), Math.max(sy, 1));
+    }
+    ctx.save();
+    ctx.strokeStyle = out ? "#8a8f98" : "#c0009a";
+    ctx.lineWidth = 2 * dpr;
+    ctx.setLineDash(out ? [4 * dpr, 3 * dpr] : []);
+    ctx.strokeRect(ox + c0 * sx - pad, oy + r0 * sy - pad, (c1 - c0) * sx + 2 * pad, (r1 - r0) * sy + 2 * pad);
+    ctx.font = `${11 * dpr}px system-ui, sans-serif`;
+    ctx.fillStyle = out ? "#8a8f98" : "#c0009a";
+    ctx.fillText(String(i + 1), ox + c1 * sx + pad + 2 * dpr, oy + r0 * sy);
+    ctx.restore();
+  });
   const ghost = ui.artPending?.ghost;
   if (ghost && mpp) {  // local preview of the stroke being applied: translucent, until the server's pixels are shown
     ctx.save();
@@ -1816,6 +1918,7 @@ function bindArtwork() {
   canvas.addEventListener("pointerdown", (e) => {
     if (busy() || e.button !== 0) return;
     if (ui.artPending) { artNotice(`${ui.artPending.label} Wait for it to finish.`); return; }
+    if (ui.tips.open) { artNotice("Apply or cancel Simplify tiny tips first (zoom and pan still work)."); return; }
     const s = ui.art;
     const point = artPx(e);
     const handle = shapeHandleAt(e);
@@ -1849,7 +1952,7 @@ function bindArtwork() {
     }
   });
   canvas.addEventListener("pointerup", async (e) => {
-    if (busy() || e.button !== 0 || ui.artPending) return;
+    if (busy() || e.button !== 0 || ui.artPending || ui.tips.open) return;
     const s = ui.art;
     const point = artPx(e);
     if (s.handle !== null) {
@@ -2114,6 +2217,7 @@ async function artworkSession(action) {
     const text = action === "save" ? `Saved ${result.saved} change${result.saved === 1 ? "" : "s"}`
       : action === "discard" ? `Discarded ${result.discarded} change${result.discarded === 1 ? "" : "s"}` : null;
     ui.art = keepArtView(text ? { last: { text, ok: true } } : {});
+    ui.tips = freshTips();  // the artwork changed: a shown suggestion would be out of date
     await loadState();
   } catch (err) {
     failed = err;
@@ -2186,7 +2290,7 @@ async function artworkPost(action, body) {
   let failed = null;
   try {
     await artworkCall(action, body);
-    if (action !== "verify") ui.art = keepArtView();
+    if (action !== "verify") { ui.art = keepArtView(); ui.tips = freshTips(); }
     await loadState();
   } catch (err) {
     failed = err;
@@ -3884,6 +3988,29 @@ async function onClick(event) {
     case "art-replan": submit(`${project}/artwork/replan`, {}); break;
     case "art-fit-open": ui.fit = { ...freshFit(), open: true }; await fitPreview(); break;
     case "art-fit-close": ui.fit = freshFit(); render(); break;
+    case "art-tips-open":
+      if (!(await finalizeShape())) break;
+      ui.tips = { ...freshTips(), open: true };
+      ui.art.regions = []; ui.art.selection = null;
+      render();
+      await tipsPreview([]);
+      break;
+    case "art-tips-close": ui.tips = freshTips(); render(); break;
+    case "art-tips-view": ui.tips.view = el.dataset.view; render(); break;
+    case "art-tips-toggle": {
+      const id = el.dataset.tip;
+      const exclude = el.checked ? ui.tips.exclude.filter((x) => x !== id) : [...ui.tips.exclude, id];
+      drawArtOverlay();
+      await tipsPreview(exclude);
+      break;
+    }
+    case "art-tips-show": {
+      const [r0, c0, r1, c1] = el.dataset.box.split(",").map(Number);
+      const m = 12;  // a little context around the tip
+      focusView("art", [c0 - m, r0 - m, c1 + m, r1 + m]);
+      break;
+    }
+    case "art-tips-apply": await tipsApply(); break;
     case "art-fit-auto": ui.fit.acceptLoss = false; await fitPreview(); break;
     case "art-fit-accept": ui.fit.acceptLoss = !ui.fit.acceptLoss; await fitCommit(); break;
     case "art-fit-bg": if (ui.fit.manual) { ui.fit.manual.background = el.dataset.color; await fitCommit(); } break;

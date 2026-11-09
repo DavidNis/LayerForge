@@ -397,3 +397,9 @@ No complete UI/server, arbitrary photographic depth estimation, frame design, gl
 - [x] No layout shift from the Issues panel; CAD stack preloaded; stability browser test.
 - [ ] Approval needed: identical-output packed unique in ``experimental_global_planner.exact_index`` (planner module).
 - [ ] User review; then commit, rebuild exe/zip and packaged tests (when approved).
+
+## Simplify tiny tips (2026-11-09)
+
+- [x] Suggestion (core/tips.py), simplify_tips edit, endpoint, Artwork editor card, tests, Chupa check.
+- [x] Shared concurrent issue checks; stale-planning note and per-tip mark.
+- [ ] User review; then commit, rebuild exe/zip and packaged tests (when approved).

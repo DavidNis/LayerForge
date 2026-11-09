@@ -1284,3 +1284,38 @@ FDM thresholds remain generic assumptions until a print calibrates them).
   start-up/packaging complexity; not justified for a few seconds after opening a project, with feedback already
   immediate).
 - Not changed: planner, validators, edit-log format, replay rules, selection semantics, Issues content.
+
+## D-V3-044 | 2026-11-09 | Simplify tiny tips: a conservative, reviewed artwork suggestion (Artwork editor)
+
+- OBSERVED (read-only Chupa experiment, user approved): 58 of 79 risky cutouts (19 of 24 places) were caused by
+  narrow pointed tips in the image; shortening 14 tips (187 px, 0.0178 %) gave 79 -> 37 risky cutouts and
+  24 -> 13 places in one planner run, 13 sheets both, structurally valid. Experimental, not a guarantee.
+- DESIGN_CHOICE (``core/tips.py``): only at the places the issue inspector reports a cutout narrower than the
+  process minimum with cause "image"; the part of the revealed color narrower than a disc of that minimum
+  (from the artwork's mm/px) is a candidate.  Changed only if it is a tip of a wider shape (never a whole
+  thin line), 3 px .. 1.8 mm^2, not part of a shape under 10 mm^2 (pupils, small eyes, catchlights, freckles)
+  nor more than 1/4 of its shape, and at least 85 % surrounded by ONE other color, which fills it.  A tip
+  between two other colors (three-color junction) is left unchanged with its reason - not decided
+  automatically.  Each tip is computed on the unchanged artwork and kept clear of the others, so any can be
+  left out; before showing (and for every selection) a local check refuses new or lost regions, new narrow
+  parts and colors leaving the palette.  No AI, blur or quantization; the planner is not run.
+- The accepted tips are one logged artwork edit ``simplify_tips`` with each tip's exact pixels, color and
+  fill: replay checks every pixel still has its color (else refused) and sets the fill, so it reproduces the
+  approved artwork independent of later changes to the suggestion rules.  Undo / redo / save / verify /
+  replay as for every artwork edit; planning only on the user's explicit request.
+- UI: "Simplify tiny tips" beside "Fit artwork to canvas" (offered once sheets are planned).  The card lists
+  the numbered tips (from -> to color, px, issue number, Show = zoom), After / Before / Changes in the zoomable
+  artwork view (Changes: every changed pixel in magenta, drawn from the tips' pixels), a checkbox per tip,
+  the places left unchanged with reasons, Apply N changes / Cancel.  Drawing waits while the card is open.
+- Not changed: planner, candidate selection, widening, width thresholds, validation rules.
+- Amendment (2026-11-09, user request). (1) Concurrent issue checks: the first request for a project's
+  issues computes; another request for the same input files waits for that result instead of computing
+  again (an error reaches every waiting request; nothing is cached on error; the cache key is unchanged).
+  Measured on Chupa when opening the project (Issues panel, then Simplify tiny tips 0.5 s later): 2 full
+  checks -> 1; issues ready 7.5-10.2 s -> 5.5-7.7 s; suggestion ready 8.8-11.2 s -> 6.5-8.7 s.
+  (2) Stale planning: the suggestion compares the working artwork (saved and unsaved edits) with the artwork
+  the sheets were planned from (hash; the planned image is read only when they differ, cached per file
+  stamp). When they differ the card says it is based on the cutouts of the sheets planned before the latest
+  edits (with the pixels changed since) and asks to plan again; tips near pixels edited since planning are
+  marked. Every proposed pixel is still checked against the working artwork, and applying stays the user's
+  explicit choice. The card never states a printability improvement; that is known only after planning.

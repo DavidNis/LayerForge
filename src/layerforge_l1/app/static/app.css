@@ -488,6 +488,11 @@ button.primary.large, .button.large { padding: 9px 18px; min-height: 40px; font-
 .art-savebar.confirm { border-color: var(--bad); }
 .art-savebar .row { gap: 6px; }
 .unsaved-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--warn); margin-right: 4px; vertical-align: middle; }
+/* Simplify tiny tips: the numbered list beside the artwork view. */
+.tips-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; max-height: 260px; overflow-y: auto; }
+.tips-list li { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 2px 4px; border-radius: 6px; }
+.tips-list li:hover { background: var(--panel-2, rgba(127, 127, 127, 0.08)); }
+.tips-list label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
 /* An artwork request in flight (one at a time): a small status, not a dialog. */
 .art-pending { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
 .spinner.small { width: 12px; height: 12px; border-width: 2px; margin-top: 0; }
