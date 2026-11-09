@@ -1244,3 +1244,43 @@ FDM thresholds remain generic assumptions until a print calibrates them).
   show "-". "Revert to before widening" deletes the later edits too (layer edits have no redo), so it asks for
   confirmation first, naming the edits that are lost; Cancel changes nothing. Algorithm, planner, geometry,
   thresholds and validation unchanged.
+
+## D-V3-043 | 2026-11-09 | Artwork editor responsiveness: same results, computed once; one request at a time with local feedback
+
+- OBSERVED_IN_FILE (measured, Chupa 1024 x 1024, HEAD code): a line took ~3 s to preview and ~3 s to add
+  (server time; the browser's own rendering was ~20 ms and state/issue/image fetches 10-40 ms); undo 5.3 s, save
+  5.5 s, verify 5.5 s. Profile: ``np.unique(pixels, axis=0)`` (a row sort of every pixel, ~0.7 s) ran 5 times per
+  edit in ``change_summary`` / ``palette_summary`` - ~85 % of the time; adding a previewed line recomputed the
+  preview; every replay (undo, redo, save, verify) recomputed change summaries it does not use. No visible
+  feedback between releasing the mouse and the server's preview; a second edit could be sent meanwhile.
+- DESIGN_CHOICE (results unchanged): ``unique_colors`` packs RGB into one uint32 and sorts 1-D (same rows, same
+  order as the row sort; tested against it); ``plan_edit(summarize=False)`` for replays (they check only the
+  selection and region hash, as before); the drawing preview keeps its ``planned_edit`` and the following add
+  reuses it only for the same op on the same pixels (rgb hash), frame and scale - otherwise it is computed again.
+  The log entry, replay checks, preview images and API responses are as before.
+- DESIGN_CHOICE (UI): one artwork request at a time. While it runs the save bar shows what is being done
+  ("Previewing line...", "Applying Line 2 mm...", "Undoing..."), the drawn stroke stays on the canvas as a
+  translucent local preview (the artwork image only ever shows the server's pixels), and edit controls / new
+  strokes are disabled; zoom, pan and the rest of the page stay usable. A server preview is labelled "Preview, not
+  applied yet"; an applied edit shows a check and the unsaved count. A failed edit leaves the artwork as on the
+  server and previews the pending shape again; a failed preview leaves no stroke.
+- Amendment (2026-11-09, user request: no layout shift). OBSERVED: the Issues panel sits above the editor and
+  grew from its one-line placeholder (~44 px) to ~1036 px when its first check finished, moving the canvas
+  under a stroke in progress (the page is rebuilt on every render, so the browser's scroll anchoring cannot
+  help). DESIGN_CHOICE: (1) a background Issues update (first load, re-check, new result) replaces only the
+  Issues panel, never the editor's canvas; (2) while the user works in the editor (it is at least half on screen
+  and the last pointer / key / wheel input was in it, or there was none yet) any height change above it is
+  cancelled by scrolling the page by the same amount, on partial and full re-renders. After input elsewhere
+  (e.g. in the Issues panel) nothing is anchored, so the panel the user works in does not move. Zoom, pan,
+  tool and the user's own scrolling are untouched. This replaces the earlier "re-render after the drag" delay.
+- Initial-load contention (measured, Chupa): the first Issues check of a project takes 7-12 s (sheet-validation
+  diagnostics ~5.6 s, geometry check ~4.5 s, review load ~0.9 s) in a server thread. In-process, a line preview
+  during it takes median 0.58 s vs 0.48 s alone (max 1.4 s): the check releases the interpreter lock regularly
+  except for two long holds - the first CadQuery/OCP import (~0.5-1.4 s) and ``np.unique(axis=0)`` in
+  ``experimental_global_planner.exact_index`` (0.73 s; memoized per artwork). DESIGN_CHOICE: import the CAD
+  stack once in a background thread when the server starts (``server._preload_cad``; nothing computed).
+  OPEN_QUESTION (needs approval, planner module): the same identical-output packed unique in ``exact_index``.
+  Not done: running the check in a separate process (removes contention but adds a second ~300 MB process and
+  start-up/packaging complexity; not justified for a few seconds after opening a project, with feedback already
+  immediate).
+- Not changed: planner, validators, edit-log format, replay rules, selection semantics, Issues content.

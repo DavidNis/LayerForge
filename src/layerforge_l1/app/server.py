@@ -374,8 +374,28 @@ class _Server(ThreadingHTTPServer):
         super().server_bind()
 
 
+_PRELOAD = threading.Lock()
+_preloaded = False
+
+
+def _preload_cad() -> None:
+    """Import the CAD stack (CadQuery / OCP via ``geometry.py``: ~1.5 s, mostly holding the interpreter lock)
+    once when the app starts, instead of inside the first Issues check of the first project opened, where it
+    slowed the user's first artwork edits.  Nothing is computed; an import error is left for the real use."""
+
+    try:
+        from .. import geometry  # noqa: F401
+    except Exception:  # noqa: BLE001 - reported where the geometry is actually used
+        pass
+
+
 def make_server(workspace: Path, host: str = "127.0.0.1", port: int = 8765,
                 open_folders: bool = False) -> ThreadingHTTPServer:
+    global _preloaded
+    with _PRELOAD:
+        if not _preloaded:  # once per process (the launcher may try several ports)
+            _preloaded = True
+            threading.Thread(target=_preload_cad, name="preload-cad").start()  # not a daemon: never cut mid-import
     app = App(workspace, open_folders)
     server = _Server((host, port), partial(Handler, app=app))
     server.app = app  # type: ignore[attr-defined]

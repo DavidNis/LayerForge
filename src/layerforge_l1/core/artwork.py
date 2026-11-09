@@ -22,6 +22,7 @@ artwork is not validated against this one (see ``app/workspace.py``).
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 from datetime import datetime, timezone
@@ -99,6 +100,23 @@ def _color_mask(image: np.ndarray, rgb: tuple[int, int, int]) -> np.ndarray:
     return np.all(image == np.asarray(rgb, np.uint8), axis=2)
 
 
+def _packed(pixels: np.ndarray) -> np.ndarray:
+    """RGB pixels (..., 3) as one uint32 each (``r << 16 | g << 8 | b``): ordered like the (r, g, b) rows."""
+
+    p = pixels.astype(np.uint32)
+    return (p[..., 0] << 16) | (p[..., 1] << 8) | p[..., 2]
+
+
+def unique_colors(pixels: np.ndarray, return_counts: bool = False) -> Any:
+    """``np.unique(pixels.reshape(-1, 3), axis=0[, return_counts=True])`` (same rows, same order), through
+    the packed values: a 1-D sort instead of a row sort, which takes ~0.7 s on a 1024 x 1024 artwork."""
+
+    values = np.unique(_packed(pixels.reshape(-1, 3)), return_counts=return_counts)
+    keys = values[0] if return_counts else values
+    colors = np.stack([(keys >> 16) & 255, (keys >> 8) & 255, keys & 255], axis=1).astype(np.uint8)
+    return (colors, values[1]) if return_counts else colors
+
+
 def artwork_area(image: np.ndarray, frame_hex: str | None) -> np.ndarray:
     """Pixels that belong to the artwork (everything except the never-visible frame padding)."""
 
@@ -115,10 +133,11 @@ def palette_summary(image: np.ndarray, frame_hex: str | None, mm_per_pixel: floa
     """Every artwork color with its area and 4-connected region count, largest first."""
 
     inside = artwork_area(image, frame_hex)
-    colors, counts = np.unique(image[inside].reshape(-1, 3), axis=0, return_counts=True)
+    colors, counts = unique_colors(image[inside], return_counts=True)
+    packed = _packed(image)
     rows = []
     for rgb, count in zip(colors, counts):
-        mask = _color_mask(image, tuple(int(v) for v in rgb)) & inside
+        mask = (packed == _packed(rgb)) & inside
         rows.append({"hex": hex_color(tuple(int(v) for v in rgb)), "pixels": int(count),
                      "area_mm2": round(float(count) * mm_per_pixel**2, 2), "regions_4": region_count(mask)})
     rows.sort(key=lambda r: (-r["pixels"], r["hex"]))
@@ -211,8 +230,8 @@ def change_summary(before: np.ndarray, after: np.ndarray, mask: np.ndarray, from
     ring = ndimage.binary_dilation(mask, structure=FOUR) & ~mask
     to_before = _color_mask(before, to_rgb) & inside
     touching = ndimage.label(to_before, structure=FOUR)[0][ring & to_before]
-    before_colors = {hex_color(tuple(int(v) for v in c)) for c in np.unique(before[inside].reshape(-1, 3), axis=0)}
-    after_colors = {hex_color(tuple(int(v) for v in c)) for c in np.unique(after[inside].reshape(-1, 3), axis=0)}
+    before_colors = {hex_color(tuple(int(v) for v in c)) for c in unique_colors(before[inside])}
+    after_colors = {hex_color(tuple(int(v) for v in c)) for c in unique_colors(after[inside])}
     involved = froms + ([to] if to not in froms else [])
     return {
         "from": froms[0] if len(froms) == 1 else "mixed", "from_colors": froms, "to": to,
@@ -416,9 +435,10 @@ def preview_id(current_sha: str, op: dict[str, Any]) -> str:
     return hashlib.sha256(json.dumps([current_sha, op], sort_keys=True).encode()).hexdigest()[:16]
 
 
-def plan_edit(image: np.ndarray, op: dict[str, Any], frame_hex: str | None,
-              mm_per_pixel: float) -> tuple[np.ndarray, np.ndarray, dict[str, Any], dict[str, Any]]:
-    """(after, mask, selection, change) of one checked op on ``image``; nothing is saved."""
+def plan_edit(image: np.ndarray, op: dict[str, Any], frame_hex: str | None, mm_per_pixel: float,
+              summarize: bool = True) -> tuple[np.ndarray, np.ndarray, dict[str, Any], dict[str, Any] | None]:
+    """(after, mask, selection, change) of one checked op on ``image``; nothing is saved.  A replay, which
+    checks only the selection against its record, passes ``summarize=False`` (change is then None)."""
 
     if op["op"] == "fit_composition":
         return plan_fit(image, op, frame_hex, mm_per_pixel)
@@ -441,6 +461,8 @@ def plan_edit(image: np.ndarray, op: dict[str, Any], frame_hex: str | None,
             raise ArtworkError(f"the selected region already has {op['color']}; nothing would change")
         froms = selection["color"]
     after = recolor(image, mask, op["color"], frame_hex)  # all selected pixels at once, nothing else
+    if not summarize:
+        return after, mask, selection, None
     return after, mask, selection, change_summary(image, after, mask, froms, op["color"], frame_hex)
 
 
@@ -473,7 +495,7 @@ def _stroke_selection(image: np.ndarray, op: dict[str, Any], frame_hex: str | No
     if not changed.any():
         raise ArtworkError("the stroke changes no pixel" + (" inside the selected region(s)" if clip is not None else ""))
     rows, cols = np.nonzero(mask)
-    colors = sorted({hex_color(tuple(int(v) for v in c)) for c in np.unique(image[changed].reshape(-1, 3), axis=0)})
+    colors = sorted({hex_color(tuple(int(v) for v in c)) for c in unique_colors(image[changed])})
     selection = {
         "color": colors[0] if len(colors) == 1 else "mixed", "colors": colors, "regions": 1, "items": [],
         "pixels": int(mask.sum()), "area_mm2": round(float(mask.sum()) * mm_per_pixel**2, 3),
@@ -526,7 +548,7 @@ def detect_background(image: np.ndarray, frame_hex: str | None) -> dict[str, Any
         raise ArtworkError("the artwork has no pixels outside the frame")
     pad = np.pad(inside, 1, constant_values=False)
     border = inside & ~(pad[:-2, 1:-1] & pad[2:, 1:-1] & pad[1:-1, :-2] & pad[1:-1, 2:])
-    colors, counts = np.unique(image[border].reshape(-1, 3), axis=0, return_counts=True)
+    colors, counts = unique_colors(image[border], return_counts=True)
     order = np.argsort(-counts, kind="stable")
     top = [{"hex": hex_color(tuple(int(v) for v in colors[i])), "share": round(float(counts[i] / counts.sum()), 4)}
            for i in order[:4]]
@@ -780,7 +802,7 @@ def compose(image: np.ndarray, frame_hex: str | None, op: dict[str, Any]) -> tup
 
 def _region_counts(image: np.ndarray, frame_hex: str | None) -> dict[str, int]:
     inside = ~_frame_mask(image, frame_hex)
-    colors = np.unique(image[inside].reshape(-1, 3), axis=0)
+    colors = unique_colors(image[inside])
     return {hex_color(tuple(int(v) for v in c)): region_count(_color_mask(image, tuple(int(v) for v in c)) & inside)
             for c in colors}
 
@@ -936,24 +958,38 @@ def replay(directory: Path, log: dict[str, Any], count: int | None = None) -> np
         raise ArtworkError("artwork base.png does not match its recorded hash; the edit log cannot be trusted")
     frame, mpp = log["base"]["frame_color"], log["base"]["mm_per_pixel"]
     for entry in log["edits"][:count]:
-        after, mask, selection, _ = plan_edit(image, check_op(_as_logged(entry["op"])), frame, mpp)
+        after, mask, selection, _ = plan_edit(image, check_op(_as_logged(entry["op"])), frame, mpp, summarize=False)
         if selection["color"] != entry["from"] or mask_sha256(mask) != entry["region_sha256"]:
             raise ArtworkError(f"artwork edit #{entry['index']} no longer selects the same pixels; the log does not replay")
         image = after
     return image
 
 
-def _entry(image: np.ndarray, op: dict[str, Any], frame: str | None, mpp: float,
-           index: int) -> tuple[np.ndarray, dict[str, Any]]:
-    """(after, log entry) of one checked op on ``image``: what it replaced and the exact pixels it changed."""
+def planned_edit(image: np.ndarray, op: dict[str, Any], frame: str | None, mpp: float) -> dict[str, Any]:
+    """Everything ``_entry`` computes for ``op`` on ``image`` (a preview keeps it for the edit that follows)."""
 
     after, mask, selection, change = plan_edit(image, op, frame, mpp)
+    return {"image_sha256": rgb_sha256(image), "op": op, "frame": frame, "mm_per_pixel": mpp, "after": after, "mask": mask,
+            "selection": selection, "change": change, "palette_after": palette_summary(after, frame, mpp)}
+
+
+def _entry(image: np.ndarray, op: dict[str, Any], frame: str | None, mpp: float,
+           index: int, planned: dict[str, Any] | None = None) -> tuple[np.ndarray, dict[str, Any]]:
+    """(after, log entry) of one checked op on ``image``: what it replaced and the exact pixels it changed.
+    ``planned`` (from ``planned_edit``) is used only if it was computed for this op on these exact pixels
+    with the same frame and scale; otherwise it is computed here."""
+
+    if (planned is None or planned["op"] != op or (planned["frame"], planned["mm_per_pixel"]) != (frame, mpp)
+            or planned["image_sha256"] != rgb_sha256(image)):
+        planned = planned_edit(image, op, frame, mpp)
+    after, mask, selection = planned["after"], planned["mask"], copy.deepcopy(planned["selection"])
+    change = copy.deepcopy(planned["change"])
     entry = {"index": index, "op": op, "from": selection["color"],
              "from_colors": selection.get("colors", [selection["color"]]), "to": op["color"],
              "region_sha256": mask_sha256(mask), "selection": {**{k: selection[k] for k in (
                  "pixels", "area_mm2", "bbox_px", "regions_of_color", "limited_by_box", "whole_region_pixels")},
                  "regions": selection.get("regions", 1)},
-             "change": change, "palette_after": palette_summary(after, frame, mpp), "applied_utc": _now()}
+             "change": change, "palette_after": copy.deepcopy(planned["palette_after"]), "applied_utc": _now()}
     return after, entry
 
 
@@ -1071,7 +1107,7 @@ def _session_replay(directory: Path, log: dict[str, Any], entries: list[dict[str
         raise ArtworkError("current.png does not match the edit log; verify or undo to rebuild it")
     frame, mpp = log["base"]["frame_color"], log["base"]["mm_per_pixel"]
     for number, entry in enumerate(entries, 1):
-        after, mask, selection, _ = plan_edit(image, check_op(entry["op"]), frame, mpp)
+        after, mask, selection, _ = plan_edit(image, check_op(entry["op"]), frame, mpp, summarize=False)
         if selection["color"] != entry["from"] or mask_sha256(mask) != entry["region_sha256"]:
             raise ArtworkError(f"unsaved change {number} no longer selects the same pixels; discard the unsaved changes")
         image = after
@@ -1110,15 +1146,17 @@ def _log_or_error(directory: Path) -> dict[str, Any]:
     return log
 
 
-def session_add(directory: Path, op: dict[str, Any]) -> tuple[np.ndarray, dict[str, Any], dict[str, Any]]:
-    """Make one checked op on the working artwork (unsaved). Returns (image, entry, session)."""
+def session_add(directory: Path, op: dict[str, Any],
+                planned: dict[str, Any] | None = None) -> tuple[np.ndarray, dict[str, Any], dict[str, Any]]:
+    """Make one checked op on the working artwork (unsaved). Returns (image, entry, session).
+    ``planned``: the preview's ``planned_edit`` of this op, reused when it was made on the same pixels."""
 
     directory = Path(directory)
     log = _log_or_error(directory)
     session = _session_or_new(directory, log)
     image = session_image(directory, log, session)
     after, entry = _entry(image, op, log["base"]["frame_color"], log["base"]["mm_per_pixel"],
-                          len(log["edits"]) + len(session["ops"]) + 1)
+                          len(log["edits"]) + len(session["ops"]) + 1, planned)
     refuse_unapproved_clipping(entry)
     session["ops"].append(entry)
     session["redo"] = []  # a new edit ends the redo chain
@@ -1152,7 +1190,7 @@ def session_redo(directory: Path) -> tuple[np.ndarray, dict[str, Any]]:
     image = session_image(directory, log, session)
     entry = session["redo"].pop()
     frame, mpp = log["base"]["frame_color"], log["base"]["mm_per_pixel"]
-    after, mask, selection, _ = plan_edit(image, check_op(entry["op"]), frame, mpp)
+    after, mask, selection, _ = plan_edit(image, check_op(entry["op"]), frame, mpp, summarize=False)
     if selection["color"] != entry["from"] or mask_sha256(mask) != entry["region_sha256"]:
         raise ArtworkError("the undone change no longer selects the same pixels; make it again")
     session["ops"].append(entry)

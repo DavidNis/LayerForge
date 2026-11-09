@@ -389,3 +389,11 @@ No complete UI/server, arbitrary photographic depth estimation, frame design, gl
   details collapsed; browser test + Chupa check.
 - [x] User review (approved); confirm dialog for "Revert to before widening" + browser test.
 - [ ] Commit, rebuild exe/zip, packaged tests, packaged-UI check.
+
+## Artwork editor responsiveness (2026-11-09)
+
+- [x] Measure the line lifecycle (Chupa + synthetic, browser and API), fix the confirmed bottlenecks, one request at
+  a time with local feedback, tests.
+- [x] No layout shift from the Issues panel; CAD stack preloaded; stability browser test.
+- [ ] Approval needed: identical-output packed unique in ``experimental_global_planner.exact_index`` (planner module).
+- [ ] User review; then commit, rebuild exe/zip and packaged tests (when approved).

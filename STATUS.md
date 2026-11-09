@@ -1222,3 +1222,18 @@ follow the light-blue body). Not user approved; no CAD exported.
   test_review_layers 2, test_issue_inspector 5: all PASS.
   User approved the UI; added a confirm dialog to "Revert to before widening" (names the later edits that are
   deleted; Cancel keeps them) + browser test: test_widening 20 PASS.
+
+- 2026-11-09 - Artwork editor responsiveness (D-V3-043). State: READY_FOR_USER_TEST; not committed, exe not rebuilt.
+  Root cause: row-wise np.unique over all pixels (5x per edit), add recomputing its preview, replays recomputing
+  summaries. Chupa (frozen scratch copy, browser, steady state): line feedback 3.1 s -> 18 ms; preview 3.1 s ->
+  0.54 s; Done -> applied 2.9 s -> 0.17 s; undo 5.4 s -> 0.23 s. API: save 5.5 s -> 0.14 s, verify 5.5 s -> 0.11 s.
+  Synthetic 512 px: preview 0.75 -> 0.24 s, add 0.75 -> 0.11 s, undo 1.2 -> 0.15 s. Tests: test_artwork_responsive 6
+  (new; incl. browser drive tests/e2e/drive_artwork_pending.mjs), artwork_session 7, artwork_paint 21,
+  artwork_recolor 16, artwork_fit 14, stroke_connectors 12, issue_inspector 5, physical_resize 7, review_layers 2,
+  l4_app 13, widening 20: all PASS.
+  Follow-up (user request): no layout shift - a background Issues update replaces only that panel and the editor
+  keeps its place on screen (scroll compensation while the user works in it); CAD stack imported at server
+  start. Browser drive tests/e2e/drive_artwork_stable.mjs: Issues answers held and released mid-stroke (first
+  load: panel +991 px, page scrolled +992 px, canvas moved 0.5 px; refresh after zoom/pan/scroll: all kept),
+  4 lines saved at exactly the intended pixels. Cold Chupa (draw right after opening): slowest preview 2.4-2.5 s
+  -> 1.5-1.8 s; feedback 14-26 ms throughout.

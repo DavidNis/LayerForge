@@ -488,6 +488,9 @@ button.primary.large, .button.large { padding: 9px 18px; min-height: 40px; font-
 .art-savebar.confirm { border-color: var(--bad); }
 .art-savebar .row { gap: 6px; }
 .unsaved-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--warn); margin-right: 4px; vertical-align: middle; }
+/* An artwork request in flight (one at a time): a small status, not a dialog. */
+.art-pending { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
+.spinner.small { width: 12px; height: 12px; border-width: 2px; margin-top: 0; }
 .flip { display: inline-flex; transform: scaleX(-1); }
 .history li.unsaved { opacity: 0.85; font-style: italic; }
 /* Issue inspector: the image with located issues beside a compact, filterable list. */

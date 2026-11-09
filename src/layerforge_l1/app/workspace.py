@@ -21,6 +21,7 @@ review project itself is the save format, so a project reloads after a restart.
 
 from __future__ import annotations
 
+import copy
 import io
 import json
 import os
@@ -310,6 +311,9 @@ class Workspace:
         self.root = Path(root).resolve()
         self.root.mkdir(parents=True, exist_ok=True)
         self._artwork_lock = threading.Lock()  # artwork edits are quick requests, not queued jobs
+        # The last drawing preview per project (``art.planned_edit``): the edit that follows reuses it
+        # when it is the same op on the same pixels (checked by hash), instead of computing it again.
+        self._artwork_planned: dict[str, dict[str, Any]] = {}
         self._basis_sha: dict[tuple[str, int, int], str] = {}  # artwork file stamp -> pixel hash
         self._issue_cache: dict[str, tuple[Any, dict[str, Any]]] = {}  # project -> (input stamps, issues)
 
@@ -1442,7 +1446,9 @@ class Workspace:
         from ..core import artwork as art
 
         op = art.check_op(request)
-        after, mask, selection, change = art.plan_edit(image, op, frame, mpp)
+        self._artwork_planned.pop(name, None)
+        planned = art.planned_edit(image, op, frame, mpp)
+        after, mask, selection, change = (planned[k] for k in ("after", "mask", "selection", "change"))
         pid = art.preview_id(sha, op)
         art.save_rgb(art.highlight(image, mask), out / "selection.png")
         art.save_rgb(after, out / "after.png")
@@ -1453,8 +1459,9 @@ class Workspace:
                          "in front sheets, or planning reports it.")
         if op.get("clip_regions"):
             notes.append(f"Painted only inside the {len(op['clip_regions'])} selected region(s); nothing outside changes.")
-        return {"preview_id": pid, "op": op, "selection": selection, "change": change,
-                "stroke_px": selection["stroke_points_px"], "palette_after": art.palette_summary(after, frame, mpp),
+        self._artwork_planned[name] = planned
+        return {"preview_id": pid, "op": op, "selection": copy.deepcopy(selection), "change": copy.deepcopy(change),
+                "stroke_px": selection["stroke_points_px"], "palette_after": copy.deepcopy(planned["palette_after"]),
                 "images": {k: self.url(name, f"artwork/preview/{k}.png", pid) for k in ("selection", "after", "before_after")},
                 "notes": notes}
 
@@ -1655,7 +1662,7 @@ class Workspace:
             try:
                 if action == "add":
                     op = self._artwork_op((request or {}).get("op") if isinstance(request, dict) else None)
-                    _, entry, _ = art.session_add(directory, op)
+                    _, entry, _ = art.session_add(directory, op, self._artwork_planned.pop(name, None))
                     out = {"added": entry["index"], "change": entry["change"]}
                 elif action == "undo":
                     art.session_undo(directory)

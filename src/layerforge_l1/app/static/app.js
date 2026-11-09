@@ -13,6 +13,7 @@ const ui = {
   sheet: null,         // selected sheet id
   view: "front",       // editor image: front (assembled, default) | sheet | changes_base | changes_previous
   pending: null,       // accept_artwork awaiting "Apply" (the only edit proposed from Review Layers)
+  artPending: null,    // the artwork request in flight: {label, ghost} (one at a time; see artBegin)
   marker: null,        // [x,y] mm highlighted on the canvas
   hover: null,
   process: null,       // printer/process form values
@@ -285,6 +286,7 @@ function defaultTab() {
 function render() {
   renderProjectSelect();
   const focusKey = artFocusKey();
+  const anchor = artAnchor();
   const root = $("#app");
   if (!ui.name) {
     root.innerHTML = errorBanner() + importView();
@@ -316,6 +318,30 @@ function render() {
   bindFit();
   bindInspector();
   restoreArtFocus(focusKey);
+  keepArtAnchor(anchor);
+}
+
+// The Artwork editor's canvas keeps its place on screen when content above it changes height (the Issues
+// panel loading or re-checking, a banner): the page scrolls by the same amount, so a stroke in progress
+// and the next one land where the user aims. The page is rebuilt on render, so the browser's own scroll
+// anchoring cannot do this. Only while the user works in the editor: it is mostly on screen and the last
+// pointer, key or wheel input was in it (or there was none yet); after input elsewhere nothing is moved.
+let artInputLast = null;  // "art" | "other": where the last pointer / key / wheel input was
+for (const type of ["pointerdown", "keydown", "wheel"]) {
+  document.addEventListener(type, (e) => {
+    artInputLast = e.target.closest?.('[data-testid="artwork-panel"]') ? "art" : "other";
+  }, { capture: true, passive: true });
+}
+function artAnchor() {
+  const r = $("#art-viewport")?.getBoundingClientRect();
+  if (!r || artInputLast === "other") return null;
+  const shown = Math.min(r.bottom, window.innerHeight) - Math.max(r.top, 0);
+  return shown >= r.height / 2 ? { tab: ui.tab, top: r.top } : null;
+}
+function keepArtAnchor(anchor) {
+  if (!anchor || anchor.tab !== ui.tab) return;
+  const top = $("#art-viewport")?.getBoundingClientRect().top;
+  if (top !== undefined && Math.abs(top - anchor.top) >= 1) window.scrollBy(0, top - anchor.top);
 }
 
 // The workflow as one stepper: Import -> Edit artwork -> Plan -> Review layers -> (Check printability)
@@ -1038,9 +1064,9 @@ function shapeCard(d, mpp, pv) {
   return `<div class="subpanel art-shape" data-testid="art-shape">
     <div class="art-selection-head"><strong>${title}</strong><span class="small muted" data-testid="art-shape-points">${pt(d.points[0])} → ${pt(d.points[d.points.length - 1])}</span></div>
     <div class="row">${gapPath}${straighten}</div>${fields}
-    ${pv ? `<p class="small" style="margin:0" data-testid="art-stroke-info">${esc(artOpLabel(pv.op))}${pv.op.op === "close_gap" ? ` · ends snapped to ${[pv.stroke_px[0], pv.stroke_px[pv.stroke_px.length - 1]].map((q) => `(${q[0]}, ${q[1]})`).join(" and ")}` : ""} · ${fmt(pv.change.pixels)} px · palette ${pv.change.palette_size_before} → ${pv.change.palette_size_after} ${infoTip(pv.notes.join(" "))}</p>` : ""}
-    <div class="row"><button class="primary small" data-action="art-done" data-testid="art-done" ${pv ? "" : "disabled"}>${ICON.check}<span>Done</span></button>
-      <button class="ghost small" data-action="art-remove" data-testid="art-remove">Remove</button>
+    ${pv ? `<p class="small" style="margin:0" data-testid="art-stroke-info"><span class="muted">Preview, not applied yet:</span> ${esc(artOpLabel(pv.op))}${pv.op.op === "close_gap" ? ` · ends snapped to ${[pv.stroke_px[0], pv.stroke_px[pv.stroke_px.length - 1]].map((q) => `(${q[0]}, ${q[1]})`).join(" and ")}` : ""} · ${fmt(pv.change.pixels)} px · palette ${pv.change.palette_size_before} → ${pv.change.palette_size_after} ${infoTip(pv.notes.join(" "))}</p>` : ""}
+    <div class="row"><button class="primary small" data-action="art-done" data-testid="art-done" ${pv && !ui.artPending ? "" : "disabled"}>${ICON.check}<span>Done</span></button>
+      <button class="ghost small" data-action="art-remove" data-testid="art-remove" ${ui.artPending ? "disabled" : ""}>Remove</button>
       <span class="small muted">Drag the ${straight ? "end points" : "end and control points"} to adjust · Enter: Done</span></div></div>`;
 }
 
@@ -1351,7 +1377,7 @@ function artworkPanel() {
   if (!a) return "";
   if (!a.available) return `<div class="panel tight small muted">The artwork editor is unavailable: ${esc(a.reason || "")}</div>`;
   const s = ui.art;
-  const dis = busy() ? "disabled" : "";
+  const dis = busy() || ui.artPending ? "disabled" : "";  // also while an artwork request runs (one at a time)
   const edits = a.edits || [];
   const palette = a.palette || [];
   const drawing = DRAW_MODES.includes(s.mode);
@@ -1360,7 +1386,7 @@ function artworkPanel() {
   const shape = s.draw && SHAPE_KINDS.includes(s.draw.kind) ? s.draw : null;
   const pv = shape && isDrawOp(s.preview?.op) ? s.preview : null;
   const image = pv ? pv.images.after : s.selection ? s.selection.images.selection : a.image;
-  const canPick = (sel || painting) && !busy() ? "" : "disabled";
+  const canPick = (sel || painting) && !busy() && !ui.artPending ? "" : "disabled";
   const u = a.unsaved || { count: 0, redo: 0, ops: [] };
   const savedDis = u.count || busy() ? "disabled" : "";  // the saved history waits for Save / Discard
 
@@ -1419,7 +1445,8 @@ function artworkPanel() {
   const status = u.stale ? '<span class="no" data-testid="art-unsaved">Unsaved changes were made on an earlier artwork and cannot be saved; discard them.</span>'
     : u.count ? `<span class="unsaved-dot" aria-hidden="true"></span><strong data-testid="art-unsaved">${u.count} unsaved change${u.count === 1 ? "" : "s"}</strong>${s.recovered ? ' <span class="small muted" data-testid="art-recovered">(recovered)</span>' : ""}`
     : '<span class="small muted" data-testid="art-unsaved">All changes saved</span>';
-  const last = s.last ? `<span class="small ${s.last.bad ? "no" : "muted"}" data-testid="art-last">${esc(s.last.text)}</span>` : "";
+  const last = ui.artPending ? `<span class="art-pending small" data-testid="art-pending" role="status"><span class="spinner small" aria-hidden="true"></span>${esc(ui.artPending.label)}</span>`
+    : s.last ? `${s.last.ok ? '<span class="yes small" aria-hidden="true">✓</span>' : ""}<span class="small ${s.last.bad ? "no" : "muted"}" data-testid="art-last" role="status">${esc(s.last.text)}</span>` : "";
   const savebar = s.confirmDiscard ? `<div class="art-savebar confirm" data-testid="art-savebar">
       <span><strong>Discard ${u.count} unsaved change${u.count === 1 ? "" : "s"}?</strong> <span class="small muted">The saved artwork stays as it is.</span></span>
       <div class="row"><button class="ghost" data-action="art-discard-cancel" data-testid="art-discard-cancel">Keep editing</button>
@@ -1710,6 +1737,19 @@ function drawArtOverlay() {
     ctx.stroke();
     ctx.restore();
   }
+  const ghost = ui.artPending?.ghost;
+  if (ghost && mpp) {  // local preview of the stroke being applied: translucent, until the server's pixels are shown
+    ctx.save();
+    ctx.globalAlpha = 0.5;
+    ctx.strokeStyle = ghost.color || "#ff2d55";
+    ctx.lineWidth = Math.max(1, (ghost.width / mpp) * sx);
+    ctx.lineCap = ctx.lineJoin = "round";
+    ctx.beginPath();
+    const pts = ghost.points.length === 1 ? [ghost.points[0], [ghost.points[0][0], ghost.points[0][1] + 0.01]] : centreLine(ghost.points, ghost.path);
+    pts.forEach((q, i) => ctx[i ? "lineTo" : "moveTo"](ox + (q[1] + 0.5) * sx, oy + (q[0] + 0.5) * sy));
+    ctx.stroke();
+    ctx.restore();
+  }
   const d = ui.art.draw;
   if (d && SHAPE_KINDS.includes(d.kind)) {  // the pending shape: centre line, handles (and the live stroke while dragging)
     const at = (q) => [ox + (q[1] + 0.5) * sx, oy + (q[0] + 0.5) * sy];
@@ -1775,6 +1815,7 @@ function bindArtwork() {
   applyArtView();
   canvas.addEventListener("pointerdown", (e) => {
     if (busy() || e.button !== 0) return;
+    if (ui.artPending) { artNotice(`${ui.artPending.label} Wait for it to finish.`); return; }
     const s = ui.art;
     const point = artPx(e);
     const handle = shapeHandleAt(e);
@@ -1808,7 +1849,7 @@ function bindArtwork() {
     }
   });
   canvas.addEventListener("pointerup", async (e) => {
-    if (busy() || e.button !== 0) return;
+    if (busy() || e.button !== 0 || ui.artPending) return;
     const s = ui.art;
     const point = artPx(e);
     if (s.handle !== null) {
@@ -1939,6 +1980,21 @@ function artworkCall(action, body) {
   return api("POST", `/api/projects/${encodeURIComponent(ui.name)}/artwork/${action}`, body);
 }
 
+// One artwork request at a time (preview, edit, undo / redo, save). While it runs the save bar shows
+// what is being done, a drawn stroke stays on the canvas as a translucent local preview (``ghost``:
+// not applied yet; the artwork image only ever shows the server's pixels), and the edit controls are
+// disabled so nothing is submitted twice. Zoom, pan and the rest of the page stay usable. Returns
+// false (nothing to send) while another request is running; artEnd() must follow in a finally.
+function artBegin(label, ghost = null) {
+  if (ui.artPending) return false;
+  ui.artPending = { label, ghost };
+  render();
+  return true;
+}
+const artEnd = () => { ui.artPending = null; };
+const artGhost = (points, path = "line") => ({ points: points.map((q) => q.slice()), path, width: ui.art.width, color: ui.art.color });
+const SHAPE_NAMES = { line: "line", curve: "curve", gap: "gap closure" };
+
 // The view (zoom, pan), tool, thickness and limit box survive a new selection, Apply, Undo and
 // Cancel; the paint tools also keep their color, so several strokes or fills follow one another.
 function keepArtView(extra = {}) {
@@ -1954,6 +2010,7 @@ function keepArtView(extra = {}) {
 // length). The shape stays pending (editable) until Done, the next shape, a tool change or Save.
 async function artworkDraw(spec) {
   const s = ui.art;
+  if (ui.artPending) return;
   ui.error = null;
   if (spec) s.draw = { path: "line", ...spec, op: spec.kind === "gap" ? "close_gap" : "paint_stroke" };
   const d = s.draw;
@@ -1961,6 +2018,9 @@ async function artworkDraw(spec) {
   const body = { op: d.op, points_px: d.points, width_mm: s.width, color: s.color, source: s.source };
   if (d.path === "cubic") body.path = "cubic";
   if (s.source === "eyedropper") body.sampled_at_px = s.sampled;
+  s.preview = null;  // an earlier preview of this shape is out of date: the current artwork + the local stroke meanwhile
+  if (!artBegin(`Previewing ${SHAPE_NAMES[d.kind]}…`, artGhost(d.points, d.path))) return;
+  let failed = null;
   try {
     s.preview = await artworkCall("preview", body);
     if (d.kind === "gap") {  // the ends snapped to the contour: the handles follow
@@ -1970,26 +2030,34 @@ async function artworkDraw(spec) {
     }
   } catch (err) {
     s.preview = null;  // the shape stays pending so its points can be moved
-    render();
-    artNotice(`Not drawn: ${err.message || err}`);
-    return;
+    failed = err;
+  } finally {
+    artEnd();
   }
+  if (failed) s.last = { text: `Not drawn: ${failed.message || failed}`, bad: true };
   render();
 }
 
 // One completed edit into the working session (shown at once, saved with Save Changes).
-async function artworkAdd(op, extra = {}) {
-  if (busy()) return false;
+async function artworkAdd(op, extra = {}, ghost = null) {
+  if (busy() || !artBegin(`Applying ${artOpLabel(op)}…`, ghost)) return false;
   ui.error = null;
+  let result = null, failed = null;
   try {
-    const result = await artworkCall("session/add", { op });
-    ui.art = keepArtView({ ...extra, last: { text: `${artOpLabel(op)}: ${fmt(result.change.pixels)} px changed` } });
-    await loadState();
+    result = await artworkCall("session/add", { op });
+    ui.art = keepArtView({ ...extra, last: { text: `${artOpLabel(op)}: ${fmt(result.change.pixels)} px changed`, ok: true } });
+    await loadState();  // the artwork image switches to the server's result before the status clears
   } catch (err) {
-    ui.art.last = { text: `Not changed: ${err.message || err}`, bad: true };
+    failed = err;
+  } finally {
+    artEnd();
+  }
+  if (failed && !result) {  // nothing was changed: the screen shows the artwork as it is on the server
+    ui.art.last = { text: `Not changed: ${failed.message || failed}`, bad: true };
     render();
     return false;
   }
+  if (failed) showError(failed, "Artwork refresh");  // applied, but the page could not reload the project
   render();
   return true;
 }
@@ -2000,8 +2068,11 @@ async function finalizeShape() {
   const s = ui.art;
   if (!s.draw || !SHAPE_KINDS.includes(s.draw.kind)) return true;
   const pv = s.preview;
+  if (ui.artPending) return false;  // its preview is still being made
   if (!pv || !isDrawOp(pv.op)) { s.draw = null; return true; }
-  return artworkAdd(pv.op);
+  if (await artworkAdd(pv.op)) return true;
+  if (ui.art.draw) await artworkDraw();  // refused: preview the shape again on the artwork as it is now
+  return false;
 }
 
 function opColor(extra) {
@@ -2020,7 +2091,7 @@ async function artworkFill(at) {
 async function artworkBrush(points) {
   const regions = ui.art.regions.slice();
   const op = opColor({ op: "paint_stroke", points_px: points, width_mm: ui.art.width, clip_regions: regions });
-  if (!(await artworkAdd(op))) { drawArtOverlay(); return; }
+  if (!(await artworkAdd(op, {}, artGhost(points)))) { drawArtOverlay(); return; }
   try {
     const result = await artworkCall("preview", { regions });
     ui.art.regions = result.regions;
@@ -2029,19 +2100,29 @@ async function artworkBrush(points) {
   render();
 }
 
+const SESSION_LABELS = { undo: "Undoing…", redo: "Redoing…", discard: "Discarding…", save: "Saving…" };
+
 async function artworkSession(action) {
-  if (busy()) return;
+  if (busy() || ui.artPending) return;
   if (action === "save" && !(await finalizeShape())) return;
   if (action === "undo" && ui.art.draw && SHAPE_KINDS.includes(ui.art.draw.kind)) { discardShape(true); return; }
   ui.error = null;
+  if (!artBegin(SESSION_LABELS[action])) return;
+  let failed = null;
   try {
     const result = await artworkCall(`session/${action}`, {});
     const text = action === "save" ? `Saved ${result.saved} change${result.saved === 1 ? "" : "s"}`
       : action === "discard" ? `Discarded ${result.discarded} change${result.discarded === 1 ? "" : "s"}` : null;
-    ui.art = keepArtView(text ? { last: { text } } : {});
+    ui.art = keepArtView(text ? { last: { text, ok: true } } : {});
     await loadState();
   } catch (err) {
-    showError(err, action === "save" ? "Save Changes" : `Artwork ${action}`);
+    failed = err;
+  } finally {
+    artEnd();
+  }
+  if (failed) {
+    showError(failed, action === "save" ? "Save Changes" : `Artwork ${action}`);
+    render();
     return;
   }
   render();
@@ -2065,6 +2146,8 @@ function setShapeGeometry(angle, length) {
 async function artworkSelect(at, additive = false) {
   ui.error = null;
   const s = ui.art;
+  if (!artBegin("Selecting…")) return;
+  let failed = null;
   try {
     const result = await artworkCall("preview", { regions: additive ? s.regions : [], toggle: { at_px: at, box_px: s.box } });
     s.regions = result.regions;
@@ -2072,9 +2155,11 @@ async function artworkSelect(at, additive = false) {
     s.selection = result.selection ? result : null;
     s.draw = null;
   } catch (err) {
-    showError(err, "Artwork selection");
-    return;
+    failed = err;
+  } finally {
+    artEnd();
   }
+  if (failed) showError(failed, "Artwork selection");
   render();
 }
 
@@ -2097,15 +2182,18 @@ async function artworkSample(at) {
 }
 
 async function artworkPost(action, body) {
-  if (busy()) return;
+  if (busy() || !artBegin(action === "verify" ? "Verifying…" : "Undoing…")) return;
+  let failed = null;
   try {
     await artworkCall(action, body);
     if (action !== "verify") ui.art = keepArtView();
     await loadState();
   } catch (err) {
-    showError(err, `Artwork ${action}`);
-    return;
+    failed = err;
+  } finally {
+    artEnd();
   }
+  if (failed) showError(failed, `Artwork ${action}`);
   render();
 }
 
@@ -2126,6 +2214,21 @@ function freshInsp() {
   return { selected: null, selectedKey: null, kind: "", severity: "", status: "", view: "auto", zoom: null, pan: [0, 0], panning: null, shown: null };
 }
 
+// A background Issues update (first load, re-check, new result) replaces only the Issues panel: the rest
+// of the page is not rebuilt, so a stroke, pan, zoom or open field in the Artwork editor continues
+// undisturbed, and the editor keeps its place on screen (keepArtAnchor). Full render if the panel is absent.
+function renderIssues() {
+  const old = $('[data-testid="issue-inspector"]');
+  if (!old) { render(); return; }
+  const anchor = artAnchor();
+  const html = document.createElement("template");
+  html.innerHTML = issuesPanel().trim();
+  const next = html.content.firstElementChild;
+  if (next) old.replaceWith(next); else old.remove();
+  bindInspector();
+  keepArtAnchor(anchor);
+}
+
 async function loadIssues() {
   if (!ui.name || ui.issuesLoading || !ui.state?.proposal || busy()) return;
   ui.issuesLoading = true;
@@ -2134,7 +2237,7 @@ async function loadIssues() {
   const same = (a, b) => JSON.stringify({ ...a, computed_utc: null }) === JSON.stringify({ ...b, computed_utc: null });
   let changed = true;
   const wasStale = Boolean(ui.issues && !ui.issues.error && inspBasisStale(ui.issues));
-  if (wasStale) render();  // show "re-checking" on the old locations while the check runs
+  if (wasStale) renderIssues();  // show "re-checking" on the old locations while the check runs
   try {
     const data = await api("GET", `/api/projects/${encodeURIComponent(name)}/issues`);
     if (ui.name !== name) return;
@@ -2146,7 +2249,7 @@ async function loadIssues() {
   } finally {
     ui.issuesLoading = false;
   }
-  if (changed) render();  // nothing new: no re-render (it would interrupt a drag or a pan in progress)
+  if (changed) renderIssues();  // nothing new: no re-render
 }
 
 // Issue numbers follow the current result; the selection follows the issue's stable key across
