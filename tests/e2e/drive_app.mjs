@@ -159,7 +159,7 @@ try {
   const layers = await evaluate(`[...document.querySelectorAll('[data-testid="layer-row"]')].map((e) => e.querySelector(".name").innerText)`);
   results.layers_front_to_back = layers;
   await shot("03_review");
-  if (!(await evaluate(`/off/.test(document.querySelector('[data-testid="widening-panel"] summary')?.innerText || "")`))) throw new Error("widening panel should say off");
+  if (!(await evaluate(`/Off/.test(document.querySelector('[data-testid="widening-panel"] summary')?.innerText || "")`))) throw new Error("widening panel should say off");
   step("review started", { layers });
 
   // 3a. Review Layers has no sheet-geometry tools.  Projects can still hold geometry edits (made by the

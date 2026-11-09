@@ -2938,7 +2938,8 @@ function validationPanel() {
   </details>`;
 }
 
-// Cutout widening (core/widening.py): what the last run did and an explicit re-run after edits.
+// Cutout widening (core/widening.py): the outcome of the last run (from the logged edit and the
+// geometry-check counts measured when it ran; nothing is recomputed here), its layers, undo and re-run.
 function wideningPanel() {
   const d = ui.state.draft;
   const w = d.widening;
@@ -2946,23 +2947,99 @@ function wideningPanel() {
   const s = w.last?.summary;
   const c = d.last_change;
   const notApplied = c && c.action === "widen" && !c.index ? c.widening : null;
-  const risk = s?.before && s?.after
-    ? `Risky cutouts (geometry check, ${esc(s.after.process)}): <strong>${fmt(s.before.risky_cutouts)} → ${fmt(s.after.risky_cutouts)}</strong> at ${fmt(s.before.places)} → ${fmt(s.after.places)} places.` : "";
-  const status = s
-    ? `${badge("ok", "applied")} <span class="small muted">edit #${w.last.index}${w.last.automatic ? ", when the review started" : ""}</span>`
-    : notApplied ? badge("neutral", "not applied") : w.enabled === false ? badge("neutral", "off") : badge("neutral", "not run");
-  const after = s && w.edits_after
-    ? `<p class="small" style="margin:0">${w.edits_after} layer edit${w.edits_after === 1 ? "" : "s"} since. Edits are not widened automatically; running it again widens only narrow cutouts the edits created (already widened cutouts are not widened further).</p>` : "";
-  const reason = notApplied ? `<p class="small muted" style="margin:0">${notApplied.status === "NO_CHANGE" ? "No narrow cutout could be widened into hidden material."
-    : esc(notApplied.reason || notApplied.status)}</p>` : "";
-  const body = s ? `<p class="small" style="margin:0">Removed ${fmt(s.removed_mm2, 1)} mm² of hidden material at ${fmt(s.spots - s.rejected)} places${s.rejected ? `; ${fmt(s.rejected)} kept to keep layers connected and at least 1.2 mm wide` : ""}. ${risk}</p>` : "";
+  const dis = busy() ? "disabled" : "";
+  const runBtn = `<button class="small ${s ? "ghost" : ""}" data-action="widen" ${busy() || !w.can_run ? "disabled" : ""} data-testid="widen-run"
+      title="${w.can_run ? "Widen the narrow cutouts of the current layers (logged as one edit)" : "Nothing changed since the last widening, or the layers are invalid"}">${s ? "Widen new cutouts" : "Widen narrow cutouts"}</button>`;
+  const what = "Cutouts narrower than 0.8 mm are widened by up to 0.35 mm per side into material that the layers in front already hide.";
+  if (!s) {  // off, not run, or nothing could be widened
+    const state = notApplied ? "Not applied" : w.enabled === false ? "Off" : "Not run";
+    const text = notApplied ? (notApplied.status === "NO_CHANGE" ? "No narrow cutout could be widened into hidden material." : notApplied.reason || notApplied.status)
+      : w.enabled === false ? "Off for this project: the layers are as planned." : "The layers are as planned.";
+    return `<details class="panel tight section" data-section="widening" data-testid="widening-panel" ${openAttr("widening", false)}>
+      <summary><h3>Cutout widening</h3><span class="small muted" data-testid="widen-headline">${state}</span></summary>
+      <div class="section-body stack">
+        <p class="small" style="margin:0" data-testid="widen-state-text">${esc(text)} <span class="muted">${esc(what)}</span></p>
+        <div class="row">${runBtn}</div>
+      </div>
+    </details>`;
+  }
+  const edit = d.edits.find((e) => e.index === w.last.index);
+  const sameRun = c && c.action === "widen" && c.index === w.last.index;
+  const perLayer = (edit?.retained_changed_px && Object.keys(edit.retained_changed_px).length ? edit.retained_changed_px : null)
+    || (sameRun ? c.change?.retained_changed_px : null) || null;
+  const ids = Object.keys(edit?.op?.removed || perLayer || {});
+  const mm2 = (px) => (px == null || !d.validation.mm_per_pixel ? null : px * d.validation.mm_per_pixel ** 2);
+  const layers = ids.map((id) => {
+    const at = d.sheets.findIndex((x) => x.id === id);
+    return { id, sheet: at < 0 ? null : d.sheets[at], no: at < 0 ? null : d.sheets.length - at, px: perLayer?.[id] ?? null };
+  }).sort((a, b) => (a.no ?? 1e9) - (b.no ?? 1e9));
+  // Outcome facts; anything not recorded shows "–" instead of a guess.
+  const b = s.before?.risky_cutouts, a = s.after?.risky_cutouts;
+  const measured = typeof b === "number" && typeof a === "number";
+  const drop = measured && b > 0 ? Math.round(((b - a) / b) * 100) : null;
+  const frontSame = edit ? edit.visible_changed_px === 0 : null;
+  const valid = edit ? edit.validation_status === "PASS" : null;
+  const fact = (value, label, cls = "", id = "") => `<div${id ? ` data-testid="${id}"` : ""}><span class="${cls}">${value}</span>${label}</div>`;
+  const facts = `<div class="facts widen-facts" data-testid="widen-facts">
+      ${fact(measured ? `${fmt(b)} → ${fmt(a)}` : "–", "risky cutouts", "", "widen-risky")}
+      ${fact(drop == null ? "–" : `${drop < 0 ? "+" : drop > 0 ? "−" : ""}${Math.abs(drop)}%`, drop < 0 ? "more" : "fewer", drop > 0 ? "yes" : drop < 0 ? "no" : "", "widen-drop")}
+      ${fact(fmt(layers.length), `layer${layers.length === 1 ? "" : "s"} changed`, "", "widen-layer-count")}
+      ${fact(frontSame == null ? "–" : frontSame ? "Unchanged" : "Changed", "front view", frontSame === false ? "no" : "", "widen-front")}
+    </div>`;
+  const headline = measured ? `${fmt(b)} → ${fmt(a)} risky cutouts${drop > 0 ? ` (−${drop}%)` : ""}` : `${layers.length} layer${layers.length === 1 ? "" : "s"} changed`;
+  // Structural validation and printability are different questions: valid layers can still carry print risks.
+  const checks = valid == null ? "" : `<div class="widen-check ${valid ? "ok" : "bad"}" data-testid="widen-validation">
+      <strong>${valid ? "✓ Structural checks passed" : "✗ Structural checks failed"}</strong>
+      <span class="small muted">${valid ? "Every layer is still one connected piece with material at least 1.2 mm wide." : "See Validation; undo the widening to restore the planned layers."}</span></div>`;
+  const remaining = !measured ? `<div class="widen-check neutral small" data-testid="widen-remaining">Print risks after widening were not measured; see Issues.</div>`
+    : a > 0 ? `<div class="widen-check warn" data-testid="widen-remaining"><strong>${fmt(a)} risky cutout${a === 1 ? "" : "s"} remain${a === 1 ? "s" : ""}</strong>
+        <span class="small muted">at ${fmt(s.after.places)} place${s.after.places === 1 ? "" : "s"}: still narrower than recommended for printing (print risks, not validation errors).</span>
+        <button class="small link" data-action="widen-issues" data-testid="widen-open-issues">Review in Issues</button></div>`
+      : `<div class="widen-check ok small" data-testid="widen-remaining">No risky cutouts remain in the geometry check.</div>`;
+  const chips = layers.map((l) => l.sheet
+    ? `<button class="widen-layer ${l.id === ui.sheet ? "active" : ""}" data-action="select-sheet" data-sheet="${esc(l.id)}" data-testid="widen-layer"
+        title="Show layer ${l.no} (${esc(l.sheet.color)})${l.px != null ? `: ${fmt(mm2(l.px), 1)} mm² of hidden material removed` : ""}">${swatch(l.sheet.color)}Layer ${l.no}${l.px != null ? ` <span class="muted">${fmt(mm2(l.px), 1)} mm²</span>` : ""}</button>`
+    : `<span class="widen-layer muted" data-testid="widen-layer" title="This layer is no longer in the stack">removed layer</span>`).join("");
+  const changeView = sameRun && d.previews.images.changes_vs_previous ? "changes_previous"
+    : d.edits.length === 1 && w.last.index === 1 && d.previews.images.changes_vs_base ? "changes_base" : null;
+  const last = w.last.index === d.edits.length;
+  // Reverting past later edits deletes them from the history (layer edits have no redo): ask first.
+  const n = d.edits.length - w.last.index;
+  const lose = `Revert to before the cutout widening?\n\nThis deletes the widening (edit #${w.last.index}) and the ${n} layer edit${n === 1 ? "" : "s"} made after it`
+    + ` (${n === 1 ? `edit #${d.edits.length}` : `edits #${w.last.index + 1}–#${d.edits.length}`}) from the edit history.`
+    + `\nThey cannot be restored with Undo; you would have to make them again.`;
+  const undo = last
+    ? `<button class="small" data-action="undo" ${dis} data-testid="widen-undo" title="Restore the layers as they were before the widening">${ICON.undo}<span>Undo widening</span></button>`
+    : `<button class="small ghost" data-action="revert" data-keep="${w.last.index - 1}" data-confirm="${esc(lose)}" ${dis} data-testid="widen-undo"
+        title="Restore the layers as they were before the widening; the ${w.edits_after} later edit${w.edits_after === 1 ? " is" : "s are"} removed too">Revert to before widening</button>`;
+  const later = w.edits_after ? `<p class="small muted" style="margin:0">${w.edits_after} layer edit${w.edits_after === 1 ? "" : "s"} since. Edits are not widened automatically; “Widen new cutouts” widens only narrow cutouts they created.</p>` : "";
+  const kept = s.rejected ? ` ${fmt(s.rejected)} place${s.rejected === 1 ? " was" : "s were"} left as planned to keep the layers strong.` : "";
+  const techLayers = layers.map((l) => `<tr><td>${l.no ?? "–"}</td><td><code>${esc(l.id)}</code></td><td>${l.px == null ? "–" : fmt(l.px)}</td>
+      <td class="mono">${esc(String(edit?.op?.removed?.[l.id] || "–").split("/").pop())}</td></tr>`).join("");
+  const process = s.after?.process || s.before?.process;
   return `<details class="panel tight section" data-section="widening" data-testid="widening-panel" ${openAttr("widening", false)}>
-    <summary><h3>Cutout widening</h3>${status}</summary>
+    <summary><h3>Cutout widening</h3><span class="small" data-testid="widen-headline">${badge("ok", "Applied")} <span class="muted">${esc(headline)}</span></span></summary>
     <div class="section-body stack">
-      <p class="small muted" style="margin:0">Cutouts narrower than 0.8 mm are widened by up to 0.35 mm per side into material that layers in front already hide. The front view, visible shapes, layer order, colors and count stay the same; undo removes it.</p>
-      ${body}${after}${reason}
-      <div class="row"><button class="small" data-action="widen" ${busy() || !w.can_run ? "disabled" : ""} data-testid="widen-run"
-        title="${w.can_run ? "Widen the narrow cutouts of the current layers (logged as one edit)" : "Nothing changed since the last widening, or the layers are invalid"}">${s ? "Widen new cutouts" : "Widen narrow cutouts"}</button></div>
+      <p class="small" style="margin:0" data-testid="widen-what">${esc(what)}${w.last.automatic ? " Applied when the review started." : ""}${esc(kept)}</p>
+      ${facts}
+      ${checks}
+      ${remaining}
+      ${layers.length ? `<div class="widen-layers" data-testid="widen-layers"><span class="small muted">Changed layers (front first):</span> ${chips}
+        ${changeView ? `<button class="small link" data-action="view" data-view="${changeView}" data-testid="widen-show-changes">Show changes on the preview</button>` : ""}</div>` : ""}
+      ${later}
+      <div class="row">${undo}${runBtn}</div>
+      <details class="small widen-tech" data-section="widening-tech" data-testid="widen-tech" ${openAttr("widening-tech", false)}><summary>Technical details</summary>
+        <dl class="kv">
+          <dt>Edit</dt><dd>#${w.last.index} <code>widen_openings</code>${w.last.automatic ? " (automatic)" : ""} · ${esc(edit?.kind || "–")} · ${esc(edit?.validation_status || "–")}</dd>
+          <dt>Hidden material removed</dt><dd>${fmt(s.removed_mm2, 1)} mm² · ${fmt(s.removed_px)} px</dd>
+          <dt>Places</dt><dd>${fmt(s.spots)} found · ${fmt(s.spots - s.rejected)} widened · ${fmt(s.rejected)} kept</dd>
+          <dt>Checks</dt><dd>${fmt(s.local_checks)} local · ${fmt(s.full_sheet_fallbacks)} whole-sheet · ${fmt(s.seconds, 1)} s</dd>
+          <dt>Geometry check</dt><dd>${esc(process || "–")} · places ${fmt(s.before?.places)} → ${fmt(s.after?.places)} · narrowest ${fmt(s.before?.narrowest_mm, 3)} → ${fmt(s.after?.narrowest_mm, 3)} mm</dd>
+          ${frontSame === false ? `<dt>Visible pixels changed</dt><dd>${fmt(edit.visible_changed_px)}</dd>` : ""}
+          ${edit?.op?.config ? `<dt>Settings</dt><dd class="mono">${esc(Object.entries(edit.op.config).map(([k, v]) => `${k}=${v}`).join(", "))}</dd>` : ""}
+        </dl>
+        ${techLayers ? `<div class="table-wrap"><table><thead><tr><th>Layer</th><th>Id</th><th>Removed px</th><th>Mask file</th></tr></thead><tbody>${techLayers}</tbody></table></div>` : ""}
+      </details>
     </div>
   </details>`;
 }
@@ -2970,7 +3047,7 @@ function wideningPanel() {
 function changePanel() {
   const c = ui.state.draft.last_change;
   if (!c) return "";
-  if (c.action === "widen" && !c.index) return "";
+  if (c.action === "widen") return "";  // shown in the Cutout widening panel
   if (c.action !== "edit" && c.action !== "widen") {
     return `<div class="panel tight section-flat"><h3 style="margin:0">Last action <span class="small muted" style="font-weight:400">${esc(c.action)}: ${c.edits_before} → ${c.edits_after} edits (replayed from the base). Compare with “Changes vs previous”.</span></h3></div>`;
   }
@@ -3591,6 +3668,11 @@ async function onClick(event) {
       break;
     case "start-review": submit(`${project}/review`, { candidate: el.dataset.candidate, widen_openings: widenOn() }); break;
     case "widen": submit(`${project}/widen`, {}); break;
+    case "widen-issues":  // the remaining risky cutouts are listed in the Issues section above
+      ui.sections.issues = true;
+      render();
+      $('[data-testid="issue-inspector"]')?.scrollIntoView({ behavior: "smooth", block: "start" });
+      break;
     case "select-sheet": ui.sheet = el.dataset.sheet; ui.marker = null; if (!ui.view.startsWith("changes")) ui.view = "sheet"; render(); break;
     case "view": ui.view = el.dataset.view; render(); break;
     case "cancel-pending": ui.pending = null; render(); break;
@@ -3609,7 +3691,10 @@ async function onClick(event) {
       break;
     }
     case "undo": submit(`${project}/undo`, {}); break;
-    case "revert": submit(`${project}/undo`, { keep: Number(el.dataset.keep) }); break;
+    case "revert":
+      if (el.dataset.confirm && !confirm(el.dataset.confirm)) break;  // destructive revert: nothing changes on Cancel
+      submit(`${project}/undo`, { keep: Number(el.dataset.keep) });
+      break;
     case "verify": submit(`${project}/verify`, {}); break;
     case "reload": await loadState(); render(); break;
     case "run-printability": submit(`${project}/printability`, { process: processPayload() }); break;

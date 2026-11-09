@@ -306,6 +306,10 @@ def test_review_edit_logs_masks_and_replays(stack, tmp_path) -> None:
     assert op["summary"]["before"] == {"n": 1} and op["summary"]["after"] == {"n": 2}
     assert entry["change"]["kind"] == "hidden_geometry" and entry["change"]["visible_changed_px"] == 0
     assert entry["validation_status"] == "PASS"
+    # The inspection (the app's draft view) carries the logged per-layer change for the summary panel.
+    logged = review.inspect_project(project)["edits"][0]
+    assert logged["retained_changed_px"] == entry["change"]["retained_changed_px"]
+    assert set(logged["retained_changed_px"]) == {"s1_red"} and logged["retained_changed_px"]["s1_red"] > 0
     saved = review.load_project(project)
     expected = widening.widen_openings(stack)[0]
     assert np.array_equal(saved.sheets[1].retained, expected.sheets[1].retained)
@@ -494,3 +498,127 @@ def test_existing_projects_are_not_widened_without_a_choice(stack, tmp_path) -> 
     out = ws.start_review("old_project_2", "beam_area", lambda *a, **k: None, widen_openings=True)
     assert out["widening"]["status"] == widening.APPLIED
     assert ws.record("old_project_2")["proposal_settings"]["widen_openings"] is True
+
+
+def test_browser_widening_summary_is_outcome_first(tmp_path) -> None:
+    """In a real browser (``tests/e2e/drive_widening.mjs``) on a project widened when its review started:
+    the panel states the outcome from the logged numbers (risky cutouts before -> after, reduction,
+    layers changed, front view, structural checks), tells remaining print risks apart from validation,
+    names the changed layers by number (selecting one shows it), keeps ids, mask files and pixel counts
+    in collapsed Technical details, stays compact in a narrow window, and Undo restores the plan."""
+
+    import subprocess
+
+    from test_l4_app import BROWSERS, ROOT, _node_ok, _propose, start
+
+    browser = next((b for b in BROWSERS if b.is_file()), None)
+    if not _node_ok() or browser is None:
+        pytest.skip("needs Node >= 22 and Edge/Chrome to drive the UI in a real browser")
+    server, client = start(tmp_path / "workspace")
+    try:
+        name, state = _propose(client)
+        client.run(name, "review", {"candidate": state["proposal"]["selected"], "widen_openings": True})
+        draft = client.state(name)["draft"]
+        w = draft["widening"]
+        assert w["runs"] == 1 and w["last"]["index"] == 1
+        shots = ROOT / "artifacts" / "widening_summary_v1"
+        run = subprocess.run(["node", str(ROOT / "tests" / "e2e" / "drive_widening.mjs"), client.base + "/", str(browser), "-",
+                              str(shots), name], capture_output=True, text=True, encoding="utf-8", timeout=900)
+        lines = [line for line in run.stdout.splitlines() if line.startswith("{")]
+        assert lines, run.stderr[-3000:]
+        r = json.loads(lines[-1])
+        (shots / "drive_result.json").write_text(json.dumps(r, indent=1), encoding="utf-8")
+        assert r["ok"], r.get("error", "") + "\nconsole: " + str(r.get("console_errors")) + "\n" + run.stderr[-3000:]
+        assert r["console_errors"] == []
+        check_widening_summary(r, draft)
+        assert r["after_undo"]["headline"] in ("Not run", "Off") and r["after_undo"]["run"]
+        assert client.state(name)["draft"]["edits"] == []
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_browser_revert_before_widening_asks_first(tmp_path) -> None:
+    """With an edit after the widening, "Revert to before widening" deletes that edit too: the browser
+    asks first and says what is lost; Cancel changes nothing, OK reverts to the planned layers."""
+
+    import subprocess
+
+    from test_l4_app import BROWSERS, ROOT, _node_ok, _propose, start
+
+    browser = next((b for b in BROWSERS if b.is_file()), None)
+    if not _node_ok() or browser is None:
+        pytest.skip("needs Node >= 22 and Edge/Chrome to drive the UI in a real browser")
+    server, client = start(tmp_path / "workspace")
+    try:
+        name, state = _propose(client)
+        client.run(name, "review", {"candidate": state["proposal"]["selected"], "widen_openings": True})
+        back = client.state(name)["draft"]["sheets"][0]["id"]
+        client.run(name, "edit", {"op": {"op": "thickness", "sheet": back, "mm": 2.0}})
+        assert [e["op"]["op"] for e in client.state(name)["draft"]["edits"]] == ["widen_openings", "thickness"]
+        shots = tmp_path / "shots"
+        run = subprocess.run(["node", str(ROOT / "tests" / "e2e" / "drive_widening.mjs"), client.base + "/", str(browser), "-",
+                              str(shots), name, "revert"], capture_output=True, text=True, encoding="utf-8", timeout=900)
+        lines = [line for line in run.stdout.splitlines() if line.startswith("{")]
+        assert lines, run.stderr[-3000:]
+        r = json.loads(lines[-1])
+        assert r["ok"], r.get("error", "") + "\n" + run.stderr[-3000:]
+        assert r["console_errors"] == []
+        v = r["revert"]
+        assert v["label"] == "Revert to before widening" and v["edits_before"] == 2
+        # Cancel: one confirm dialog naming what is deleted; nothing sent, both edits kept.
+        assert [d["type"] for d in v["cancel"]["dialogs"]] == ["confirm"]
+        message = v["cancel"]["dialogs"][0]["message"]
+        assert "widening (edit #1)" in message and "1 layer edit made after it (edit #2)" in message
+        assert "cannot be restored with Undo" in message
+        assert v["cancel"]["history"] == 2 and v["cancel"]["api_edits"] == 2 and not v["cancel"]["busy"]
+        # OK: reverted to the planned layers.
+        assert v["accept"]["dialogs"] == 2 and v["accept"]["history"] == 0
+        assert v["accept"]["headline"] in ("Not run", "Off")
+        assert client.state(name)["draft"]["edits"] == []
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def check_widening_summary(r: dict, draft: dict) -> None:
+    """The panel's numbers are the project's own (also used for the Chupa check)."""
+
+    w = draft["widening"]
+    summary = w["last"]["summary"]
+    edit = next(e for e in draft["edits"] if e["index"] == w["last"]["index"])
+    before, after = summary["before"]["risky_cutouts"], summary["after"]["risky_cutouts"]
+    p = r["panel"]
+    assert r["collapsed"]["headline"].startswith("Applied") and f"{before} → {after} risky cutouts" in r["collapsed"]["headline"]
+    assert p["facts"]["widen-risky"] == f"{before} → {after} risky cutouts"
+    drop = round((before - after) / before * 100) if before else None
+    assert p["facts"]["widen-drop"] == ("– fewer" if drop is None else f"−{drop}% fewer" if drop > 0 else f"{drop}% fewer" if drop == 0 else f"+{-drop}% more")
+    changed = set(edit["op"]["removed"])
+    assert p["facts"]["widen-layer-count"].startswith(f"{len(changed)} layer")
+    assert p["facts"]["widen-front"] == ("Unchanged front view" if edit["visible_changed_px"] == 0 else "Changed front view")
+    # Validation and remaining print risks are separate statements.
+    assert p["validation"].startswith("✓ Structural checks passed") and "ok" in p["validation_class"]
+    if after:
+        assert f"{after} risky cutout" in p["remaining"] and "not validation errors" in p["remaining"] and p["open_issues"]
+        assert r["issues"]["open"] and r["issues"]["in_view"]
+    else:
+        assert "No risky cutouts remain" in p["remaining"]
+    # Changed layers by number (front first), each selectable; the area is the logged pixel count in mm².
+    sheets = draft["sheets"]
+    numbers = {s["id"]: len(sheets) - i for i, s in enumerate(sheets)}
+    assert [layer["sheet"] for layer in p["layers"]] == sorted(changed, key=numbers.get)
+    mpp = draft["validation"]["mm_per_pixel"]
+    for layer in p["layers"]:
+        px = edit["retained_changed_px"][layer["sheet"]]
+        assert layer["text"] == f"Layer {numbers[layer['sheet']]} {px * mpp ** 2:.1f} mm²"
+    if p["layers"]:
+        assert r["layer_click"]["view"] == "Layer" and r["layer_click"]["chip_active"] and r["layer_click"]["panel_open"]
+    # Internal identifiers, mask files and pixel counts only in the collapsed Technical details.
+    assert not p["tech_open"] and p["badges"] == 1 and p["change_panel"] == 0
+    for sheet_id, mask in edit["op"]["removed"].items():
+        assert sheet_id not in p["main_text"] and mask.split("/")[-1] not in p["main_text"]
+        assert sheet_id in p["tech_text"] and mask.split("/")[-1] in p["tech_text"]
+    assert " px" not in p["main_text"] and "widen_openings" not in p["main_text"]
+    assert f"{summary['removed_px']:,}".replace(",", "") in p["tech_text"].replace(",", "")
+    assert p["undo"] == "Undo widening" and (p["show_changes"] and r["show_changes"] in ("Last change", "Changes vs base") or not p["show_changes"])
+    assert not r["narrow"]["overflow"] and r["narrow"]["columns"] == 2

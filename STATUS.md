@@ -1209,3 +1209,16 @@ follow the light-blue body). Not user approved; no CAD exported.
   bd5a4c261ee6a82762e52ef0922a95e9854a07ae32855ac76d83f9c2b53b7986); bundled static files identical to src.
   Packaged tests (one per process): 9 PASS. Five-project CAD-kit re-run not done (low memory earlier).
   Physical print test: PENDING.
+
+
+- 2026-11-09 — Cutout widening summary redesigned (UI only; D-V3-042 amendment). State: READY_FOR_USER_TEST.
+  Not committed, exe/zip not rebuilt. Files: app/static/app.js (wideningPanel, changePanel skips widening edits,
+  widen-issues action), app.css (widen-* styles), core/review.py (inspect_project passes retained_changed_px),
+  tests/test_widening.py (+1 browser test, +inspection assertion), tests/e2e/drive_widening.mjs (new),
+  tests/e2e/drive_app.mjs ("Off" label). Chupa (scratch copy, review started with widening; original hashed
+  unchanged): panel shows 106 -> 22 risky cutouts (-79%), 12 layers changed, front view unchanged, structural
+  checks passed, 22 remaining at 19 places with the Issues link; all values match the project's logged numbers;
+  no ids/hashes/px outside Technical details; no overflow at 700 px. Tests: test_widening 19, test_l4_app 13,
+  test_review_layers 2, test_issue_inspector 5: all PASS.
+  User approved the UI; added a confirm dialog to "Revert to before widening" (names the later edits that are
+  deleted; Cancel keeps them) + browser test: test_widening 20 PASS.

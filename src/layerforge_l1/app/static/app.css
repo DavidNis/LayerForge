@@ -565,3 +565,18 @@ button.link { border: none; background: none; padding: 0; color: var(--accent); 
 
 /* Color cleanup (Plan): one image, before/after toggle */
 .cleanup-img { max-width: 520px; width: 100%; image-rendering: pixelated; }
+
+/* Cutout widening (Review layers): outcome first, technical details collapsed */
+.widen-facts { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+@media (max-width: 760px) { .widen-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.widen-check { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; padding: 6px 10px; border-radius: 6px; border-left: 3px solid var(--line); background: var(--panel-2); }
+.widen-check.ok { border-left-color: var(--ok); }
+.widen-check.ok strong { color: var(--ok); }
+.widen-check.warn { border-left-color: var(--warn); }
+.widen-check.bad { border-left-color: var(--bad); }
+.widen-check.bad strong { color: var(--bad); }
+.widen-layers { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.widen-layer { display: inline-flex; align-items: center; gap: 5px; padding: 1px 8px; border-radius: 999px; font-size: 12px; min-height: 24px; }
+.widen-layer.active { background: var(--panel); color: var(--text); border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 25%, transparent); font-weight: 600; }
+.widen-layer .swatch { width: 10px; height: 10px; }
+.widen-tech table { font-size: 12px; }

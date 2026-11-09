@@ -1230,3 +1230,17 @@ FDM thresholds remain generic assumptions until a print calibrates them).
     cutout threshold (`PrintProcess.min_opening_mm`). 0.84 mm = `PrintProcess.min_positive_feature_mm`, the
     generic FDM estimate's thin-material RISK level (2 x the 0.42 mm line width, ASSUMPTION, D-V3 L3 print
     kit); it reports thin material, it does not validate structure. Physical suitability open until a print.
+
+
+- Amendment (2026-11-09, UI only; user request): the Cutout widening panel is outcome-first. Collapsed line:
+  Applied + risky cutouts before -> after (reduction). Open: what it did, four facts (risky cutouts, % fewer,
+  layers changed, front view), "Structural checks passed/failed" stated separately from "N risky cutouts remain"
+  (print risks, not validation errors) with a link to Issues, changed layers as "Layer N" chips (front first,
+  removed area in mm^2, click selects the layer), "Show changes on the preview" when the view shows exactly this
+  widening, Undo widening (or Revert to before widening when later edits exist), re-run. Ids, mask files, pixel
+  counts, settings and check counts moved to a collapsed Technical details section; the generic "Edit #n" change
+  panel is not shown for widening edits. Numbers come from the logged edit and its stored geometry-check counts;
+  `review.inspect_project` now passes on each edit's logged `retained_changed_px` (display only). Unrecorded values
+  show "-". "Revert to before widening" deletes the later edits too (layer edits have no redo), so it asks for
+  confirmation first, naming the edits that are lost; Cancel changes nothing. Algorithm, planner, geometry,
+  thresholds and validation unchanged.

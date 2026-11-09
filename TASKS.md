@@ -382,3 +382,10 @@ No complete UI/server, arbitrary photographic depth estimation, frame design, gl
 - [x] Review round: performance (+19.3 s -> +11.8 s on Chupa), idempotent repeated widening, no automatic
   widening of existing projects, edge-connected removal + "no new cutout" gate; validated on 5 projects.
 - [ ] Physical print test (pending).
+
+## Cutout widening summary UI (2026-11-09)
+
+- [x] Outcome-first panel, validation vs remaining risks, layer chips, Issues link, undo/revert, Technical
+  details collapsed; browser test + Chupa check.
+- [x] User review (approved); confirm dialog for "Revert to before widening" + browser test.
+- [ ] Commit, rebuild exe/zip, packaged tests, packaged-UI check.
