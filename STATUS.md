@@ -1046,6 +1046,32 @@ follow the light-blue body). Not user approved; no CAD exported.
   Rebuilt with the clipping fix (user request): dist\LayerForge\LayerForge.exe (2026-11-04 23:06) and
   dist\LayerForge-0.1.0-win64.zip (23:07, SHA-256 4d4ebd54ee7160a490f03b427a832a0a96291d454cf4b3918ec7751770055bd9);
   bundled static files byte-identical to src. Packaged tests (tests/test_windows_build.py, one per process): 9 PASS.
+- 2026-11-05 UX Stage 1: Review Layers is a read-only inspection workspace. State: READY_FOR_USER_TEST. Not committed.
+  Changed: app/static/app.js + app.css (Review layout; Artwork editor in its own tab; issue card "Show on layer";
+  text that pointed at "Review & edit -> Artwork editor"), tests/test_review_layers.py (new, 2 tests),
+  tests/e2e/drive_review.mjs (new), drive_app.mjs / drive_artwork.mjs (geometry edits now made through the
+  unchanged edit API; Review canvas checks are inspection only), drive_fit.mjs (headless scrollbars hidden:
+  the scrollbar appeared at the first press and shifted the canvas mid-drag), test_l4_app.py,
+  test_artwork_recolor.py assertions. Fit card: stale warnings hidden in place during a drag (no layout jump).
+  Backend, planner, validators, CAD, export rules unchanged. Evidence: artifacts/review_layers_v1/{before,after}/.
+  Before -> after (same project, 1440 px window): preview 740 -> 800 px square, page 3,862 -> 2,560 px, visible
+  buttons 67 -> 25, words ~713 -> ~386, headings 19 -> 10, sheet-editing controls 14 -> 0, artwork editor 1 -> 0.
+  Tests PASS: test_review_layers 2; test_l4_app::test_browser_workflow; test_artwork_recolor::test_browser_artwork_panel;
+  test_issue_inspector::test_browser_issue_inspector; test_artwork_fit browser test (after the driver fix).
+  The final full run (issue inspector, recolor, fit, session, paint, l4 suites) was stopped by Claude Code for
+  low system memory after test_review_layers (2 PASS); the rest NOT re-run after the last small edits. Exe NOT rebuilt.
+  Rebuilt with Review Layers Stage 1 (user request): dist\LayerForge\LayerForge.exe (2026-11-05 01:07) and
+  dist\LayerForge-0.1.0-win64.zip (01:10, SHA-256 d243f93f2007a42b9a81d95f7c6b758d8d40752c44e763893fb91bf2110ba599);
+  bundled static files byte-identical to src. Packaged tests (one per process): 9 PASS.
+- 2026-11-05 Artwork editor moved back into Review Layers below the Issues (user correction); artwork tab removed.
+  app.js/app.css, test_review_layers.py, drive_review.mjs, drive_artwork.mjs, test_artwork_recolor.py updated.
+  Tests PASS: test_review_layers browser test (editor present, directly after the issue inspector, scrolled into
+  view by "Edit artwork"), test_artwork_recolor::test_browser_artwork_panel. Exe NOT rebuilt: LayerForge.exe is
+  running; dist\ holds the 01:07 build with the separate tab.
+  Rebuilt after the app was closed: dist\LayerForge\LayerForge.exe (2026-11-05 01:47) and
+  dist\LayerForge-0.1.0-win64.zip (01:48, SHA-256 0dd73e1f38318576c2578795b53656b899d7a9b9965954e55928c59b1b571d72);
+  bundled static files byte-identical to src (Artwork editor below the Issues).
+  Packaged tests (one per process): 9 PASS.
 
 - 2026-11-06 — Performance audit (diagnosis only, no code changed). Evidence and scripts: artifacts/perf_audit_v1/.
   Dog, clean runs: packaged exe proposal 1048 s (planning 4 candidates 611 s, CAD 402 s); print kit 516 s

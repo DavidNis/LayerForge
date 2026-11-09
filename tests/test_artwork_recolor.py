@@ -641,23 +641,13 @@ def test_browser_artwork_panel(app):
     assert paint["saved_before"] == 1 and paint["batches"] == ["save_001"] + ["save_002"] * 6
     assert all(label in paint["history"] for label in ("Fill", "Line 1 mm", "Curve 1 mm", "Brush 1 mm", "Close gap 1 mm (curved)"))
     assert paint["after_revert"] == 1
-    # Review & edit canvas: wheel zoom toward the cursor, exact clicks at high zoom, panning never edits.
+    # Review Layers canvas: wheel zoom toward the cursor, an exact point marked at high zoom, panning moves only the view.
     rz = result["review_zoom"]
     assert int(rz["after_wheel"].split("%")[0]) >= 3 * int(rz["fit"].split("%")[0]) and not rz["page_scrolled"]
     assert rz["anchor_drift_px"] < rz["screen_px_per_image_px"] * 1.5
     assert rz["clicked_mm"] and all(abs(a - b) <= 0.15 for a, b in zip(rz["clicked_mm"], rz["target_mm"])), rz
-    assert rz["panned"] and rz["pending_unchanged_by_pan"] and near(rz["after_fit"], rz["fit"])
-    # Line / Curve connectors: Bridge gone from the toolbar; editable before Apply; visible change needs approval.
-    conn = result["connector"]
-    assert conn["bridge_buttons"] == 0 and conn["line_buttons"] == 1 and conn["curve_buttons"] == 1
-    assert conn["created"].startswith("Pending line")
-    assert abs(conn["after_handle"][1][0] - 110) < 0.6 and abs(conn["after_handle"][1][1] - 135) < 0.6  # end handle moved
-    shape = conn["after_fields"]
-    a, b = shape["points_mm"]
-    assert shape["width_mm"] == 2.5 and abs(b[1] - a[1]) < 1e-6 and abs(b[0] - a[0] - 50) < 0.01  # width, angle 0, length 50
-    assert "Visible change" in conn["check"] and "invalid" in conn["check"]  # dry run before Apply
-    assert "add" in conn["applied_change"] and "Visible change" in conn["applied_change"]
-    assert "DRAFT_INVALID" in conn["applied_validation"] and "REVIEWED_VALID" in conn["after_undo"]
-    assert conn["arc_bent"] > conn["arc_straight"] + 5 and abs(conn["arc_straightened"] - conn["arc_straight"]) < 0.05
-    assert conn["pending_after_cancel"] == 0
+    assert rz["panned"] and rz["pending_unchanged_by_pan"] and rz["pending_edits"] == 0 and near(rz["after_fit"], rz["fit"])
+    # Review Layers has no sheet tools; the Artwork editor stays on it ("Edit artwork" opens Review).
+    assert result["review_tools"]["tools"] == 0 and result["review_tools"]["artwork_panel"] == 1
+    assert result["review_tools"]["artwork_tab"].endswith("/review")
     assert "Plan sheets from this artwork" in result["try_again"] and result["try_again_in_view"] and result["replan_label"] == "Plan sheets from this artwork"

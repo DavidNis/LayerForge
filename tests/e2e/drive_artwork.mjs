@@ -484,10 +484,11 @@ try {
   await shotEl("art_check", '[data-testid="artwork-check"]');
   step("planned from the edited artwork", { after: results.check_after_row });
 
-  // 9. Review & edit canvas: wheel zoom toward the cursor, exact mm hit-testing at high zoom, panning.
+  // 9. Review Layers canvas (inspection): wheel zoom toward the cursor, an exact mm point marked by a click
+  // at high zoom, panning (middle drag) that never moves the mark.
   await clickSel('[data-action="start-review"]');
   await waitFor(`document.querySelector("#edit-viewport") && document.querySelector("#edit-image")?.naturalWidth > 0 && ${idle}`, "review", 300000);
-  await clickSel('[data-tool="fill_hole"]');
+  await clickSel('[data-testid="view-switch"] [data-view="sheet"]');
   await waitFor(`document.querySelector("#edit-image")?.src.includes("/sheets/") && document.querySelector("#edit-image").complete && document.querySelector("#edit-image").naturalWidth > 0`, "sheet view loaded");
   await sleep(300);
   const editPoint = async ([x, y], scroll = true) => {
@@ -517,75 +518,29 @@ try {
   await mouse("mouseMoved", p1, 0);
   await mouse("mousePressed", p1);
   await mouse("mouseReleased", p1, 0);
-  await waitFor(`document.querySelector('[data-testid="pending-edit"]')`, "pending fill at high zoom");
-  const pending = await text('[data-testid="pending-edit"]');
-  const m = pending.match(/at \(([-\d.]+), ([-\d.]+)\) mm/);
-  rz.clicked_mm = m ? [Number(m[1]), Number(m[2])] : null;
+  const marker = () => evaluate(`JSON.parse(document.querySelector("#edit-viewport").dataset.marker || "null")`);
+  await waitFor(`JSON.parse(document.querySelector("#edit-viewport").dataset.marker || "null")`, "point marked at high zoom");
+  const pending = JSON.stringify(await marker());
+  rz.clicked_mm = await marker();
   rz.target_mm = P;
   const e0 = await evaluate(`document.querySelector("#edit-stage").style.transform`);
   const c = await viewportRect();
   await screenDrag({ x: c.x + c.w / 2, y: c.y + c.h / 2 }, { x: c.x + c.w / 2 + 80, y: c.y + c.h / 2 + 50 }, "middle");
   rz.panned = (await evaluate(`document.querySelector("#edit-stage").style.transform`)) !== e0;
-  rz.pending_unchanged_by_pan = (await text('[data-testid="pending-edit"]')) === pending;
+  rz.pending_unchanged_by_pan = JSON.stringify(await marker()) === pending;
+  rz.pending_edits = await count('[data-testid="pending-edit"]');
   await shot("a8_review_zoomed");
-  await clickSel('[data-action="cancel-pending"]');
   await clickSel('[data-testid="edit-zoom-fit"]');
   rz.after_fit = await text('[data-testid="edit-zoom-label"]');
   results.review_zoom = rz;
   step("review canvas zoom", rz);
 
-  // 10. Line / Curve connectors replace the rigid Bridge: draw, drag the handles, set width and angle,
-  // see the dry-run check, apply (a visible change on the front sheet needs approval), undo; curve handles.
-  const pendingOp = () => evaluate(`JSON.parse(document.querySelector('[data-testid="pending-edit"] pre').textContent)`);
-  const setField = (sel, value) => evaluate(`(() => { const el = document.querySelector(${JSON.stringify(sel)}); el.value = ${JSON.stringify(String(value))}; el.dispatchEvent(new Event("input", {bubbles: true})); el.dispatchEvent(new Event("change", {bubbles: true})); })()`);
-  const editDrag = async (from, to) => {
-    const a = await editPoint(from), b = await editPoint(to, false);
-    await mouse("mouseMoved", a, 0);
-    await mouse("mousePressed", a);
-    for (let i = 1; i <= 6; i++) await mouse("mouseMoved", { x: a.x + ((b.x - a.x) * i) / 6, y: a.y + ((b.y - a.y) * i) / 6 });
-    await mouse("mouseReleased", b, 0);
-    await sleep(200);
-  };
-  const conn = { bridge_buttons: await count('[data-tool="bridge"]'), line_buttons: await count('[data-tool="line"]'), curve_buttons: await count('[data-tool="curve"]') };
-  await clickSel('[data-tool="line"]');
-  await waitFor(`document.querySelector("#edit-image")?.complete && document.querySelector("#edit-image").naturalWidth > 0`, "line tool view");
-  await editDrag([40, 150], [100, 170]);
-  await waitFor(`document.querySelector('[data-testid="stroke-width"]')`, "line editor");
-  conn.created = (await text('[data-testid="pending-edit"]')).split(String.fromCharCode(10))[0];
-  await editDrag([100, 170], [110, 135]);  // drag the end handle: the connector stays editable
-  conn.after_handle = (await pendingOp()).shape.points_mm;
-  await setField('[data-testid="stroke-width"]', 2.5);
-  await setField('[data-testid="stroke-angle"]', 0);
-  await setField('[data-testid="stroke-length"]', 50);
-  conn.after_fields = (await pendingOp()).shape;
-  await waitFor(`document.querySelector('[data-testid="stroke-check"] .badge')`, "connector check", 60000);
-  conn.check = await text('[data-testid="stroke-check"]');
-  await shot("a9_line_editor");
-  await shotEl("line_editor", ".stage");
-  await clickSel('[data-testid="stroke-apply"]');
-  await waitFor(`document.querySelector('[data-testid="change-panel"]') && ${idle}`, "line applied", 120000);
-  conn.applied_change = await text('[data-testid="change-panel"] h3');
-  conn.applied_validation = await text('[data-testid="validation-panel"] h3');
-  await clickSel('[data-action="undo"]');
-  // The review bar (not the Artwork colors summary, which also says "0 edits") and the validation state.
-  await waitFor(`document.querySelector('[data-testid="review-bar"]')?.innerText.includes("· 0 edits") && document.querySelector('[data-testid="validation-panel"] h3')?.innerText.includes("REVIEWED_VALID") && ${idle}`, "line undone", 120000);
-  conn.after_undo = await text('[data-testid="validation-panel"] h3');
-  await clickSel('[data-tool="curve"]');
-  await editDrag([40, 150], [100, 150]);
-  await waitFor(`document.querySelector('[data-testid="stroke-arc-length"]')`, "curve editor");
-  conn.arc_straight = parseFloat(await text('[data-testid="stroke-arc-length"]'));
-  await editDrag([60, 150], [60, 185]);  // bend with the first curve handle
-  conn.arc_bent = parseFloat(await text('[data-testid="stroke-arc-length"]'));
-  conn.curve_points = (await pendingOp()).shape.points_mm;
-  await shot("a10_curve_editor");
-  await shotEl("curve_editor", ".stage");
-  await clickSel('[data-testid="stroke-straighten"]');
-  await sleep(150);
-  conn.arc_straightened = parseFloat(await text('[data-testid="stroke-arc-length"]'));
-  await clickSel('[data-action="cancel-pending"]');
-  conn.pending_after_cancel = await count('[data-testid="pending-edit"]');
-  results.connector = conn;
-  step("line / curve connectors", { check: conn.check.split(String.fromCharCode(10))[0], arcs: [conn.arc_straight, conn.arc_bent, conn.arc_straightened] });
+  // 10. Review Layers edits no sheet geometry (no Line, Curve, Fill, Cut, ... tool); the Artwork editor is on it.
+  results.review_tools = { tools: await count('#tab-body [data-tool], #tab-body .toolbar'), artwork_panel: await count('#tab-body [data-testid="artwork-panel"]') };
+  await clickSel('[data-step="artwork"]');
+  await sleep(300);
+  results.review_tools.artwork_tab = await evaluate("location.hash");
+  step("review is read-only", results.review_tools);
 
   results.console_errors = consoleErrors;
   results.ok = true;

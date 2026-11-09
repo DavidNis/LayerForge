@@ -965,6 +965,29 @@ FDM thresholds remain generic assumptions until a print calibrates them).
     pointer move until the server check of the new framing returns).
   - Found, NOT changed (would alter saved fit edits): at non-integer scales >= 1 the floor of the scaled size can
     leave the last source row/column unsampled (dog at 139 %: 29 px). Reported in `subject_skipped_px`, not warned.
+- 2026-11-05 Review Layers becomes a read-only inspection workspace (UX Stage 1; user instruction and choices):
+  - USER_REQUIRED: the sheet-geometry editing toolbar is removed from the UI (Add circle/rectangle, Cut
+    circle/rectangle/slot, Line, Curve, Fill cutout, Remove island, Split region), with Merge, the island
+    "Remove..." buttons and the raw edit request (Advanced). The edit backend, its operations and the edit log
+    are unchanged; projects holding such edits load, validate, replay and undo as before (also reachable by API).
+  - USER choice: the Artwork editor moves out of Review into its own tab (`#/<project>/artwork`, the existing
+    "Edit artwork" step); before a review exists it stays on the Plan page as before. Review has no artwork editor.
+  - USER choice: physical parameters stay, collapsed, as "Layer settings" in the layer panel (color, thickness,
+    order, optional rim); Undo last edit, Revert here / Revert to base and Verify save/reload stay for earlier
+    edits. "Accept front view as artwork" is shown only when the front view differs (earlier visible edits).
+  - Layout: layer list | large preview (Assembled / Layer / changes views, wheel zoom, drag to pan when zoomed,
+    click marks a point) | layer facts. Issues (with their overlays) come before the text validation; the
+    last-edit details are collapsed. The issue card's layer action is "Show on layer" (opens the issue on its
+    layer in Review); for sheet issues that also have artwork pixels it says the artwork may or may not fix
+    them. Validation hints name what can be done (undo, change the artwork or plan settings and plan again)
+    instead of pointing at removed tools. Clicking a layer shows that layer.
+  - OBSERVED_IN_FILE: the app has a light scheme and a dark scheme (prefers-color-scheme); only existing CSS
+    variables are used, no new framework. Other screens unchanged except text that pointed at the removed
+    "Review & edit -> Artwork editor" location (Plan note, Export notes) and the shared issue card button label.
+- 2026-11-05 Correction (user, after testing the exe): the Artwork editor stays in Review Layers, directly below
+  the Issues, as before; only the page was to be cleaner. The separate artwork tab is removed again; the "Edit
+  artwork" step opens Review and scrolls to the editor (Plan page before a review exists, unchanged). The rest of
+  the Stage 1 cleanup (no sheet-geometry tools, collapsed Layer settings, layout) stays.
 - 2026-11-07 Performance Step 2: the proposal no longer exports or verifies STEP; the print kit does (user approved).
   - OBSERVED_IN_FILE (golden baselines, 5 projects): the print kit's CAD files were identical to the proposal's in
     every project, and STEP read-back (importStep + isValid) was 82-89% of each CAD stage, so the proposal repeated

@@ -284,7 +284,8 @@ def test_browser_workflow(app):
     assert run.returncode == 0
     assert result["console_errors"] == []
     assert "NOT VERIFIED" in result["physical_after_proposal"] and "NOT VERIFIED" in result["physical_at_end"]
-    assert "no cutout to fill" in result["error_banner"]
+    assert result["review_tools"] == 0  # Review Layers is read-only: no sheet-geometry tools
+    assert "no cutout to fill" in result["error_banner"]  # earlier-style geometry edits: still checked by the edit API
     assert "DRAFT_INVALID" in result["after_slot"]["validation"]
     assert "Visible change" in result["after_slot"]["change"]
     assert "REVIEWED_VALID" in result["after_accept"]

@@ -12,11 +12,7 @@ const ui = {
   error: null,         // {title, message, hint, report}
   sheet: null,         // selected sheet id
   view: "front",       // editor image: front (assembled, default) | sheet | changes_base | changes_previous
-  tool: "inspect",
-  precision: "vector",
-  barWidth: 1.2,
-  drag: null,          // {from:[x,y], to:[x,y]} while drawing
-  pending: null,       // edit op awaiting "Apply"
+  pending: null,       // accept_artwork awaiting "Apply" (the only edit proposed from Review Layers)
   marker: null,        // [x,y] mm highlighted on the canvas
   hover: null,
   process: null,       // printer/process form values
@@ -37,9 +33,6 @@ const ui = {
   resizeApproved: {},  // resize preview id -> {size, changes} approvals
   confirmProject: null, // project name whose inline delete confirmation is shown
   projectNotice: null,  // result of the last project deletion (shown on the project list)
-  strokeCap: "round",   // Line / Curve connector ends
-  strokeDrag: null,     // {handle: index | "move", start, orig} while editing a pending connector
-  strokeCheck: null,    // {key, result | error | pending}: dry run of the pending connector
   planLater: false,     // import: stop after intake so artwork colors can be edited before planning
   art: freshArt(),      // artwork recolor panel (flat-color target, not a sheet)
   fit: freshFit(),      // Fit artwork to canvas card (inside the Artwork editor)
@@ -48,7 +41,7 @@ const ui = {
   issuesLoading: false,
   issuesDirty: true,    // the shown issues may be older than the state: reload (keeping them shown meanwhile)
   artSpace: false,      // Space held: a left drag on a zoomable image pans
-  editView: { zoom: null, pan: [0, 0], panning: null },  // Review & edit canvas zoom (viewport only)
+  editView: { zoom: null, pan: [0, 0], panning: null },  // Review Layers canvas zoom (viewport only)
 };
 
 // Artwork editor: selected regions, a chosen color, the pending Line / Curve / Close gap (with the
@@ -65,25 +58,10 @@ const unsavedArt = () => ui.state?.artwork?.unsaved?.count || 0;
 
 const TABS = [
   ["proposal", "Import & proposal"],
-  ["review", "Review & edit"],
+  ["review", "Review layers"],
   ["printability", "Printability"],
   ["kit", "Print kit"],
 ];
-
-const TOOLS = [
-  ["inspect", "Inspect", "Hover to read coordinates; click to mark a point."],
-  ["fill_hole", "Fill cutout", "Click inside a cutout of the selected sheet to close it."],
-  ["remove_island", "Remove island", "Click a floating island of the selected sheet to delete it."],
-  ["split", "Split region", "Click a visible region of the selected sheet to move it to a new sheet."],
-  ["add_circle", "Add circle", "Drag from the centre outwards to add material."],
-  ["subtract_circle", "Cut circle", "Drag from the centre outwards to cut a round hole."],
-  ["add_rect", "Add rectangle", "Drag a rectangle to add material."],
-  ["subtract_rect", "Cut rectangle", "Drag a rectangle to cut a hole."],
-  ["subtract_bar", "Cut slot", "Drag a line; cuts a slot of the given width (e.g. to widen a narrow slit)."],
-  ["line", "Line", "Drag to draw a straight connector, then drag its ends or type angle, length and width before Apply."],
-  ["curve", "Curve", "Drag to draw a connector, then bend it with the two square handles and set its width before Apply."],
-];
-const STROKE_TOOLS = ["line", "curve"];
 
 const PROCESS_FIELDS = [
   ["nozzle_diameter_mm", "Nozzle Ø (mm)"],
@@ -215,7 +193,7 @@ function afterJob(job) {
   if (job.kind === "resize_retry") { setTab("proposal"); ui.resizeApproved = {}; ui.resizeSize = null; }
   if (job.kind === "start_review") {
     setTab("review");
-    const pending = ui.inspPendingEdit;  // Edit layer from a candidate's issue: open the editor there
+    const pending = ui.inspPendingEdit;  // Show on layer from a candidate's issue: show it in the review
     ui.inspPendingEdit = null;
     if (pending && ui.state.draft) setTimeout(() => inspEditLayer(pending), 0);
   }
@@ -636,7 +614,7 @@ function proposalView() {
         <div class="section-body stack" style="gap:6px"><ul class="small" style="margin:0">${notes.map((f) => `<li>${badge(f.severity === "WARN" ? "warn" : "neutral", f.severity)} <strong>${esc(f.code)}</strong> — ${esc(f.message)}</li>`).join("")}</ul>${cadLine}</div></details>` : ""}
     </div>
     ${ui.state.draft ? "" : issuesPanel()}
-    ${ui.state.draft ? `<p class="small muted panel tight">The artwork is edited in <a href="#/${encodeURIComponent(ui.name)}/review" data-action="tab" data-tab="review">Review &amp; edit</a> while a review exists.</p>` : artworkPanel()}
+    ${ui.state.draft ? `<p class="small muted panel tight">The artwork is edited in <a href="#/${encodeURIComponent(ui.name)}/review" data-action="tab" data-tab="review" data-focus="artwork">Review layers</a> while a review exists.</p>` : artworkPanel()}
     ${resizePanel()}
     ${upscalePanel()}
     ${detailsPanel(p, reviewing)}
@@ -1460,7 +1438,7 @@ function artworkPanel() {
   </details>`;
 }
 
-// -- zoomable views (Artwork colors, Review & edit): viewport zoom only, never the artwork itself.
+// -- zoomable views (Artwork editor, Review layers): viewport zoom only, never the artwork itself.
 // The stage is sized image pixels x scale and moved inside a fixed viewport; overlays cover the
 // viewport and map through the image's on-screen rectangle, so hit-testing is exact at any zoom.
 // Zoom is stored as a multiple of "fit" (null = fit), so it survives switching between images.
@@ -2464,7 +2442,6 @@ function inspEditLayer(issue) {
   ui.marker = issue.at_mm;
   ui.pending = null;
   ui.view = issue.sheet ? "sheet" : "front";
-  ui.tool = "inspect";
   setTab("review");
   render();
   $("#edit-viewport")?.scrollIntoView({ block: "center" });
@@ -2478,7 +2455,7 @@ function inspEditLayer(issue) {
   });
 }
 
-// Open the Artwork editor (in Review & edit, else on the proposal page) zoomed onto the issue's pixels.
+// Open the Artwork editor (in Review layers while a review exists, else on the Plan page) zoomed onto the issue's pixels.
 function inspEditArtwork(issue) {
   const box = issue?.artwork_box_px;
   if (!box) return;
@@ -2496,27 +2473,25 @@ function selectedSheet() {
 }
 
 function reviewView() {
-  const d = ui.state.draft;
   const sheet = selectedSheet();
   return `${reviewBar()}
-  <div class="editor">
-    <aside class="editor-left">${layersPanel()}${historyPanel()}</aside>
-    <div class="editor-main">
+  <div class="review" data-testid="review-layout">
+    <aside class="review-side">${layersPanel()}${historyPanel()}</aside>
+    <div class="review-main">
       ${draftBanner()}
       <div class="panel tight stage">${canvasPanel(sheet)}</div>
-      ${validationPanel()}
       ${issuesPanel()}
       ${artworkPanel()}
+      ${validationPanel()}
       ${changePanel()}
       ${previewsPanel()}
-      ${advancedPanel()}
     </div>
-    <aside class="editor-right">${sheet ? sheetPanel(sheet) : '<div class="panel tight muted small">Select a layer to edit it.</div>'}</aside>
+    <aside class="review-side">${sheet ? sheetPanel(sheet) : '<div class="panel tight muted small">Select a layer.</div>'}</aside>
   </div>`;
 }
 
-// One bar with the draft's state and every next step: edits are saved automatically, so
-// "save" here means proving the saved project reloads identically.
+// Review Layers inspects the sheets (no sheet-geometry tools); the Artwork editor sits below the issues.
+// Earlier layer edits can be undone.
 function reviewBar() {
   const d = ui.state.draft;
   const ok = d.status.printable;
@@ -2526,19 +2501,21 @@ function reviewBar() {
   const verified = v ? (v.replay_identical
     ? `<span class="small"><span class="yes">✓</span> Reloading and replaying all ${v.edits} edits reproduces the saved geometry exactly.</span>`
     : `<span class="small"><span class="no">✗</span> Replay differs: ${esc(v.differences.join(", "))}</span>`) : "";
+  const exportOk = ok && !ui.state.artwork?.differs_from_planned && !unsavedArt();
+  const why = unsavedArt() ? "Save or discard the unsaved artwork changes first" : ui.state.artwork?.differs_from_planned
+    ? "The artwork was edited after these sheets were planned" : ok ? "Export STEP/STL for every layer" : "Invalid drafts cannot be exported";
   return `<div class="review-bar" data-testid="review-bar">
     <div class="review-bar-status">
-      ${badge(ok ? "ok" : "bad", ok ? "Valid draft" : "Invalid draft")}
-      <span class="small muted">${d.sheets.length} layers · ${fmt(d.total_height_mm)} mm stack · ${d.edits.length} edit${d.edits.length === 1 ? "" : "s"} · saved</span>
+      ${badge(ok ? "ok" : "bad", ok ? "Valid" : "Invalid")}
+      <span class="small muted">${d.sheets.length} layers · ${fmt(d.total_height_mm)} mm stack · ${d.edits.length} edit${d.edits.length === 1 ? "" : "s"}</span>
     </div>
     <div class="review-bar-actions">
-      <button class="tool-btn tip" data-action="undo" ${d.edits.length ? dis : "disabled"} data-tip="Undo the last layer edit">${ICON.undo}<span>Undo last edit</span></button>
-      <button class="tool-btn ghost tip" data-action="verify" ${dis} data-tip="Replay the saved edit log from the base and compare">Verify save/reload</button>
-      <button class="tool-btn ${visibleChange ? "attention" : "ghost"} tip" data-action="propose-op" data-op='${esc(JSON.stringify({ op: "accept_artwork" }))}' ${dis}
-        data-tip="Only for an intended visible change: the current front view becomes the reviewed artwork">Accept front view as artwork…</button>
+      ${visibleChange ? `<button class="tool-btn attention tip" data-action="propose-op" data-op='${esc(JSON.stringify({ op: "accept_artwork" }))}' ${dis}
+        data-tip="Only for an intended visible change: the current front view becomes the reviewed artwork">Accept front view as artwork…</button>` : ""}
+      ${d.edits.length ? `<button class="tool-btn tip" data-action="undo" ${dis} data-tip="Undo the last layer edit">${ICON.undo}<span>Undo last edit</span></button>` : ""}
       <span class="divider" aria-hidden="true"></span>
       <button class="tool-btn ghost" data-action="tab" data-tab="printability">Printability →</button>
-      <button class="primary" data-action="tab" data-tab="kit" ${ok && !ui.state.artwork?.differs_from_planned && !unsavedArt() ? "" : "disabled"} title="${unsavedArt() ? "Save or discard the unsaved artwork changes first" : ui.state.artwork?.differs_from_planned ? "The artwork was edited after these sheets were planned" : ok ? "Export STEP/STL for every layer" : "Invalid drafts cannot be exported"}">Build print kit →</button>
+      <button class="primary" data-action="tab" data-tab="kit" ${exportOk ? "" : "disabled"} title="${esc(why)}">Build print kit →</button>
     </div>
     ${verified ? `<div class="review-bar-note">${verified} <span class="muted small">(${esc(v.checked_utc)})</span></div>` : ""}
   </div>`;
@@ -2549,80 +2526,61 @@ function layersPanel() {
   const frontToBack = [...d.sheets].reverse();
   const list = frontToBack.map((s, i) => {
     const fails = s.checks.pass === false;
+    const selected = s.id === ui.sheet;
     return `
-    <li class="layer ${s.id === ui.sheet ? "selected" : ""} ${fails ? "failing" : ""}" data-action="select-sheet" data-sheet="${esc(s.id)}" tabindex="0" data-testid="layer-row" title="${esc(s.export_name)} · ${esc(s.color)}">
+    <li class="layer ${selected ? "selected" : ""} ${fails ? "failing" : ""}" data-action="select-sheet" data-sheet="${esc(s.id)}" role="option" aria-selected="${selected}"
+        tabindex="${selected || (!ui.sheet && !i) ? 0 : -1}" data-testid="layer-row" title="${esc(s.export_name)} · ${esc(s.color)}${fails ? " · fails a check" : ""}">
       <span class="layer-index">${i + 1}</span>
       ${swatch(s.color, true)}
       <div class="layer-text"><div class="name">${esc(s.export_name)}</div>
-        <div class="meta">${fmt(s.thickness_mm)} mm${s.rim ? ` · rim ${fmt(s.rim.width_mm)}×${fmt(s.rim.total_height_mm)} mm` : ""} · ${s.cutout_holes} cutout${s.cutout_holes === 1 ? "" : "s"}${s.islands ? ` · <span class="no">${s.islands} island${s.islands === 1 ? "" : "s"}</span>` : ""}${s.geometry === "exact vector" ? " · vector" : ""}</div></div>
-      ${fails ? badge("bad", "fails") : ""}
+        <div class="meta">${fmt(s.thickness_mm)} mm${s.rim ? ` · rim ${fmt(s.rim.width_mm)}×${fmt(s.rim.total_height_mm)}` : ""} · ${s.cutout_holes} cutout${s.cutout_holes === 1 ? "" : "s"}${s.islands ? ` · <span class="no">${s.islands} island${s.islands === 1 ? "" : "s"}</span>` : ""}</div></div>
+      ${fails ? '<span class="layer-flag" aria-label="fails a check">!</span>' : ""}
     </li>`;
   }).join("");
-  return `<div class="panel tight layers-panel">
-    <div class="spread"><h3 style="margin:0">Layers</h3><span class="small muted">${d.sheets.length} · front first</span></div>
-    <div class="end-label">Front (viewer side)</div>
-    <ul class="layer-list">${list}</ul>
+  return `<div class="panel tight layers-panel" data-testid="layers-panel">
+    <div class="spread"><h3 style="margin:0">Layers</h3><span class="small muted">${d.sheets.length} · ${fmt(d.total_height_mm)} mm</span></div>
+    <div class="end-label">Front</div>
+    <ul class="layer-list" role="listbox" aria-label="Layers, front first">${list}</ul>
     <div class="end-label">Back</div>
-    <p class="small muted" style="margin:6px 0 0">One filament color per layer · total ${fmt(d.total_height_mm)} mm</p>
   </div>`;
 }
 
 function draftBanner() {
   const d = ui.state.draft;
   if (d.stale) return `<div class="banner warn">The saved project changed outside this view. <button class="small" data-action="reload">Reload</button></div>`;
-  if (d.previews.notice) return `<div class="banner warn"><strong>Draft invalid.</strong> ${esc(d.previews.notice)}</div>`;
   return "";
 }
-
-const TOOL_GROUPS = [
-  ["", ["inspect"]],
-  ["Add", ["add_circle", "add_rect", "line", "curve"]],
-  ["Cut", ["subtract_circle", "subtract_rect", "subtract_bar"]],
-  ["Fix", ["fill_hole", "remove_island", "split"]],
-];
 
 function canvasPanel(sheet) {
   const d = ui.state.draft;
   const images = d.previews.images;
-  const views = [["front", "Assembled"], ["sheet", "Selected layer"], ["changes_base", "Changes vs base"], ["changes_previous", "Changes vs previous"]]
+  const views = [["front", "Assembled"], ["sheet", "Layer"], ["changes_base", "Changes vs base"], ["changes_previous", "Last change"]]
     .filter(([v]) => v === "sheet" || (v === "front" && images.assembled_front) || (v === "changes_base" && images.changes_vs_base) || (v === "changes_previous" && images.changes_vs_previous));
-  const tool = TOOLS.find(([t]) => t === ui.tool);
-  const needsWidth = ui.tool === "subtract_bar" || STROKE_TOOLS.includes(ui.tool);
-  const shaped = ["add_circle", "subtract_circle", "add_rect", "subtract_rect", "subtract_bar", ...STROKE_TOOLS].includes(ui.tool);
-  const label = (t) => TOOLS.find(([x]) => x === t);
   const caption = {
     front: "Assembled front view of all layers",
     sheet: sheet ? `Layer ${sheet.export_name} alone` : "No layer selected",
     changes_base: "Changes since the base proposal",
     changes_previous: "Changes made by the last action",
   }[ui.view] || "";
+  const legend = ui.view.startsWith("changes")
+    ? '<span class="legend"><span><i style="background:#ff0000"></i>visible change</span><span><i style="background:#285aff"></i>hidden change</span></span>'
+    : ui.view === "sheet" ? '<span class="legend"><span><i style="background:#ebebeb;border:1px solid #bbb"></i>cutout</span></span>' : "";
+  const title = ui.view === "sheet" && sheet ? `<span class="stage-title small">${swatch(sheet.color)} ${esc(sheet.export_name)}</span>` : "";
   return `
     <div class="stage-head">
-      <div class="segmented" role="tablist" aria-label="View">${views.map(([v, l]) => `<button class="small ${ui.view === v ? "active" : ""}" data-action="view" data-view="${v}" role="tab" aria-selected="${ui.view === v}">${l}</button>`).join("")}</div>
-      <span class="small muted">${esc(caption)}</span>
+      <div class="segmented" role="tablist" aria-label="View" data-testid="view-switch">${views.map(([v, l]) => `<button class="small ${ui.view === v ? "active" : ""}" data-action="view" data-view="${v}" role="tab" aria-selected="${ui.view === v}">${l}</button>`).join("")}</div>
+      ${title}
+      ${zoomBar("edit")}
     </div>
-    <div class="zoom-viewport edit-viewport ${ui.artSpace ? "space" : ""}" id="edit-viewport" data-testid="edit-viewport" tabindex="0" aria-label="Edit canvas (mouse wheel zooms; + / - / 0 with focus)">
+    ${d.previews.notice ? `<p class="small warn-text stage-note" data-testid="preview-notice">${esc(d.previews.notice)}</p>` : ""}
+    <div class="zoom-viewport edit-viewport review-viewport ${ui.artSpace ? "space" : ""}" id="edit-viewport" data-testid="edit-viewport" tabindex="0"
+      aria-label="${esc(caption)} (mouse wheel zooms, drag moves the zoomed view; + / - / 0 with focus)" data-marker="${esc(JSON.stringify(ui.marker || null))}">
       <div class="zoom-stage" id="edit-stage"><img id="edit-image" src="${esc(viewImage(sheet))}" alt="${esc(caption)}" draggable="false"></div>
-      <canvas id="overlay" aria-label="Edit canvas"></canvas>
+      <canvas id="overlay" aria-label="${esc(caption)}"></canvas>
     </div>
     <div class="spread small stage-foot">
-      <span class="coords muted" id="coords">${ui.hover ? `x ${ui.hover[0].toFixed(2)} mm · y ${ui.hover[1].toFixed(2)} mm` : "x, y in mm from the bottom-left corner"}</span>
-      ${zoomBar("edit")}
-      ${ui.view.startsWith("changes") ? '<span class="legend"><span><i style="background:#ff0000"></i>visible change</span><span><i style="background:#285aff"></i>hidden change</span></span>' : ui.view === "sheet" ? '<span class="legend"><span><i style="background:#ebebeb;border:1px solid #bbb"></i>cutout</span></span>' : ""}
-    </div>
-    <div class="tools">
-      <div class="tools-head small"><strong>Edit ${sheet ? `${swatch(sheet.color)} ${esc(sheet.export_name)}` : "—"}</strong>
-        <span class="muted">${esc(tool ? tool[2] : "")}</span></div>
-      <div class="toolbar" role="toolbar" aria-label="Edit tools">
-        ${TOOL_GROUPS.map(([group, tools]) => `<div class="tool-group">${group ? `<span class="tool-group-label">${group}</span>` : ""}${tools.map((t) => {
-          const [, l, h] = label(t);
-          return `<button class="small ${ui.tool === t ? "active" : ""}" data-action="tool" data-tool="${t}" title="${esc(h)}" ${busy() ? "disabled" : ""}>${l}</button>`;
-        }).join("")}</div>`).join("")}
-      </div>
-      ${needsWidth || shaped ? `<div class="row small tool-options">
-        ${needsWidth ? `<label class="check">width <input type="number" id="bar-width" value="${ui.barWidth}" min="0.1" step="0.1" style="width:70px"> mm</label>` : ""}
-        ${shaped ? `<label class="check">precision <select id="precision"><option value="vector" ${ui.precision === "vector" ? "selected" : ""}>exact vector</option><option value="raster" ${ui.precision === "raster" ? "selected" : ""}>grid raster</option></select></label>` : ""}
-      </div>` : ""}
+      <span class="coords muted" id="coords">${ui.hover ? `x ${ui.hover[0].toFixed(2)} mm · y ${ui.hover[1].toFixed(2)} mm` : "x, y (mm)"}</span>
+      ${legend}
     </div>
     ${pendingPanel()}`;
 }
@@ -2635,31 +2593,17 @@ function viewImage(sheet) {
   return sheet ? sheet.image : "";
 }
 
+// The one edit still proposed from this screen: accepting an intended visible change (earlier edits).
 function pendingPanel() {
   if (!ui.pending) return "";
-  if (isStroke(ui.pending)) return strokePanel(ui.pending);
   return `<div class="pending" data-testid="pending-edit">
-    <div class="spread"><strong>Pending edit: ${esc(describeOp(ui.pending))}</strong>
-      <div class="row"><button class="small ghost" data-action="cancel-pending">Cancel</button><button class="small primary" data-action="apply-pending" ${busy() ? "disabled" : ""}>Apply edit</button></div></div>
-    <details><summary>Edit request (L2 format)</summary><pre class="mono small">${esc(JSON.stringify(ui.pending, null, 2))}</pre></details>
+    <div class="spread"><strong>${esc(describeOp(ui.pending))}</strong>
+      <div class="row"><button class="small ghost" data-action="cancel-pending">Cancel</button><button class="small primary" data-action="apply-pending" ${busy() ? "disabled" : ""}>Apply</button></div></div>
   </div>`;
 }
 
 function describeOp(op) {
-  const at = op.at_mm ? ` at (${op.at_mm.join(", ")}) mm` : "";
-  switch (op.op) {
-    case "fill_hole": return `fill the cutout of ${op.sheet}${at}`;
-    case "remove_island": return `remove the island of ${op.sheet}${at}`;
-    case "split": return `split the region at (${op.region.region_at_mm.join(", ")}) mm into a new sheet`;
-    case "add": case "subtract": {
-      if (isStroke(op)) return `add a ${op.shape.path === "line" ? "line" : "curve"} ${op.shape.width_mm} mm wide on ${op.sheet}`;
-      const s = op.shape;
-      const what = s.type === "circle" ? `circle r=${s.radius_mm} mm` : s.type === "bar" ? `slot ${s.width_mm} mm wide` : "rectangle";
-      return `${op.op === "add" ? "add" : "cut"} ${what} on ${op.sheet} (${op.precision || "vector"})`;
-    }
-    case "bridge": return `bridge ${op.width_mm} mm wide on ${op.sheet}`;
-    default: return op.op;
-  }
+  return op.op === "accept_artwork" ? "Accept the current front view as the reviewed artwork" : op.op;
 }
 
 function validationPanel() {
@@ -2668,8 +2612,8 @@ function validationPanel() {
   const ok = status.printable;
   const hints = v.failures.map((f) => {
     let hint = "";
-    if (/reconstruction differs/.test(f)) hint = "The front view no longer matches the reviewed artwork. Undo, or use “Accept front view as artwork” if the visible change is intended.";
-    else if (/sheet checks failed/.test(f)) hint = "See the sheet's checks below: every sheet must stay one 4-connected piece with material at least 1.2 mm wide and a complete perimeter.";
+    if (/reconstruction differs/.test(f)) hint = "The front view no longer matches the reviewed artwork. Undo the edit, or accept the front view if the change is intended.";
+    else if (/sheet checks failed/.test(f)) hint = "A sheet breaks a physical rule (one 4-connected piece, material at least 1.2 mm wide, complete perimeter). Sheets are not edited here: undo the earlier layer edits, or change the artwork or the plan settings and plan again. Not every sheet problem can be solved in the artwork.";
     else if (/visible masks disagree/.test(f)) hint = "Visible regions do not match the front view; undo the last edit.";
     return `<li><strong>${esc(f)}</strong>${hint ? `<br><span class="muted">${esc(hint)}</span>` : ""}</li>`;
   }).join("");
@@ -2683,27 +2627,24 @@ function validationPanel() {
       <td>${s.islands ? `<span class="no">${s.islands}</span>` : "0"}</td>
       <td>${s.vector_checks ? yesno(s.vector_checks.pass) : '<span class="muted">raster</span>'}</td></tr>`;
   }).join("");
-  const islands = ui.state.draft.islands.map((i) => `<li>${esc(i.sheet)}: ${fmt(i.area_mm2)} mm² at (${i.point_on_island_mm.join(", ")}) mm${i.visible_px ? `, ${i.visible_px} px visible` : ", hidden"}
-      <button class="small" data-action="locate" data-sheet="${esc(i.sheet)}" data-x="${i.point_on_island_mm[0]}" data-y="${i.point_on_island_mm[1]}">Locate</button>
-      <button class="small" data-action="propose-op" data-op='${esc(JSON.stringify({ op: "remove_island", sheet: i.sheet, at_mm: i.point_on_island_mm }))}'>Remove…</button></li>`).join("");
+  const islands = ui.state.draft.islands.map((i) => `<li>${esc(i.sheet)}: ${fmt(i.area_mm2)} mm²${i.visible_px ? `, ${i.visible_px} px visible` : ", hidden"}
+      <button class="small" data-action="locate" data-sheet="${esc(i.sheet)}" data-x="${i.point_on_island_mm[0]}" data-y="${i.point_on_island_mm[1]}">Locate</button></li>`).join("");
   const summary = ok
     ? `front view ${status.reconstruction_vs_reviewed_target_px === 0 ? "identical to the reviewed artwork" : `${fmt(status.reconstruction_vs_reviewed_target_px)} px differ`} · ${fmt(status.floating_islands)} floating islands`
-    : `${v.failures.length} failure${v.failures.length === 1 ? "" : "s"} — not exportable until fixed`;
+    : `${v.failures.length} failure${v.failures.length === 1 ? "" : "s"} · not exportable`;
   // Problems keep the section open; a valid draft collapses to its one-line summary.
   return `<details class="panel tight section" data-testid="validation-panel" data-section="validation" ${openAttr("validation", false, !ok || Boolean(islands))}>
     <summary><h3>Validation ${badge(ok ? "ok" : "bad", ok ? "REVIEWED_VALID" : "DRAFT_INVALID")}</h3><span class="small muted">${esc(summary)}</span></summary>
     <div class="section-body">
-      <dl class="kv">
+      ${hints ? `<ul class="small tight-list">${hints}</ul>` : ""}
+      ${islands ? `<h4 style="margin-top:10px">Floating islands</h4><ul class="small tight-list">${islands}</ul>` : ""}
+      <dl class="kv small">
         <dt>Front view vs reviewed artwork</dt><dd>${status.reconstruction_vs_reviewed_target_px === 0 ? '<span class="yes">identical</span>' : `<span class="no">${fmt(status.reconstruction_vs_reviewed_target_px)} px differ</span>`}</dd>
-        <dt>Deviation from source artwork</dt><dd>${fmt(status.deviation_from_source_artwork_px)} px ${status.deviation_from_source_artwork_px ? `<span class="muted">(${status.reconstruction_vs_reviewed_target_px ? "visible changes not accepted yet" : "accepted visible changes"})</span>` : ""}</dd>
-        <dt>Floating islands</dt><dd>${fmt(status.floating_islands)}</dd>
+        <dt>Deviation from source artwork</dt><dd>${fmt(status.deviation_from_source_artwork_px)} px</dd>
         <dt>Repeated colors</dt><dd>${(v.repeated_colors || []).map((h) => swatch(h)).join(" ") || "none"}</dd>
-        <dt>Validators</dt><dd class="muted">approved L0 validators · ${fmt(v.mm_per_pixel, 4)} mm/px</dd>
       </dl>
-      ${hints ? `<h4 style="margin-top:10px">Failures</h4><ul class="small">${hints}</ul>` : ""}
-      ${islands ? `<h4 style="margin-top:10px">Islands (must be bridged or removed)</h4><ul class="small">${islands}</ul>` : ""}
-      <details data-section="per-sheet" ${openAttr("per-sheet", false, !ok)}><summary>Per-sheet checks${v.details_recomputed ? "" : " (all gate checks passed in the edit's validation)"}</summary>
-        <div class="table-wrap"><table><thead><tr><th>Sheet (front first)</th><th>Pass</th><th>4-connected</th><th>Width ≥ 1.2 mm</th><th>Perimeter</th><th>Visible ⊂ material</th><th>Islands</th><th>Exact geometry</th></tr></thead><tbody>${rows}</tbody></table></div>
+      <details data-section="per-sheet" ${openAttr("per-sheet", false)}><summary>Per-layer checks</summary>
+        <div class="table-wrap"><table><thead><tr><th>Layer (front first)</th><th>Pass</th><th>4-connected</th><th>Width ≥ 1.2 mm</th><th>Perimeter</th><th>Visible ⊂ material</th><th>Islands</th><th>Exact geometry</th></tr></thead><tbody>${rows}</tbody></table></div>
       </details>
     </div>
   </details>`;
@@ -2717,7 +2658,7 @@ function changePanel() {
   }
   const [cls, label, text] = CHANGE_KINDS[c.change.kind] || ["neutral", c.change.kind, ""];
   const ch = c.change;
-  return `<details class="panel tight section" data-testid="change-panel" data-section="change" ${openAttr("change", false, cls === "bad")}>
+  return `<details class="panel tight section" data-testid="change-panel" data-section="change" ${openAttr("change")}>
     <summary><h3>Edit #${c.index}: ${esc(c.op.op)} ${badge(cls, label)}</h3>${badge(c.validation_status === "PASS" ? "ok" : "bad", c.validation_status)}</summary>
     <div class="section-body">
       <p class="small">${esc(text)}</p>
@@ -2738,26 +2679,12 @@ function previewsPanel() {
   const d = ui.state.draft;
   const images = d.previews.images;
   return `<details class="panel tight section" data-section="previews" ${openAttr("previews")}>
-    <summary><h3>More previews</h3><span class="small muted">exploded stack and artwork comparison · ${esc(d.previews.mask_source || "")}</span></summary>
+    <summary><h3>More previews</h3><span class="small muted">exploded stack · artwork comparison</span></summary>
     <div class="section-body">
       <div class="gallery">
         ${images.exploded ? `<figure><img class="img" src="${esc(images.exploded)}" alt="exploded" loading="lazy"><figcaption>Exploded stack (back to front)</figcaption></figure>` : ""}
       </div>
-      ${images.source_comparison ? `<figure style="margin-top:12px"><img class="img" src="${esc(images.source_comparison)}" alt="comparison" loading="lazy"><figcaption>Reviewed artwork | assembled | mismatches in red · click any image to open it full size</figcaption></figure>` : ""}
-    </div>
-  </details>`;
-}
-
-function advancedPanel() {
-  const dis = busy() ? "disabled" : "";
-  return `<details class="panel tight section" data-section="advanced" ${openAttr("advanced")}>
-    <summary><h3>Advanced</h3><span class="small muted">raw edit request · reload from disk</span></summary>
-    <div class="section-body stack">
-      <p class="small muted">Every edit is saved immediately with its validation result. Invalid drafts are kept so you can fix them, but they cannot be exported.</p>
-      <div><textarea id="raw-op" spellcheck="false" placeholder='{"op": "recolor", "sheet": "…", "color": "#AABBCC"}'></textarea>
-        <p class="small muted">Operations: ${(ui.info?.edit_ops || []).map((o) => `<code>${esc(o)}</code>`).join(" ")}</p>
-        <button class="small" data-action="raw-op" ${dis}>Review request</button></div>
-      <div><button class="small ghost" data-action="reload">Reload from disk</button></div>
+      ${images.source_comparison ? `<figure style="margin-top:12px"><img class="img" src="${esc(images.source_comparison)}" alt="comparison" loading="lazy"><figcaption>Reviewed artwork | assembled | mismatches in red · click to open full size</figcaption></figure>` : ""}
     </div>
   </details>`;
 }
@@ -2766,7 +2693,6 @@ function sheetPanel(sheet) {
   const sheets = ui.state.draft.sheets;
   const index = sheets.findIndex((s) => s.id === sheet.id);
   const fromFront = sheets.length - 1 - index;
-  const others = sheets.filter((s) => s.id !== sheet.id);
   const dis = busy() ? "disabled" : "";
   const fails = sheet.checks.pass === false;
   const rimKey = (s) => (s.rim ? `${s.rim.width_mm}x${s.rim.total_height_mm}` : "");
@@ -2775,42 +2701,31 @@ function sheetPanel(sheet) {
     <div class="inspector-head">
       ${swatch(sheet.color, true)}
       <div><h3 style="margin:0">${esc(sheet.export_name)}</h3>
-        <div class="small muted">Layer ${fromFront + 1} of ${sheets.length} from the front · ${esc(sheet.color)}</div></div>
+        <div class="small muted">Layer ${fromFront + 1} of ${sheets.length} · ${esc(sheet.color)}</div></div>
       ${fails ? badge("bad", "fails") : badge("ok", "ok")}
     </div>
-    <button class="thumb ${ui.view === "sheet" ? "active" : ""}" data-action="view" data-view="sheet" title="Show this layer on the canvas">
-      <img src="${esc(sheet.image)}" alt="layer ${esc(sheet.export_name)}" draggable="false"></button>
     <div class="facts">
-      <div><span>${fmt(sheet.thickness_mm)} mm</span>thickness</div>
+      <div><span>${fmt(sheet.thickness_mm)}</span>mm thick</div>
       <div><span>${sheet.cutout_holes}</span>cutouts</div>
       <div><span class="${sheet.islands ? "no" : ""}">${sheet.islands}</span>islands</div>
-      <div><span>${fmt(sheet.retained_fraction * 100, 0)} %</span>material</div>
+      <div><span>${fmt(sheet.retained_fraction * 100, 0)}%</span>material</div>
     </div>
-    <div class="inspector-section">
-      <h4>Appearance</h4>
+    <details class="inspector-section" data-section="layer-settings" data-testid="layer-settings" ${openAttr("layer-settings")}>
+      <summary><h4>Layer settings</h4><span class="small muted">color · thickness · order · rim</span></summary>
       <div class="field-row"><label for="p-color">Color</label><input type="color" id="p-color" value="${esc(sheet.color.toLowerCase())}"><button class="small" data-action="recolor" ${dis}>Recolor</button></div>
       <div class="field-row"><label for="p-thick">Thickness</label><span><input type="number" id="p-thick" value="${sheet.thickness_mm}" min="0.2" step="0.2"> mm</span><button class="small" data-action="thickness" ${dis}>Set</button></div>
-    </div>
-    <div class="inspector-section">
-      <h4>Order</h4>
-      <div class="row">
-        <button class="small" data-action="move" data-to="${index + 1}" ${index >= sheets.length - 1 ? "disabled" : dis}>↑ Toward front</button>
-        <button class="small" data-action="move" data-to="${index - 1}" ${index <= 0 ? "disabled" : dis}>↓ Toward back</button>
+      <div class="field-row"><label>Order</label><span class="row">
+        <button class="small" data-action="move" data-to="${index + 1}" ${index >= sheets.length - 1 ? "disabled" : dis} title="Toward the front">↑ Front</button>
+        <button class="small" data-action="move" data-to="${index - 1}" ${index <= 0 ? "disabled" : dis} title="Toward the back">↓ Back</button></span></div>
+      <div class="settings-rim">
+        <div class="row small"><label class="check"><input type="checkbox" id="p-rim" ${sheet.rim ? "checked" : ""}> Raised rim</label>
+          <span class="muted">${sheet.rim ? `${fmt(sheet.rim.width_mm)} × ${fmt(sheet.rim.total_height_mm)} mm${rimOnAll ? " · all layers" : ""}` : "off"}</span>
+          ${infoTip("Optional raised border on the shared 12.5 mm perimeter band. Off by default and never required. With all layers the setting is one edit (one undo step).")}</div>
+        <label class="check small"><input type="checkbox" id="p-rim-all" data-testid="rim-all" ${ui.rimAll ? "checked" : ""}> All ${sheets.length} layers</label>
+        <div class="field-row"><label for="p-rim-w">Width</label><span><input type="number" id="p-rim-w" value="${sheet.rim ? sheet.rim.width_mm : 6}" min="0.5" max="12.5" step="0.5"> mm</span></div>
+        <div class="field-row"><label for="p-rim-h">Height</label><span><input type="number" id="p-rim-h" value="${sheet.rim ? sheet.rim.total_height_mm : r3(Math.max(...sheets.map((s) => s.thickness_mm)) + 0.8)}" min="0.2" step="0.2"> mm</span></div>
+        <button class="small" data-action="rim" ${dis}>Apply rim</button>
       </div>
-    </div>
-    <details class="inspector-section" data-section="rim" ${openAttr("rim", Boolean(sheet.rim))}>
-      <summary><h4>Optional rim</h4><span class="small muted">${sheet.rim ? `${fmt(sheet.rim.width_mm)} × ${fmt(sheet.rim.total_height_mm)} mm${rimOnAll ? " · all layers" : ""}` : "off"}</span></summary>
-      <label class="check"><input type="checkbox" id="p-rim" ${sheet.rim ? "checked" : ""}> Raised border</label>
-      <label class="check"><input type="checkbox" id="p-rim-all" data-testid="rim-all" ${ui.rimAll ? "checked" : ""}> Apply to all ${sheets.length} layers</label>
-      <p class="small muted" style="margin:4px 0">On the shared 12.5 mm perimeter band. Off by default; never required. With "all layers" the setting is one edit (one undo step).</p>
-      <div class="field-row"><label for="p-rim-w">Width</label><span><input type="number" id="p-rim-w" value="${sheet.rim ? sheet.rim.width_mm : 6}" min="0.5" max="12.5" step="0.5"> mm</span></div>
-      <div class="field-row"><label for="p-rim-h">Total height</label><span><input type="number" id="p-rim-h" value="${sheet.rim ? sheet.rim.total_height_mm : r3(Math.max(...sheets.map((s) => s.thickness_mm)) + 0.8)}" min="0.2" step="0.2"> mm</span></div>
-      <button class="small" data-action="rim" ${dis}>Apply rim setting</button>
-    </details>
-    <details class="inspector-section" data-section="merge" ${openAttr("merge")}>
-      <summary><h4>Merge</h4><span class="small muted">combine another layer into this one</span></summary>
-      <div class="field-row"><select id="p-merge" aria-label="Layer to merge">${others.map((s) => `<option value="${esc(s.id)}">${esc(s.export_name)}</option>`).join("")}</select>
-        <button class="small" data-action="merge" ${others.length ? dis : "disabled"}>Merge</button></div>
     </details>
     <details class="inspector-section" data-section="details" ${openAttr("details")}>
       <summary><h4>Details</h4></summary>
@@ -2821,7 +2736,6 @@ function sheetPanel(sheet) {
         <dt>Geometry</dt><dd>${esc(sheet.geometry)}</dd>
         <dt>Material</dt><dd>${fmt(sheet.retained_fraction * 100, 1)} % of the sheet</dd>
         <dt>Visible</dt><dd>${fmt(sheet.visible_px)} px</dd>
-        <dt>Cutouts / islands</dt><dd>${sheet.cutout_holes} / ${sheet.islands}</dd>
       </dl>
     </details>
   </div>`;
@@ -2831,20 +2745,25 @@ function historyPanel() {
   const d = ui.state.draft;
   const items = d.edits.slice().reverse().map((e) => {
     const [cls, label] = CHANGE_KINDS[e.kind] || ["neutral", e.kind];
-    return `<li><span>#${e.index} <strong>${esc(e.op.op)}</strong> ${badge(cls, label)} ${e.validation_status !== "PASS" ? badge("bad", "invalid") : ""}</span>
+    return `<li data-testid="history-item"><span>#${e.index} <strong>${esc(e.op.op)}</strong> ${badge(cls, label)} ${e.validation_status !== "PASS" ? badge("bad", "invalid") : ""}</span>
       <button class="small ghost" data-action="revert" data-keep="${e.index}" ${busy() || e.index === d.edits.length ? "disabled" : ""} title="Keep edits 1..${e.index}">Revert here</button></li>`;
   }).join("");
-  return `<details class="panel tight section" data-section="history" ${openAttr("history", d.edits.length > 0)}>
-    <summary><h3>Edit history</h3><span class="small muted">${d.edits.length ? `${d.edits.length} edit${d.edits.length === 1 ? "" : "s"}` : "no edits yet"}</span></summary>
+  const dis = busy() ? "disabled" : "";
+  return `<details class="panel tight section" data-section="history" data-testid="history-panel" ${openAttr("history")}>
+    <summary><h3>Edit history</h3><span class="small muted">${d.edits.length ? `${d.edits.length} edit${d.edits.length === 1 ? "" : "s"}` : "none"}</span></summary>
     <div class="section-body">
-      <p class="small muted">Base: ${esc(d.base.source.split("/").slice(-2).join("/"))} (${esc(d.base.validation_status)})</p>
-      ${items ? `<ul class="history">${items}</ul>` : ""}
-      <button class="small ghost" data-action="revert" data-keep="0" ${d.edits.length && !busy() ? "" : "disabled"}>Revert to base</button>
+      ${items ? `<ul class="history">${items}</ul>` : '<p class="small muted" style="margin:0">No layer edits.</p>'}
+      <div class="row">
+        <button class="small ghost" data-action="revert" data-keep="0" ${d.edits.length && !busy() ? "" : "disabled"}>Revert to base</button>
+        <button class="small ghost tip" data-action="verify" ${dis} data-tip="Replay the saved edit log from the base and compare">Verify save/reload</button>
+      </div>
     </div>
   </details>`;
 }
 
 // ------------------------------------------------------------------------------ canvas
+// Inspection only: the wheel zooms, a drag (or Space+drag / middle drag) moves the zoomed view, a click
+// marks a point (its mm coordinates are shown below the view).
 function overlayGeometry() {
   const img = $("#edit-image");
   const canvas = $("#overlay");
@@ -2877,66 +2796,13 @@ function drawOverlay() {
   if (g.canvas.width !== w || g.canvas.height !== h) { g.canvas.width = w; g.canvas.height = h; }
   const ctx = g.canvas.getContext("2d");
   ctx.clearRect(0, 0, w, h);
-  const mmToPx = (g.rect.width * dpr) / g.size;
   ctx.lineWidth = 2 * dpr;
-  const shape = ui.drag ? shapeFromDrag(ui.drag) : ui.pending;
-  if (shape) drawShape(ctx, shape, g, mmToPx);
-  const point = ui.pending?.at_mm || ui.pending?.region?.region_at_mm || ui.marker;
+  const point = ui.marker;
   if (point) {
     const [x, y] = toPx(point, g);
     ctx.strokeStyle = "#ff2d55";
     ctx.beginPath(); ctx.arc(x, y, 9 * dpr, 0, Math.PI * 2); ctx.stroke();
     ctx.beginPath(); ctx.moveTo(x - 14 * dpr, y); ctx.lineTo(x + 14 * dpr, y); ctx.moveTo(x, y - 14 * dpr); ctx.lineTo(x, y + 14 * dpr); ctx.stroke();
-  }
-}
-
-function drawShape(ctx, op, g, mmToPx) {
-  const s = op.shape || (op.op === "bridge" ? { type: "bar", from_mm: op.from_mm, to_mm: op.to_mm, width_mm: op.width_mm } : null);
-  if (!s) return;
-  if (s.type === "stroke") { drawStroke(ctx, op, g, mmToPx); return; }
-  const adding = op.op === "add" || op.op === "bridge";
-  ctx.strokeStyle = adding ? "#00a86b" : "#ff2d55";
-  ctx.fillStyle = adding ? "rgba(0,168,107,0.25)" : "rgba(255,45,85,0.25)";
-  ctx.beginPath();
-  if (s.type === "circle") {
-    const [x, y] = toPx(s.center_mm, g);
-    ctx.arc(x, y, Math.max(s.radius_mm * mmToPx, 1), 0, Math.PI * 2);
-  } else if (s.type === "polygon") {
-    s.points_mm.forEach((p, i) => { const [x, y] = toPx(p, g); if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y); });
-    ctx.closePath();
-  } else if (s.type === "bar") {
-    const [x0, y0] = toPx(s.from_mm, g);
-    const [x1, y1] = toPx(s.to_mm, g);
-    const len = Math.hypot(x1 - x0, y1 - y0) || 1;
-    const half = Math.max((s.width_mm * mmToPx) / 2, 1);
-    const nx = (-(y1 - y0) / len) * half;
-    const ny = ((x1 - x0) / len) * half;
-    ctx.moveTo(x0 + nx, y0 + ny); ctx.lineTo(x1 + nx, y1 + ny); ctx.lineTo(x1 - nx, y1 - ny); ctx.lineTo(x0 - nx, y0 - ny);
-    ctx.closePath();
-  }
-  ctx.fill();
-  ctx.stroke();
-}
-
-function shapeFromDrag({ from, to }) {
-  const sheet = ui.sheet;
-  const precision = ui.precision;
-  switch (ui.tool) {
-    case "add_circle": case "subtract_circle":
-      return { op: ui.tool.startsWith("add") ? "add" : "subtract", sheet, shape: { type: "circle", center_mm: from, radius_mm: r3(Math.hypot(to[0] - from[0], to[1] - from[1])) }, precision };
-    case "add_rect": case "subtract_rect": {
-      const [x0, x1] = [Math.min(from[0], to[0]), Math.max(from[0], to[0])];
-      const [y0, y1] = [Math.min(from[1], to[1]), Math.max(from[1], to[1])];
-      return { op: ui.tool.startsWith("add") ? "add" : "subtract", sheet, shape: { type: "polygon", points_mm: [[x0, y0], [x1, y0], [x1, y1], [x0, y1]] }, precision };
-    }
-    case "subtract_bar":
-      return { op: "subtract", sheet, shape: { type: "bar", from_mm: from, to_mm: to, width_mm: ui.barWidth }, precision };
-    case "bridge":
-      return { op: "bridge", sheet, from_mm: from, to_mm: to, width_mm: ui.barWidth, precision };
-    case "line": case "curve":
-      return strokeOp(ui.tool, from, to);
-    default:
-      return null;
   }
 }
 
@@ -2946,254 +2812,52 @@ function bindCanvas() {
   bindViewport("edit", canvas);
   $("#edit-image")?.addEventListener("load", () => applyView("edit"));
   applyView("edit");
+  const state = ui.editView;
+  let press = null;  // left button down: a click marks a point, a drag of the zoomed view moves it
   canvas.addEventListener("pointermove", (e) => {
     ui.hover = toMm(e);
     const c = $("#coords");
     if (c) c.textContent = `x ${ui.hover[0].toFixed(2)} mm · y ${ui.hover[1].toFixed(2)} mm`;
-    if (ui.strokeDrag) { moveStrokeHandle(ui.hover, e.shiftKey); drawOverlay(); return; }
-    if (ui.drag) { ui.drag.to = ui.hover; drawOverlay(); return; }
-    if (isStroke(ui.pending)) {
-      const hit = strokeHit(e);
-      canvas.style.cursor = hit === null ? "" : hit === "move" ? "move" : "grab";
+    if (!press) return;
+    if (!press.moved && Math.hypot(e.clientX - press.x, e.clientY - press.y) < 4) return;
+    press.moved = true;
+    if (state.zoom !== null) {
+      state.pan = [press.pan[0] + e.clientX - press.x, press.pan[1] + e.clientY - press.y];
+      applyView("edit");
     }
   });
   canvas.addEventListener("pointerdown", (e) => {
-    if (busy() || !ui.sheet || e.button !== 0) return;
-    const point = toMm(e);
-    const hit = isStroke(ui.pending) ? strokeHit(e) : null;
-    if (hit !== null) {  // edit the pending connector instead of drawing a new one
-      canvas.setPointerCapture(e.pointerId);
-      ui.strokeDrag = { handle: hit, start: point, orig: ui.pending.shape.points_mm.map((q) => [...q]) };
-      return;
-    }
-    if (["add_circle", "subtract_circle", "add_rect", "subtract_rect", "subtract_bar", ...STROKE_TOOLS].includes(ui.tool)) {
-      canvas.setPointerCapture(e.pointerId);
-      ui.drag = { from: point, to: point };
-      ui.pending = null;
-      drawOverlay();
-    }
+    if (e.button !== 0) return;
+    canvas.setPointerCapture(e.pointerId);
+    press = { x: e.clientX, y: e.clientY, pan: [...state.pan], moved: false };
+    if (state.zoom !== null) $("#edit-viewport")?.classList.add("panning");
   });
   canvas.addEventListener("pointerup", (e) => {
-    const point = toMm(e);
-    if (ui.strokeDrag) {
-      ui.strokeDrag = null;
-      strokeChanged();
-      return;
-    }
-    if (ui.drag) {
-      ui.drag.to = point;
-      const op = shapeFromDrag(ui.drag);
-      ui.drag = null;
-      const degenerate = (op.shape?.radius_mm === 0) || (op.shape?.type === "polygon" && (op.shape.points_mm[0][0] === op.shape.points_mm[1][0] || op.shape.points_mm[0][1] === op.shape.points_mm[2][1]))
-        || ((op.shape?.type === "bar" || op.op === "bridge") && JSON.stringify(op.from_mm || op.shape.from_mm) === JSON.stringify(op.to_mm || op.shape.to_mm))
-        || (isStroke(op) && strokeLength(op.shape) < 0.05);
-      ui.pending = degenerate ? null : op;
-      if (isStroke(ui.pending)) { strokeChanged(); return; }
-      render();
-      return;
-    }
-    if (busy() || !ui.sheet) return;
-    if (ui.tool === "fill_hole" || ui.tool === "remove_island") ui.pending = { op: ui.tool, sheet: ui.sheet, at_mm: point };
-    else if (ui.tool === "split") ui.pending = { op: "split", sheet: ui.sheet, region: { region_at_mm: point }, place: "front" };
-    else { ui.marker = point; ui.pending = null; }
-    render();
+    if (!press) return;
+    const moved = press.moved;
+    press = null;
+    $("#edit-viewport")?.classList.remove("panning");
+    if (moved) return;
+    ui.marker = toMm(e);
+    $("#edit-viewport")?.setAttribute("data-marker", JSON.stringify(ui.marker));
+    drawOverlay();
   });
   canvas.addEventListener("pointerleave", () => { ui.hover = null; });
 }
 
-// -------------------------------------------------------------- Line / Curve connectors
-// A connector is an ``add`` of a ``stroke`` shape (core.editing): a straight or cubic Bezier centre line
-// with a width.  It stays an editable pending shape until Apply; the preview draws the real material
-// (the centre line buffered by half the width, round or flat ends), sampled like the core samples it.
-const STROKE_SEGMENTS = 64;
-const isStroke = (op) => op?.op === "add" && op.shape?.type === "stroke";
-const lerp = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
-
-function strokeOp(tool, from, to) {
-  const points = tool === "line" ? [from, to] : [from, lerp(from, to, 1 / 3), lerp(from, to, 2 / 3), to];
-  return { op: "add", sheet: ui.sheet, shape: { type: "stroke", path: tool === "line" ? "line" : "cubic",
-    points_mm: points.map((q) => q.map(r3)), width_mm: r3(ui.barWidth), cap: ui.strokeCap }, precision: ui.precision };
-}
-
-function strokeCentre(shape) {
-  const p = shape.points_mm;
-  if (shape.path === "line") return p;
-  const out = [];
-  for (let i = 0; i <= STROKE_SEGMENTS; i++) {
-    const t = i / STROKE_SEGMENTS;
-    const a = (1 - t) ** 3, b = 3 * (1 - t) ** 2 * t, c = 3 * (1 - t) * t ** 2, d = t ** 3;
-    out.push([a * p[0][0] + b * p[1][0] + c * p[2][0] + d * p[3][0], a * p[0][1] + b * p[1][1] + c * p[2][1] + d * p[3][1]]);
-  }
-  return out;
-}
-
-function strokeLength(shape) {
-  const c = strokeCentre(shape);
-  let n = 0;
-  for (let i = 1; i < c.length; i++) n += Math.hypot(c[i][0] - c[i - 1][0], c[i][1] - c[i - 1][1]);
-  return n;
-}
-
-// Which part of the pending connector is under the pointer: a handle index, "move" (the body) or null.
-function strokeHit(event) {
-  const g = overlayGeometry();
-  if (!g || !isStroke(ui.pending)) return null;
-  const s = ui.pending.shape;
-  const ex = (event.clientX - g.crect.left) * g.dpr;
-  const ey = (event.clientY - g.crect.top) * g.dpr;
-  const near = (q, r) => { const [x, y] = toPx(q, g); return Math.hypot(x - ex, y - ey) <= r * g.dpr; };
-  const order = s.path === "line" ? [0, 1] : [1, 2, 0, 3];  // curve handles before the ends they belong to
-  for (const i of order) if (near(s.points_mm[i], 11)) return i;
-  const mmToPx = (g.rect.width * g.dpr) / g.size;
-  const reach = (s.width_mm * mmToPx) / 2 + 5 * g.dpr;
-  const c = strokeCentre(s).map((q) => toPx(q, g));
-  for (let i = 1; i < c.length; i++) {
-    const [ax, ay] = c[i - 1], [bx, by] = c[i];
-    const len2 = (bx - ax) ** 2 + (by - ay) ** 2 || 1;
-    const t = Math.max(0, Math.min(1, ((ex - ax) * (bx - ax) + (ey - ay) * (by - ay)) / len2));
-    if (Math.hypot(ex - (ax + t * (bx - ax)), ey - (ay + t * (by - ay))) <= reach) return "move";
-  }
-  return null;
-}
-
-function moveStrokeHandle(point, snap) {
-  const d = ui.strokeDrag;
-  const pts = ui.pending.shape.points_mm;
-  const last = pts.length - 1;
-  if (d.handle === "move") {
-    const dx = point[0] - d.start[0], dy = point[1] - d.start[1];
-    d.orig.forEach((q, i) => { pts[i] = [r3(q[0] + dx), r3(q[1] + dy)]; });
-    return;
-  }
-  let target = point;
-  if (snap && ui.pending.shape.path === "line") {  // Shift: 15 degree steps around the other end
-    const other = d.orig[d.handle === 0 ? 1 : 0];
-    const len = Math.hypot(point[0] - other[0], point[1] - other[1]);
-    const angle = Math.round(Math.atan2(point[1] - other[1], point[0] - other[0]) / (Math.PI / 12)) * (Math.PI / 12);
-    target = [other[0] + len * Math.cos(angle), other[1] + len * Math.sin(angle)];
-  }
-  pts[d.handle] = target.map(r3);
-  // On a curve an end carries its own handle along, so the bend keeps its shape.
-  if (ui.pending.shape.path === "cubic" && (d.handle === 0 || d.handle === last)) {
-    const h = d.handle === 0 ? 1 : last - 1;
-    pts[h] = [r3(d.orig[h][0] + target[0] - d.orig[d.handle][0]), r3(d.orig[h][1] + target[1] - d.orig[d.handle][1])];
-  }
-}
-
-function drawStroke(ctx, op, g, mmToPx) {
-  const s = op.shape;
-  const dpr = g.dpr;
-  const color = ui.state.draft?.sheets.find((x) => x.id === op.sheet)?.color || "#00a86b";
-  const path = () => { ctx.beginPath(); strokeCentre(s).forEach((q, i) => { const [x, y] = toPx(q, g); if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y); }); };
-  ctx.save();
-  ctx.lineJoin = "round";
-  ctx.lineCap = s.cap === "flat" ? "butt" : "round";
-  path(); ctx.strokeStyle = "rgba(10, 14, 20, 0.85)"; ctx.lineWidth = Math.max(1, s.width_mm * mmToPx + 3 * dpr); ctx.stroke();
-  path(); ctx.strokeStyle = color; ctx.globalAlpha = 0.9; ctx.lineWidth = Math.max(1, s.width_mm * mmToPx); ctx.stroke();
-  ctx.globalAlpha = 1;
-  if (ui.drag) { ctx.restore(); return; }  // handles once the connector exists
-  const pts = s.points_mm.map((q) => toPx(q, g));
-  ctx.lineWidth = 1.5 * dpr;
-  if (s.path === "cubic") {
-    ctx.setLineDash([4 * dpr, 3 * dpr]); ctx.strokeStyle = "#2f5bd3";
-    ctx.beginPath(); ctx.moveTo(...pts[0]); ctx.lineTo(...pts[1]); ctx.moveTo(...pts[3]); ctx.lineTo(...pts[2]); ctx.stroke();
-    ctx.setLineDash([]);
-    for (const i of [1, 2]) { ctx.fillStyle = "#ffffff"; ctx.fillRect(pts[i][0] - 5 * dpr, pts[i][1] - 5 * dpr, 10 * dpr, 10 * dpr); ctx.strokeRect(pts[i][0] - 5 * dpr, pts[i][1] - 5 * dpr, 10 * dpr, 10 * dpr); }
-  }
-  for (const q of [pts[0], pts[pts.length - 1]]) {
-    ctx.beginPath(); ctx.arc(q[0], q[1], 6 * dpr, 0, Math.PI * 2);
-    ctx.fillStyle = "#ffffff"; ctx.fill(); ctx.strokeStyle = "#2f5bd3"; ctx.stroke();
-  }
-  ctx.restore();
-}
-
-// Any change to the pending connector: the last check no longer applies; check again shortly.
-let strokeCheckTimer = null;
-function strokeChanged() {
-  ui.strokeCheck = null;
-  render();
-  clearTimeout(strokeCheckTimer);
-  strokeCheckTimer = setTimeout(runStrokeCheck, 400);
-}
-
-async function runStrokeCheck() {
-  const op = ui.pending;
-  if (!isStroke(op) || busy()) return;
-  const key = JSON.stringify(op);
-  ui.strokeCheck = { key, pending: true };
-  if (!ui.strokeDrag) render();
-  let result;
-  try {
-    result = { key, result: await api("POST", `/api/projects/${encodeURIComponent(ui.name)}/edit/check`, { op }) };
-  } catch (err) {
-    result = { key, error: err.message };
-  }
-  if (JSON.stringify(ui.pending) !== key) return;  // edited meanwhile: a newer check follows
-  ui.strokeCheck = result;
-  if (!ui.strokeDrag) render();
-}
-
-function strokePanel(op) {
-  const s = op.shape;
-  const line = s.path === "line";
-  const a = s.points_mm[0];
-  const b = s.points_mm[s.points_mm.length - 1];
-  const angle = Math.atan2(b[1] - a[1], b[0] - a[0]) * 180 / Math.PI;
-  const sheet = ui.state.draft.sheets.find((x) => x.id === op.sheet);
-  const check = ui.strokeCheck?.key === JSON.stringify(op) ? ui.strokeCheck : null;
-  let checkLine = '<span class="small muted">Checking…</span>';
-  if (check?.error) checkLine = `<span class="small no">${esc(check.error)}</span>`;
-  else if (check?.result) {
-    const r = check.result;
-    const [cls, label] = CHANGE_KINDS[r.change.kind] || ["neutral", r.change.kind];
-    const visible = r.change.kind === "visible_artwork" || r.change.kind === "visible_subgrid_geometry";
-    checkLine = `${badge(cls, label)} ${badge(r.validation_status === "PASS" ? "ok" : "bad", r.validation_status === "PASS" ? "valid" : "invalid")}
-      <span class="small">${visible ? `Changes ${fmt(r.change.visible_changed_px)} visible px: applying it makes the draft invalid until you accept the front view (your approval).`
-        : r.validation_status === "PASS" ? "Hidden behind the sheets in front: the front view is unchanged." : ""}
-      ${r.failures.length ? `<span class="no">${esc(r.failures.join("; "))}</span>` : ""}</span>`;
-  }
-  return `<div class="pending stroke-editor" data-testid="pending-edit">
-    <div class="spread"><strong>Pending ${line ? "line" : "curve"} on ${swatch(sheet?.color || "#888")} ${esc(sheet?.export_name || op.sheet)}</strong>
-      <span class="small muted">Drag the round ends${line ? "" : " and the square curve handles"}; drag the stroke to move it${line ? "; Shift snaps to 15°" : ""}.</span></div>
-    <div class="stroke-fields">
-      <label class="field"><span>Width (mm)</span><input type="number" id="stroke-width" data-testid="stroke-width" min="0.1" step="0.1" value="${s.width_mm}"></label>
-      ${line ? `<label class="field"><span>Angle (°)</span><input type="number" id="stroke-angle" data-testid="stroke-angle" step="1" value="${r3(angle).toFixed(1)}"></label>
-      <label class="field"><span>Length (mm)</span><input type="number" id="stroke-length" data-testid="stroke-length" min="0.1" step="0.1" value="${r3(strokeLength(s)).toFixed(2)}"></label>`
-        : `<div class="field"><span>Length</span><strong data-testid="stroke-arc-length">${fmt(strokeLength(s), 2)} mm</strong></div>
-      <button class="tool-btn" data-action="stroke-straighten" data-testid="stroke-straighten">Straighten</button>`}
-      <label class="field"><span>Ends</span><select id="stroke-cap" data-testid="stroke-cap"><option value="round" ${s.cap === "round" ? "selected" : ""}>Round</option><option value="flat" ${s.cap === "flat" ? "selected" : ""}>Flat</option></select></label>
-    </div>
-    <p class="small muted" style="margin:0">From (${a.map((v) => fmt(v, 2)).join(", ")}) to (${b.map((v) => fmt(v, 2)).join(", ")}) mm${s.width_mm < 1.2 ? ' · <span class="no">narrower than the 1.2 mm minimum material width: validation will report it</span>' : ""}</p>
-    <div class="row" data-testid="stroke-check">${checkLine}</div>
-    <div class="spread"><details><summary class="small">Edit request (L2 format)</summary><pre class="mono small">${esc(JSON.stringify(op, null, 2))}</pre></details>
-      <div class="row"><button class="small ghost" data-action="cancel-pending">Cancel</button><button class="small primary" data-action="apply-pending" data-testid="stroke-apply" ${busy() ? "disabled" : ""}>Apply</button></div></div>
-  </div>`;
-}
-
-// Numeric fields of the pending connector.
-function strokeField(el, live) {
-  const op = ui.pending;
-  if (!isStroke(op)) return false;
-  const s = op.shape;
-  const v = Number(el.value);
-  if (el.id === "stroke-width") {
-    if (!(v > 0)) return true;
-    s.width_mm = r3(v);
-    ui.barWidth = v;
-  } else if (el.id === "stroke-cap") {
-    s.cap = el.value;
-    ui.strokeCap = el.value;
-  } else if ((el.id === "stroke-angle" || el.id === "stroke-length") && s.path === "line") {
-    const [a, b] = s.points_mm;
-    const len = el.id === "stroke-length" ? v : Math.hypot(b[0] - a[0], b[1] - a[1]);
-    const ang = (el.id === "stroke-angle" ? v : Math.atan2(b[1] - a[1], b[0] - a[0]) * 180 / Math.PI) * Math.PI / 180;
-    if (!(len > 0) || !Number.isFinite(ang)) return true;
-    s.points_mm[1] = [r3(a[0] + len * Math.cos(ang)), r3(a[1] + len * Math.sin(ang))];
-  } else {
-    return false;
-  }
-  if (live) { ui.strokeCheck = null; drawOverlay(); } else strokeChanged();
-  return true;
+// Arrow keys move through the layer list (front to back), like a list box.
+function onLayerKey(event) {
+  const row = event.target.closest?.('[data-testid="layer-row"]');
+  if (!row) return;
+  if (event.key === "Enter" || event.key === " ") { event.preventDefault(); row.click(); return; }
+  const step = { ArrowDown: 1, ArrowUp: -1 }[event.key];
+  if (!step) return;
+  event.preventDefault();
+  const rows = [...document.querySelectorAll('[data-testid="layer-row"]')];
+  const next = rows[rows.indexOf(row) + step];
+  if (!next) return;
+  next.click();
+  $(`[data-testid="layer-row"][data-sheet="${CSS.escape(next.dataset.sheet)}"]`)?.focus();
 }
 
 // ----------------------------------------------------------------------- printability
@@ -3300,9 +2964,9 @@ function kitBuildPanel(latest) {
         <div class="section-body">${processForm("kit")}</div></details>
       ${bambuOption()}
       <div class="row"><button class="${needed ? "primary" : ""}" data-action="build-kit" ${valid && !busy() ? "" : "disabled"}>${latest ? "Build new print kit" : "Build print kit"}</button>
-        ${unsavedArt() ? '<span class="small no" data-testid="kit-unsaved-art">The artwork has unsaved changes; save or discard them first (Review &amp; edit → Artwork editor).</span>'
-          : ui.state.artwork?.differs_from_planned ? '<span class="small no">The artwork was edited after these sheets were planned; plan from the edited artwork or undo the artwork edits (Review &amp; edit → Artwork editor).</span>'
-          : valid ? "" : '<span class="small no">The draft is invalid (see Review &amp; edit); invalid drafts are never exported.</span>'}</div>
+        ${unsavedArt() ? '<span class="small no" data-testid="kit-unsaved-art">The artwork has unsaved changes; save or discard them first (Review layers → Artwork editor).</span>'
+          : ui.state.artwork?.differs_from_planned ? '<span class="small no">The artwork was edited after these sheets were planned; plan from the edited artwork or undo the artwork edits (Review layers → Artwork editor).</span>'
+          : valid ? "" : '<span class="small no">The draft is invalid (see Review layers); invalid drafts are never exported.</span>'}</div>
     </div>
   </section>`;
 }
@@ -3600,25 +3264,13 @@ async function onClick(event) {
       submit(`${project}/upscale/retry`, { factor: Number(el.dataset.factor), preview_id: el.dataset.preview, approve_changes: Boolean(ui.upscaleApproved[el.dataset.preview]) });
       break;
     case "start-review": submit(`${project}/review`, { candidate: el.dataset.candidate }); break;
-    case "select-sheet": ui.sheet = el.dataset.sheet; ui.pending = null; ui.marker = null; if (ui.view !== "front") ui.view = "sheet"; render(); break;
+    case "select-sheet": ui.sheet = el.dataset.sheet; ui.marker = null; if (!ui.view.startsWith("changes")) ui.view = "sheet"; render(); break;
     case "view": ui.view = el.dataset.view; render(); break;
-    case "tool":
-      ui.tool = el.dataset.tool; ui.pending = null;
-      if (ui.tool !== "inspect" && ui.view === "front") ui.view = "sheet";  // edits act on the selected layer: show it
-      render(); break;
-    case "cancel-pending": ui.pending = null; ui.strokeCheck = null; render(); break;
-    case "stroke-straighten":
-      if (isStroke(ui.pending) && ui.pending.shape.path === "cubic") {
-        const pts = ui.pending.shape.points_mm;
-        pts[1] = lerp(pts[0], pts[3], 1 / 3).map(r3);
-        pts[2] = lerp(pts[0], pts[3], 2 / 3).map(r3);
-        strokeChanged();
-      }
-      break;
+    case "cancel-pending": ui.pending = null; render(); break;
     case "apply-pending": if (ui.pending) editOp(ui.pending); break;
     case "propose-op": ui.pending = JSON.parse(el.dataset.op); if (ui.pending.sheet) ui.sheet = ui.pending.sheet; ui.view = "sheet"; setTab("review"); render(); break;
     case "locate":
-      ui.sheet = el.dataset.sheet; ui.marker = [Number(el.dataset.x), Number(el.dataset.y)]; ui.pending = null; ui.view = "sheet"; ui.tool = "inspect";
+      ui.sheet = el.dataset.sheet; ui.marker = [Number(el.dataset.x), Number(el.dataset.y)]; ui.pending = null; ui.view = "sheet";
       setTab("review"); render(); $("#edit-viewport")?.scrollIntoView({ behavior: "smooth", block: "center" }); break;
     case "move": editOp({ op: "move", sheet, to: Number(el.dataset.to) }); break;
     case "recolor": editOp({ op: "recolor", sheet, color: $("#p-color").value.toUpperCase() }); break;
@@ -3629,14 +3281,10 @@ async function onClick(event) {
       editOp(on ? { op: "rim", sheet: target, enabled: true, width_mm: Number($("#p-rim-w").value), total_height_mm: Number($("#p-rim-h").value) } : { op: "rim", sheet: target, enabled: false });
       break;
     }
-    case "merge": editOp({ op: "merge", sheet, other: $("#p-merge").value }); break;
     case "undo": submit(`${project}/undo`, {}); break;
     case "revert": submit(`${project}/undo`, { keep: Number(el.dataset.keep) }); break;
     case "verify": submit(`${project}/verify`, {}); break;
     case "reload": await loadState(); render(); break;
-    case "raw-op":
-      try { ui.pending = JSON.parse($("#raw-op").value); render(); } catch (err) { showError({ message: `Not valid JSON: ${err.message}` }, "Edit request"); }
-      break;
     case "run-printability": submit(`${project}/printability`, { process: processPayload() }); break;
     case "build-kit":
       submit(`${project}/kits`, { process: processPayload(), bambu_printer: ui.bambu ? (ui.bambuPrinter || ui.info.bambu.default_printer) : null });
@@ -3724,7 +3372,6 @@ async function onClick(event) {
 
 function onChange(event) {
   const el = event.target;
-  if (el.id?.startsWith("stroke-") && strokeField(el, false)) return;
   if (el.id === "project-select") {
     location.hash = el.value ? `#/${encodeURIComponent(el.value)}` : "#/";
   } else if (["insp-kind", "insp-severity"].includes(el.id)) {
@@ -3786,10 +3433,6 @@ function onChange(event) {
       ui.process.source = "user-entered in the LayerForge app (not a measured profile unless you measured it)";
     }
     render();
-  } else if (el.id === "bar-width") {
-    ui.barWidth = Math.max(0.1, Number(el.value) || 1.2);
-  } else if (el.id === "precision") {
-    ui.precision = el.value;
   }
 }
 
@@ -3797,8 +3440,7 @@ function onChange(event) {
 async function main() {
   document.addEventListener("click", onClick);
   document.addEventListener("change", onChange);
-  // Width, angle and length update the connector preview while typing (the check runs on change).
-  document.addEventListener("input", (e) => { if (e.target.id?.startsWith("stroke-") && e.target.id !== "stroke-cap") strokeField(e.target, true); });
+  document.addEventListener("keydown", onLayerKey);
   // Remember sections the user opens or closes (only clicks: renders also toggle <details>).
   document.addEventListener("click", (e) => {
     const details = e.target.closest("summary")?.parentElement;

@@ -157,26 +157,28 @@ try {
   await shot("03_review");
   step("review started", { layers });
 
-  // 3a. an invalid request: fill a "cutout" where the front sheet has material -> actionable error
-  await clickSel('[data-testid="layer-row"]');  // front sheet
-  await clickSel('[data-tool="fill_hole"]');
-  await canvasClick([60, 40]);
-  await waitFor(`document.querySelector('[data-testid="pending-edit"]')`, "pending fill_hole");
-  await clickSel('[data-action="apply-pending"]');
-  await waitFor(`document.querySelector(".banner.error") && ${idle}`, "error banner", 60000);
-  results.error_banner = await text(".banner.error");
-  await shot("04_error");
-  step("invalid edit reported", { banner: results.error_banner.split("\n").slice(0, 2).join(" | ") });
-  await clickSel('[data-action="dismiss-error"]');
+  // 3a. Review Layers has no sheet-geometry tools.  Projects can still hold geometry edits (made by the
+  // earlier UI, or by scripts through the unchanged edit API): make them through the API here, then reload.
+  results.review_tools = await evaluate(`document.querySelectorAll(${JSON.stringify('#tab-body [data-tool], #tab-body .toolbar, #tab-body [data-action="apply-pending"]')}).length`);
+  const reviewProject = await text("h1");
+  const frontSheet = await evaluate(`document.querySelector('[data-testid="layer-row"]').dataset.sheet`);
+  const apiEdit = (op) => evaluate(`(async () => {
+    const r = await fetch("/api/projects/" + encodeURIComponent(${JSON.stringify(reviewProject)}) + "/edit", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ op: ${JSON.stringify(op)} }) });
+    const body = await r.json();
+    if (!r.ok) return { status: "refused", error: body.error?.message };
+    let job = body.job;
+    while (job.status !== "done" && job.status !== "failed") { await new Promise((ok) => setTimeout(ok, 300)); job = await (await fetch("/api/jobs/" + job.id)).json(); }
+    return job;
+  })()`);
+  const invalid = await apiEdit({ op: "fill_hole", sheet: frontSheet, at_mm: [60, 40] });
+  results.error_banner = typeof invalid.error === "string" ? invalid.error : JSON.stringify(invalid.error || "");
+  step("invalid edit reported", { error: results.error_banner.split("\n")[0] });
 
-  // 3b. cut a 0.6 mm slot in the front sheet (a visible change -> DRAFT_INVALID)
-  await clickSel('[data-tool="subtract_bar"]');
-  await setValue("#bar-width", "0.6");
-  await canvasDrag([40, 40], [100, 40]);
-  await waitFor(`document.querySelector('[data-testid="pending-edit"]')`, "pending slot");
-  results.pending_slot = await text('[data-testid="pending-edit"]');
-  await clickSel('[data-action="apply-pending"]');
-  await waitFor(`${bodyHas("Edit #1")} && ${idle}`, "slot applied", 180000);
+  // 3b. a 0.6 mm slot in the front sheet (a visible change -> DRAFT_INVALID), shown after a reload
+  const slot = await apiEdit({ op: "subtract", sheet: frontSheet, shape: { type: "bar", from_mm: [40, 40], to_mm: [100, 40], width_mm: 0.6 }, precision: "vector" });
+  results.slot_job = slot.status;
+  await send("Page.reload");
+  await waitFor(`document.querySelectorAll('[data-testid="layer-row"]').length > 1 && ${bodyHas("Edit #1")} && ${idle}`, "slot shown after reload", 120000);
   results.after_slot = {
     validation: await text('[data-testid="validation-panel"] h3'),
     change: await text('[data-testid="change-panel"] h3'),
@@ -194,10 +196,11 @@ try {
   results.after_accept = await text('[data-testid="validation-panel"] h3');
   step("artwork accepted", { validation: results.after_accept });
 
-  // 3d. optional rim on the back sheet only, undo it, then apply it to all layers
+  // 3d. optional rim on the back sheet only (Layer settings), undo it, then apply it to all layers
   const rimRows = `[...document.querySelectorAll('[data-testid="layer-row"]')].filter((r) => r.innerText.includes("rim 6")).length`;
   await evaluate(`(() => { const rows = document.querySelectorAll('[data-testid="layer-row"]'); rows[rows.length - 1].click(); })()`);
   await waitFor(`document.querySelector("#p-rim")`, "sheet panel");
+  await clickSel('[data-testid="layer-settings"] > summary');
   results.rim_all_default = await evaluate(`document.querySelector("#p-rim-all").checked`);
   await evaluate(`(() => { const box = document.querySelector("#p-rim-all"); box.checked = false; box.dispatchEvent(new Event("change", { bubbles: true })); })()`);
   await evaluate(`document.querySelector("#p-rim").checked = true`);
@@ -223,6 +226,7 @@ try {
   step("rim on all layers", { rows: results.layer_rows, with_rim: results.rim_all_rows });
 
   // 3e. save/reload: verify replay, then reload the page from scratch
+  await clickSel('[data-testid="history-panel"] > summary');  // Verify lives in the edit history
   await clickSel('[data-action="verify"]');
   await waitFor(`${bodyHas("reproduces the saved geometry exactly")} && ${idle}`, "verify replay", 180000);
   await send("Page.reload");
