@@ -892,6 +892,79 @@ FDM thresholds remain generic assumptions until a print calibrates them).
   - Staleness: issues carry the basis they were computed for (draft update time or candidate); after a layer edit
     the old locations are drawn grey/dashed with a "re-checking" banner until the new result arrives.
 
+## D-V3-040 | 2026-11-04 | Fit Artwork to Canvas: a logged artwork edit inside the same aperture
+
+**Status:** IMPLEMENTED; READY_FOR_USER_TEST.
+
+- USER_REQUIRED: enlarge and centre a subject that occupies only part of the canvas, aspect kept, configurable
+  margin (default 8 %), manual scale and X/Y, before/after preview, palette kept (no anti-aliasing), source
+  unchanged, sheet size and perimeter unchanged, available before planning and for existing projects through
+  explicit re-planning, undo/save/reload/history kept, existing sheets never scaled silently, ambiguous
+  backgrounds and separate pieces framed manually instead of guessed. Planner and validators unchanged.
+- DESIGN_CHOICE: the fit is a new artwork op `fit_composition` in `core/artwork.py` (source box, ONE scale
+  factor, offset, background = palette color or the never-visible frame). It uses the existing preview /
+  working session / Save Changes / replay-hash / undo / revert / verify machinery, so it is one undoable edit in
+  the history and replays bit for bit. Nearest-neighbour inverse mapping: every output pixel copies one input
+  pixel, so no new color can appear; with a factor >= 1 every box pixel becomes a non-empty block, so the
+  4-connected regions of every color in the box keep their count (tested). Below 100 % (manual only) pixels can
+  drop out and the preview warns.
+- DESIGN_CHOICE: the canvas is the whole artwork aperture (the 512*scale px square inside the shared perimeter),
+  including intake's frame padding (side strips of a portrait image): those strips become background when the
+  background is a color. Sheet mm, grid, perimeter and mm-per-pixel are untouched.
+- DESIGN_CHOICE: background detection, no guessing: if the artwork outline is irregular (transparent source)
+  the frame is the background; else a color covering >= 90 % of the artwork's outer border is the background;
+  else AMBIGUOUS_BACKGROUND (no automatic fit; the user drags a Box and picks the background). Foreground = every
+  artwork pixel that is not the background; background-colored pixels inside the subject stay because the whole
+  subject box is copied. More than one 8-connected foreground piece = MULTIPLE_FOREGROUND_REGIONS: the box
+  covering all pieces is offered as a manual starting point, nothing is applied automatically. A subject that
+  touches the artwork edge (cut off by the original image border) is reported; "Keep cut edges on the border"
+  anchors those sides (no margin there) instead of centring (option, off by default).
+- DESIGN_CHOICE: automatic fit = the largest single factor that keeps the subject box inside the canvas minus the
+  margin on every side (fraction of the canvas side), centred; it is offered only when it enlarges (>= 0.05 %),
+  else ALREADY_FITTED.
+- DESIGN_CHOICE: re-planning: `intake.use_edited_target(..., composition_ops=...)` accepts a changed frame layout
+  ONLY when the artwork's fits are passed (ordinary recolors still may not move the frame); the edited artwork's
+  own frame pixels define the frame (none when the background is a color), and the intake's unmatched-region map
+  and detail boxes are moved through the same fits. `proposal.json` records `composition_ops` (every fit since a
+  fresh intake of the source), so a later re-plan or physical resize re-applies the whole chain; flag
+  ARTWORK_RECOMPOSED (INFO). Kit export stays refused while the fitted artwork is not planned (existing rule).
+- LIMITATION: a subject cut off by the original image border shows that straight cut when centred with a margin
+  (the dog's front paw); the anchor option keeps it on the border. Detail crops saved by intake still show the
+  source framing. Upscale & Retry stays refused while artwork edits exist (as for recolors).
+- 2026-11-04 Fit card simplified to mouse-only framing (user instruction; UI only, no core change):
+  - The card shows a status badge, the Before image, a live After canvas and only "Fit automatically" and "Apply
+    fit" (plus Close). Margin, scale, top/left fields, Centre/Largest, the subject-box text, long explanations and
+    the measurement summary are removed (the automatic fit uses the default 8 % margin; the cut-edge anchor
+    option is no longer shown).
+  - Drag inside the dashed framing box moves the subject; the square handle at its bottom-left corner resizes it
+    with one factor (aspect ratio locked, top-right corner fixed). The canvas is redrawn live from the artwork's
+    own pixels without smoothing; on release the unchanged server check (`/artwork/fit` manual) returns the exact
+    edit, and Apply fit adds only an edit that matches what is shown. Moving and resizing are clamped so the
+    subject never leaves the artwork aperture (no cut-off pixels). A background picker appears only when the
+    background is ambiguous (it cannot be chosen with the mouse otherwise).
+  - Still an artwork edit only: Apply adds one unsaved change; planning only via Plan sheets from this artwork.
+- 2026-11-04 Fit clipping report corrected (user-reported false "36,904 subject pixels fall outside the canvas"):
+  - OBSERVED_IN_FILE root cause: `compose()` counted every subject pixel of the source box that the
+    nearest-neighbour mapping never samples as `foreground_cut_px`, and the app worded it "fall outside the canvas".
+    Below 100 % the reduction skips whole source rows/columns, so a subject fully inside the canvas was reported as
+    clipped (dog, fully inside: 95 % -> 24,635, 90 % -> 47,874, 75 % -> 110,223 px). Canvas clipping itself was
+    never measured separately. While dragging, the previous server warnings also stayed on screen until the next
+    check returned.
+  - DESIGN_CHOICE: `subject_loss()` measures three things on the same `_full_mapping` the edit uses: new clipping
+    (`subject_clipped_px` = transformed subject pixels off the canvas, `subject_clipped_source_px` = source pixels
+    with no copy left, `clipped_edges`, plus an exact source-grid mask), downscale skipping (`subject_skipped_px`,
+    worded as "inside the canvas, not cut off", warned only when the scale is below 100 %), and subject pixels on the
+    original rectangular artwork's own edge (`source_cropped_edges`, a note, not caused by the fit; not reported
+    for transparent artwork, whose outline is the subject).
+  - New clipping needs explicit approval: `accept_clipping: true` in the op (written only when true, so existing
+    ops and replay hashes are unchanged); `session_add` and `apply` refuse an unapproved clipping fit (replay of
+    saved logs never refuses). The card shows the lost source pixels in red over Before, red bands on the clipped
+    canvas edges, and an "Approve cutting off the red pixels" button only while clipping exists; Apply stays
+    disabled until then. Mouse framing is still clamped to the canvas, so this path is reached only by API/manual
+    ops today. Warnings, overlay and Apply are shown only for the checked framing on screen (hidden from the first
+    pointer move until the server check of the new framing returns).
+  - Found, NOT changed (would alter saved fit edits): at non-integer scales >= 1 the floor of the scaled size can
+    leave the last source row/column unsampled (dog at 139 %: 29 px). Reported in `subject_skipped_px`, not warned.
 - 2026-11-07 Performance Step 2: the proposal no longer exports or verifies STEP; the print kit does (user approved).
   - OBSERVED_IN_FILE (golden baselines, 5 projects): the print kit's CAD files were identical to the proposal's in
     every project, and STEP read-back (importStep + isValid) was 82-89% of each CAD stage, so the proposal repeated

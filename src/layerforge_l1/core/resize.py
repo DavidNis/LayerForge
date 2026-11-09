@@ -292,7 +292,8 @@ def preview_resize(image_path: Path, previous_dir: Path, output: Path, new_mm: f
     old_target = np.asarray(Image.open(Path(previous_dir) / "intake" / "target.png").convert("RGB"))
     intake_mask = prepared["artwork_mask"]
     if edited is not None:
-        prepared = use_edited_target(prepared, edited["target_rgb"], intake, edited.get("frame_color"))
+        prepared = use_edited_target(prepared, edited["target_rgb"], intake, edited.get("frame_color"),
+                                     edited.get("composition_ops"))
     m = prepared["measurements"]
     frame = previous.get("frame_color")
     old_inside = ((old_target != np.array([int(frame[i:i + 2], 16) for i in (1, 3, 5)], np.uint8)).any(-1)
@@ -363,7 +364,8 @@ def trial_plan(image_path: Path, previous: dict[str, Any], sheet_mm: float, inta
     rgb, opaque, _ = load_image(image_path)
     prepared = prepare_target(rgb, opaque, StackGrid.for_planner(planning.outer_sheet_mm, planning.scale), intake, decisions)
     if edited is not None:
-        prepared = use_edited_target(prepared, edited["target_rgb"], intake, edited.get("frame_color"))
+        prepared = use_edited_target(prepared, edited["target_rgb"], intake, edited.get("frame_color"),
+                                     edited.get("composition_ops"))
     planning = replace(planning, frame_color=prepared["frame_color"] if prepared["has_frame"] else None)
     row: dict[str, Any] = {"sheet_mm": float(sheet_mm), "beam_score": planning.beam_score}
     try:

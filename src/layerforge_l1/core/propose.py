@@ -150,7 +150,8 @@ def propose(
     grid = StackGrid.for_planner(config.planning.outer_sheet_mm, config.planning.scale)
     prepared = prepare_target(rgb, opaque, grid, intake, detail_decisions)
     if artwork is not None:
-        prepared = use_edited_target(prepared, artwork["target_rgb"], intake, artwork.get("frame_color"))
+        prepared = use_edited_target(prepared, artwork["target_rgb"], intake, artwork.get("frame_color"),
+                                     artwork.get("composition_ops"))
         _save_image(prepared["intake_target_rgb"], output / "intake" / "target_before_artwork_edits.png")
     m = prepared["measurements"]
     progress("L1_INTAKE_DONE", palette=m["palette_size"], details=len(prepared["details"]),
@@ -181,6 +182,13 @@ def propose(
             "Planned from the flat-color artwork as you edited it in LayerForge (region recolors). The source "
             "image is unchanged; the sheets are proposed automatically for the edited artwork.",
             **artwork.get("provenance", {})))
+        if artwork.get("composition_ops"):
+            flags.append(_flag(
+                "ARTWORK_RECOMPOSED", "INFO",
+                "The artwork was fitted to the canvas (subject enlarged and moved inside the same artwork aperture, "
+                "nearest-neighbour scaling, palette unchanged). Sheet size and perimeter are unchanged; the sheets "
+                "are planned for the recomposed artwork.", fits=[{k: op[k] for k in ("source_box_px", "scale",
+                "offset_px", "background", "mode")} for op in artwork["composition_ops"]]))
     frame = prepared["frame_color"] if prepared["has_frame"] else None
     planning = replace(config.planning, frame_color=frame)
 
@@ -286,6 +294,8 @@ def propose(
         "intake_details": details,
         "detail_decisions": detail_decisions or {},
         "artwork_edits": artwork.get("provenance") if artwork is not None else None,
+        # Every fit between a fresh intake of the source and the planned target (re-applied on a re-plan).
+        "composition_ops": list(artwork.get("composition_ops") or []) if artwork is not None else [],
         "palette": [c["hex"] for c in m["colors"]],
         "frame_color": frame,
         "candidates": candidates,

@@ -519,3 +519,14 @@ button.primary.large, .button.large { padding: 9px 18px; min-height: 40px; font-
 .insp-row-title { flex: 1; }
 .sev-dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
 .insp-card .kv { margin: 6px 0; }
+/* Fit artwork to canvas (Artwork editor): before image | live, draggable after canvas */
+.art-fit { display: flex; flex-direction: column; gap: 8px; }
+.art-fit.closed { padding-top: 6px; padding-bottom: 6px; }
+.art-fit-stage { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.6fr); gap: 10px; align-items: start; }
+.art-fit-stage figure { margin: 0; }
+.art-fit-stage img, .art-fit-stage canvas { width: 100%; max-width: 520px; aspect-ratio: 1 / 1; display: block;
+  border: 1px solid var(--line); border-radius: 4px; image-rendering: pixelated; background: #fff; }
+.art-fit-stage canvas { touch-action: none; cursor: default; }
+.art-fit-before { position: relative; max-width: 520px; }
+.art-fit-stage img.art-fit-overlay { position: absolute; inset: 0; border-color: transparent; background: transparent; pointer-events: none; }
+

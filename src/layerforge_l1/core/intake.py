@@ -344,7 +344,8 @@ def detail_images(canvas: np.ndarray, default_rgb: np.ndarray, result_rgb: np.nd
 
 
 def use_edited_target(prepared: dict[str, Any], edited: np.ndarray, config: IntakeConfig = IntakeConfig(),
-                      edited_frame: str | None = None) -> dict[str, Any]:
+                      edited_frame: str | None = None,
+                      composition_ops: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     """Replace ``prepared``'s target by a user-edited version of it (artwork recolor) and re-measure.
 
     The edit may only change artwork pixels to exact colors other than the frame: the shape and the
@@ -354,6 +355,11 @@ def use_edited_target(prepared: dict[str, Any], edited: np.ndarray, config: Inta
     padding is given this intake's frame color, provided it covers exactly the same pixels.
     Color measurements (palette, areas, regions, thin features, near duplicates) are recomputed
     for the edited target; source-fidelity measurements (snap/flatness) still describe intake.
+
+    ``composition_ops`` are the artwork's ``fit_composition`` edits (``core/artwork.py``), in order.
+    They move the subject inside the artwork aperture, so the frame padding may differ from this
+    intake's: the edited artwork's own frame pixels then define the frame (same grid, same aperture),
+    and the intake's spatial evidence (unmatched-region map, detail boxes) is moved the same way.
     """
 
     target, inside = prepared["target_rgb"], prepared["artwork_mask"]
@@ -362,14 +368,39 @@ def use_edited_target(prepared: dict[str, Any], edited: np.ndarray, config: Inta
         raise StackError(f"the edited artwork is {edited.shape[:2]} px, intake produced {target.shape[:2]} px; "
                          "settings changed since it was edited")
     frame = np.asarray(_parse_hex(prepared["frame_color"]), np.uint8)
-    if edited_frame and edited_frame.upper() != prepared["frame_color"].upper() and (~inside).any():
+    moved: dict[str, Any] = {}
+    if composition_ops:
+        from .artwork import remap, remap_box
+
+        own = np.asarray(_parse_hex(edited_frame or prepared["frame_color"]), np.uint8)
+        padding = np.all(edited == own, axis=2)
+        if not np.array_equal(own, frame):
+            if np.all(edited == frame, axis=2).any():
+                raise StackError(f"the edited artwork uses {prepared['frame_color']}, this intake's frame color")
+            edited[padding] = frame
+        inside = ~padding
+        unmatched, details = prepared["unmatched_mask"], [dict(d) for d in prepared["details"]]
+        for op in composition_ops:
+            unmatched = remap(unmatched, op, False)
+            for detail in details:
+                if detail.get("bbox_px") is not None:
+                    detail["bbox_px"] = remap_box(detail["bbox_px"], op, unmatched.shape)
+        kept = [d for d in details if d.get("bbox_px") is not None]
+        moved = {"artwork_mask": inside, "has_frame": bool(padding.any()), "unmatched_mask": unmatched & inside,
+                 "details": kept}
+        m_extra = {"recomposed_by_artwork_edits": len(composition_ops),
+                   "details_outside_composition": len(details) - len(kept)}
+    elif edited_frame and edited_frame.upper() != prepared["frame_color"].upper() and (~inside).any():
         padding = np.all(edited == np.asarray(_parse_hex(edited_frame), np.uint8), axis=2)
         if not np.array_equal(padding, ~inside):
             raise StackError("the edited artwork's frame padding does not cover the same pixels as this intake's")
         edited[padding] = frame
-    if not np.array_equal(edited[~inside], target[~inside]) or np.all(edited[inside] == frame, axis=1).any():
+    if not composition_ops and (not np.array_equal(edited[~inside], target[~inside])
+                                or np.all(edited[inside] == frame, axis=1).any()):
         raise StackError("the edited artwork changes the frame padding or uses the frame color inside the artwork")
     m = dict(prepared["measurements"])
+    if composition_ops:
+        m.update(m_extra)
     mm_per_pixel, width_px = m["artwork_mm_per_pixel"], m["structural_width_px"]
     colors_rgb, counts = np.unique(edited[inside].reshape(-1, 3), axis=0, return_counts=True)
     order = {c["hex"]: i for i, c in enumerate(m["colors"])}
@@ -392,7 +423,7 @@ def use_edited_target(prepared: dict[str, Any], edited: np.ndarray, config: Inta
              min_palette_delta=round(float(distances.min()), 2) if len(rows) > 1 else None,
              nearest_palette_pairs=[[rows[i]["hex"], rows[j]["hex"], round(float(distances[i, j]), 2)]
                                     for i, j in zip(*np.nonzero(np.triu(distances < config.near_duplicate_delta)))])
-    return {**prepared, "target_rgb": edited, "intake_target_rgb": target, "measurements": m,
+    return {**prepared, **moved, "target_rgb": edited, "intake_target_rgb": target, "measurements": m,
             "palette": np.array([_parse_hex(r["hex"]) for r in rows], np.uint8)}
 
 

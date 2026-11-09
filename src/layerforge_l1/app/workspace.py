@@ -749,6 +749,7 @@ class Workspace:
                              ProposalConfig(planning=planning), progress, saved["decisions"] or None,
                              artwork=None if edited is None else {
                                  "target_rgb": edited["target_rgb"], "frame_color": edited["frame_color"],
+                                 "composition_ops": edited["composition_ops"],
                                  "provenance": {**edited["provenance"], "carried_by": "physical_resize",
                                                 "sheet_mm": saved["to_mm"]}})
         except StackError as error:
@@ -1143,6 +1144,7 @@ class Workspace:
         if log and log["edits"]:
             out = {"pending": True, "sha256": log["current_sha256"], "region_recolors": len(log["edits"]),
                    "frame_color": log["base"]["frame_color"], "log_dir": directory,
+                   "composition_ops": self._composition_chain(proposal, log),
                    "provenance": {"region_recolors": len(log["edits"]), "base_sha256": log["base"]["sha256"],
                                   "base_origin": log["base"]["origin"], "artwork_sha256": log["current_sha256"],
                                   "log": "artwork_edits/edits.json"}}
@@ -1158,6 +1160,7 @@ class Workspace:
         origin = ctx["origin"]
         out = {"pending": False, "sha256": origin["sha256"], "region_recolors": planned["region_recolors"],
                "frame_color": proposal["frame_color"], "log_dir": path / "proposal" / "artwork_edits",
+               "composition_ops": list(proposal.get("composition_ops") or []),
                "provenance": {**{k: v for k, v in planned.items() if k not in ("carried_by", "sheet_mm")},
                               "artwork_sha256": origin["sha256"], "log": "artwork_edits/edits.json"}}
         if load:
@@ -1326,6 +1329,93 @@ class Workspace:
                           if selection["regions"] > 1 else "One region changes; nothing else in the artwork.",
                           "The sheet count is known only after planning; fewer colors do not guarantee fewer sheets."]}
 
+    @staticmethod
+    def _composition_chain(proposal: dict[str, Any], log: dict[str, Any] | None) -> list[dict[str, Any]]:
+        """Every fit between a fresh intake of the source and the artwork of ``log``: the fits the current
+        proposal was already planned with (its artwork is the log's base), then the log's own fits."""
+
+        from ..core import artwork as art
+
+        return list(proposal.get("composition_ops") or []) + art.composition_ops(log)
+
+    def artwork_fit(self, name: str, request: Any) -> dict[str, Any]:
+        """Fit Artwork to Canvas: find the subject, propose (or check a manual) fit and preview it.
+
+        ``{"margin": 0.08, "anchor_cut_edges": false}`` gives the automatic fit when it can be made
+        without guessing; ``{"manual": {"source_box_px", "scale", "offset_px", "background"}}`` previews a
+        manual framing.  Nothing is saved except preview images; the returned ``op`` is added to the
+        working session like any other artwork edit (``session/add``)."""
+
+        import numpy as np
+
+        from ..core import artwork as art
+
+        request = request if isinstance(request, dict) else {}
+        try:
+            margin = float(request.get("margin", art.FIT_MARGIN))
+        except (TypeError, ValueError):
+            raise AppError("the margin must be a number (a fraction such as 0.08)") from None
+        manual = request.get("manual")
+        if manual is not None and not isinstance(manual, dict):
+            raise AppError("manual must be {source_box_px, scale, offset_px, background}")
+        with self._artwork_lock:
+            directory, log, ctx = self._artwork_log(name, create=True)
+            image, sha = self._working(directory, log)
+            frame, mpp = log["base"]["frame_color"], log["base"]["mm_per_pixel"]
+            out = directory / "preview"
+            shutil.rmtree(out, ignore_errors=True)
+            out.mkdir(parents=True)
+            try:
+                analysis = art.analyse_composition(image, frame, mpp, margin, bool(request.get("anchor_cut_edges")))
+                op = (art.check_op({**manual, "op": "fit_composition", "mode": "manual", "margin": None,
+                                    "accept_clipping": manual.get("accept_clipping") is True})
+                      if manual else analysis["op"])
+                result: dict[str, Any] = {"analysis": analysis, "op": op, "frame_color": frame, "mm_per_pixel": mpp}
+                if op is None:
+                    return {**result, "can_apply": False, "images": {}}
+                after, _, selection, change = art.plan_edit(image, op, frame, mpp)
+            except art.ArtworkError as error:
+                raise AppError(str(error)) from None
+            pid = art.preview_id(sha, op)
+            art.save_rgb(after, out / "after.png")
+            art.save_rgb(art.fit_preview(image, after, op, change), out / "before_after.png")
+            # Exactly the source pixels this framing would push off the canvas, in red (same mapping as the edit).
+            _, clipped_mask = art.subject_loss(image, frame, op)
+            overlay = np.zeros((*clipped_mask.shape, 4), np.uint8)
+            overlay[clipped_mask] = (255, 0, 0, 230)
+            Image.fromarray(overlay, "RGBA").save(out / "clipped.png")
+            clipped, skipped = change["subject_clipped_px"], change["subject_skipped_px"]
+            warnings, notes = [], []
+            if change["foreground_outside_box_px"]:
+                warnings.append(f"{change['foreground_outside_box_px']} subject pixels are outside the box and are not kept.")
+            if clipped:
+                warnings.append(f"{clipped} subject pixels would be cut off past the {' and '.join(change['clipped_edges'])} "
+                                "edge of the canvas (red). " + ("You approved this loss." if op.get("accept_clipping")
+                                                                 else "Move or shrink the subject, or approve the loss."))
+            if op["scale"] < 1:
+                warnings.append(f"Scale {op['scale'] * 100:.1f} % is below 100 %: {skipped} subject pixels are skipped by the "
+                                "reduction (thin lines can vanish). They are inside the canvas, not cut off.")
+            if change["subject_regions_changed"]:
+                warnings.append("Region counts of some colors change: " + ", ".join(
+                    f"{h} {a} -> {b}" for h, (a, b) in change["subject_regions_changed"].items()))
+            if change["colors_added"] or change["colors_removed"]:
+                warnings.append(f"Palette change: added {change['colors_added']}, removed {change['colors_removed']}.")
+            if change["source_cropped_edges"]:
+                notes.append("Already cut off in the original image at the " + " and ".join(
+                    f"{e} edge ({n} px)" for e, n in change["source_cropped_edges"].items()) + "; not caused by this fit.")
+            clipping = {"new_clipped_px": clipped, "new_clipped_source_px": change["subject_clipped_source_px"],
+                        "clipped_edges": change["clipped_edges"], "source_cropped_edges": change["source_cropped_edges"],
+                        "skipped_px": skipped, "scale": op["scale"], "transformed_box_px": change["transformed_box_px"],
+                        "needs_approval": bool(clipped) and not op.get("accept_clipping"),
+                        "approved": bool(clipped) and bool(op.get("accept_clipping"))}
+            return {**result, "can_apply": not clipping["needs_approval"], "preview_id": pid, "change": change,
+                    "selection": selection, "clipping": clipping,
+                    "palette_after": art.palette_summary(after, frame, mpp), "warnings": warnings,
+                    "notes": notes + ["Artwork edit only: the uploaded image, the sheet size and the shared perimeter do not "
+                              "change, and the current sheets are not scaled; plan sheets from this artwork afterwards.",
+                              "Nearest-neighbour scaling: every pixel is a copy of an existing one, so no new color appears."],
+                    "images": {k: self.url(name, f"artwork/preview/{k}.png", pid) for k in ("after", "before_after", "clipped")}}
+
     def artwork_sample(self, name: str, at_px: Any) -> dict[str, Any]:
         """Eyedropper: the exact artwork color at a point."""
 
@@ -1493,7 +1583,9 @@ class Workspace:
         try:
             result = propose(path / record["source"]["file"], staging, IntakeConfig(max_colors=s["max_colors"]),
                              ProposalConfig(planning=planning), progress, record.get("detail_decisions") or None,
-                             artwork={"target_rgb": edited, "provenance": provenance} if edits else None)
+                             artwork={"target_rgb": edited, "provenance": provenance,
+                                      "frame_color": log["base"]["frame_color"],
+                                      "composition_ops": self._composition_chain(proposal, log)} if edits else None)
         except StackError as error:
             shutil.rmtree(staging, ignore_errors=True)
             raise AppError(f"could not plan from the edited artwork: {error}") from None

@@ -996,6 +996,56 @@ follow the light-blue body). Not user approved; no CAD exported.
   Rebuilt dist\LayerForge\LayerForge.exe and dist\LayerForge-0.1.0-win64.zip (2026-11-03 20:00, SHA-256
   3c8fa022f8be10a10a0c887b31a2c06c0b3b722b9889bb588123437b08662bb3; static files byte-identical to src).
   Packaged tests NOT run (user: rebuild only, no tests).
+- 2026-11-04 Fit Artwork to Canvas (D-V3-040). State: READY_FOR_USER_TEST. Not committed.
+  Artwork editor card "Fit artwork to canvas": detects the subject (background = color covering >= 90 % of the
+  artwork's outer border; frame for transparent outlines; else ambiguous -> manual only), proposes the largest
+  single-factor fit with an 8 % margin (configurable), centred; manual scale / top / left / Centre / Largest /
+  background / "Use the Box selection"; server-rendered before | after preview; Apply = one unsaved artwork edit
+  (`fit_composition`, nearest-neighbour, no new colors), Save Changes, then the explicit Plan sheets from this
+  artwork. Re-planning passes the fits to intake (`use_edited_target(..., composition_ops)`), recorded in
+  proposal.json as `composition_ops`; flag ARTWORK_RECOMPOSED. Planner and validators unchanged.
+  Dog (scratch copy of Oscariko.jpeg, scale 2, 225 mm, defaults; the user's project only read): subject measured
+  71.9 % x 52.3 % of the 200 mm aperture (96 % x 52 % of the portrait artwork area; the task's 64 % x 47 % was not
+  reproduced), background #879E9F (97.4 % of the border), 1 piece, touches the left edge (cut-off paw). Auto fit
+  116.9 %: 143.8 x 104.7 mm -> 168.0 x 122.3 mm, centred (dest rows 199-825, cols 82-942 of 1024), palette 7 -> 7,
+  region counts per color unchanged, frame strips -> background. Anchored option: 128 %, 184.0 x 134.0 mm.
+  Re-plan 101.5 s: PROPOSAL_READY_FOR_REVIEW, both candidates VALID (9 sheets), planned target == fitted artwork,
+  validation PASS 0 px, CAD revalidation PASS (0 px, single solids, watertight), outer sheet 225 mm unchanged,
+  source unchanged. Evidence: artifacts/artwork_fit_v1/ (dog_evaluation.json, screenshots).
+  Tests: tests/test_artwork_fit.py 10 PASS (incl. browser drive tests/e2e/drive_fit.mjs); artwork paint/session/
+  recolor + refinement + l1_propose 60 PASS. NOT RUN: issue inspector, physical resize, upscale, test_l4_app (the
+  run was stopped by Claude Code for low system memory before any result). Exe/zip NOT rebuilt (low memory).
+  Exe rebuilt with Fit Artwork to Canvas (user request): dist\LayerForge\LayerForge.exe (2026-11-04 18:19) and
+  dist\LayerForge-0.1.0-win64.zip (18:20, SHA-256 26b1a0a86bf099b50c797b441549bb27dcdd85e363641b2abffdb0c274208790);
+  bundled app.js/app.css/index.html byte-identical to src. Packaged tests NOT run (1.4 GB free memory).
+- 2026-11-04 Fit card simplified to mouse-only framing (user instruction). State: READY_FOR_USER_TEST. Not committed.
+  Only Before | live After canvas, Fit automatically, Apply fit; drag to move, bottom-left handle to resize (aspect
+  locked), clamped to the aperture. app.js/app.css only; core unchanged. tests/test_artwork_fit.py 10 PASS (browser
+  drive: move by exactly the drag, grow and shrink with the top-right corner fixed and aspect within 0.02, clamped
+  at the edges with no cut pixels, Fit automatically restores the detected op, Apply logs exactly the previewed
+  op, nothing planned). Other suites not re-run for this UI-only change.
+  Exe rebuild for this change FAILED: LayerForge.exe was running (PID 5108), so PyInstaller could not replace
+  dist\LayerForge (Access is denied). dist\ still holds the 18:19 build (zip SHA-256 26b1a0a8...), without the
+  simplified card. Rebuild after closing the app.
+  Rebuilt after the app was closed: dist\LayerForge\LayerForge.exe (2026-11-04 19:23) and
+  dist\LayerForge-0.1.0-win64.zip (19:24, SHA-256 31cac85904c505a2a18040886f4f9e4b69544c0371720309ad9b028113ce1f43);
+  bundled static files byte-identical to src (mouse-only Fit card included). Packaged tests not run.
+- 2026-11-04 Fit clipping warnings fixed (user report: 36,904 "outside the canvas" with the subject inside).
+  State: READY_FOR_USER_TEST. Not committed. Root cause and design in DECISIONS.md. Changed: core/artwork.py
+  (subject_loss, accept_clipping, refusal of unapproved clipping on new edits), app/workspace.py (warnings,
+  clipping report, clipped.png overlay, can_apply), app/static/app.js + app.css (no stale warnings, red overlay,
+  approval button), tests/test_artwork_fit.py (+4 tests, browser assertions), tests/e2e/drive_fit.mjs.
+  Planner and validators unchanged. Dog (scratch copy): auto fit 0 clipped; 90 % inside 0 clipped / 47,874 skipped
+  (old code: 47,874 "outside the canvas"); exact edge contact 0; 178 px past the right edge 33,959 clipped (24,740
+  source px red), Apply refused until approved. Evidence: artifacts/artwork_fit_v2/.
+  Tests: tests/test_artwork_fit.py 14 PASS (13 in the suite run + the browser test after a driver fix: drags now
+  snap to whole CSS pixels and the move is asserted exactly against the delivered canvas displacement; it had
+  failed by 1 px because the browser rounds fractional mouse coordinates). artwork_session 7, artwork_recolor 16,
+  artwork_paint 21 PASS. NOT RUN: test_l4_app, issue inspector, resize, upscale, packaged tests.
+  Exe/zip NOT rebuilt: LayerForge.exe is running (PID 2756); dist\ still holds the 19:23 build without this fix.
+  Rebuilt with the clipping fix (user request): dist\LayerForge\LayerForge.exe (2026-11-04 23:06) and
+  dist\LayerForge-0.1.0-win64.zip (23:07, SHA-256 4d4ebd54ee7160a490f03b427a832a0a96291d454cf4b3918ec7751770055bd9);
+  bundled static files byte-identical to src. Packaged tests (tests/test_windows_build.py, one per process): 9 PASS.
 
 - 2026-11-06 — Performance audit (diagnosis only, no code changed). Evidence and scripts: artifacts/perf_audit_v1/.
   Dog, clean runs: packaged exe proposal 1048 s (planning 4 candidates 611 s, CAD 402 s); print kit 516 s

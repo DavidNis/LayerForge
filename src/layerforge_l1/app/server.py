@@ -12,6 +12,7 @@ and return a job id at once; the page polls ``/api/jobs/<id>`` for progress.
     POST /api/projects/<p>/propose              re-run the L1 proposal (before a review exists)
     POST /api/projects/<p>/artwork/preview      {"at_px", "box_px"?, "color"?, "source"?} -> region / recolor preview
     POST /api/projects/<p>/artwork/sample       {"at_px"} -> eyedropper color
+    POST /api/projects/<p>/artwork/fit          {"margin"?, "anchor_cut_edges"?, "manual"?} -> Fit Artwork to Canvas preview
     POST /api/projects/<p>/artwork/apply        {"op", "preview_id"} -> one artwork recolor, saved
     POST /api/projects/<p>/artwork/undo         {} or {"keep": n} -> undo last / revert artwork edits
     POST /api/projects/<p>/artwork/verify       replay the artwork edit log from its base
@@ -279,7 +280,7 @@ class Handler(BaseHTTPRequestHandler):
             args = (body.get("factor"), body.get("preview_id"), body.get("approve_changes"))
             ws.check_upscale_retry(name, *args)  # stale preview, missing approval or memory: refused now
             job = app.submit("upscale_retry", name, partial(ws.upscale_retry, name, *args))
-        elif action == "artwork" and len(parts) == 5 and parts[4] in ("preview", "sample", "apply", "undo", "verify"):
+        elif action == "artwork" and len(parts) == 5 and parts[4] in ("preview", "sample", "apply", "undo", "verify", "fit"):
             active = app.jobs.active(name)
             if active is not None:  # a running job reads or replaces the artwork
                 raise JobConflict(f"'{active.kind}' is still {active.status} for this project; edit the artwork when it has finished")
@@ -287,6 +288,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(ws.artwork_preview(name, body))
             elif parts[4] == "sample":
                 self._json(ws.artwork_sample(name, body.get("at_px")))
+            elif parts[4] == "fit":
+                self._json(ws.artwork_fit(name, body))
             elif parts[4] == "apply":
                 self._json(ws.artwork_apply(name, body.get("op"), body.get("preview_id")))
             elif parts[4] == "undo":

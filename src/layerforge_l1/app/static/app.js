@@ -42,6 +42,7 @@ const ui = {
   strokeCheck: null,    // {key, result | error | pending}: dry run of the pending connector
   planLater: false,     // import: stop after intake so artwork colors can be edited before planning
   art: freshArt(),      // artwork recolor panel (flat-color target, not a sheet)
+  fit: freshFit(),      // Fit artwork to canvas card (inside the Artwork editor)
   insp: freshInsp(),    // issue inspector: selection, filters, view and zoom
   issues: null,         // /issues of the current state (null: to be loaded)
   issuesLoading: false,
@@ -218,7 +219,7 @@ function afterJob(job) {
     ui.inspPendingEdit = null;
     if (pending && ui.state.draft) setTimeout(() => inspEditLayer(pending), 0);
   }
-  if (job.kind === "artwork_replan") { setTab("proposal"); ui.art = freshArt(); }
+  if (job.kind === "artwork_replan") { setTab("proposal"); ui.art = freshArt(); ui.fit = freshFit(); }
   if (job.kind === "kit") { setTab("kit"); ui.kitBuildOpen = false; }
   if (job.kind === "printability") setTab("printability");
 }
@@ -269,6 +270,7 @@ async function route() {
     ui.sheet = null;
     ui.job = null;
     ui.art = freshArt();
+    ui.fit = freshFit();
     ui.insp = freshInsp();
     ui.issues = null;
     ui.editView = { zoom: null, pan: [0, 0], panning: null };
@@ -325,6 +327,7 @@ function render() {
     drawOverlay();
   }
   bindArtwork();
+  bindFit();
   bindInspector();
   restoreArtFocus(focusKey);
 }
@@ -962,6 +965,7 @@ function artOpLabel(op) {
   if (op.op === "close_gap") return `Close gap ${w}${op.path === "cubic" ? " (curved)" : ""}`;
   if (op.op === "paint_stroke") return op.clip_regions ? `Brush ${w} in ${op.clip_regions.length} region(s)` : `${op.path === "cubic" ? "Curve" : "Line"} ${w}`;
   if (op.op === "recolor_regions") return `Recolor ${op.regions.length} region${op.regions.length === 1 ? "" : "s"}`;
+  if (op.op === "fit_composition") return `Fit artwork to canvas ${+(op.scale * 100).toFixed(1)} %${op.mode === "manual" ? " (manual)" : ""}`;
   return "Fill";
 }
 
@@ -1045,6 +1049,277 @@ function artworkSelectionCard(sel, s) {
 }
 
 const brushNote = (s) => (s.mode === "brush" ? '<p class="small" data-testid="art-brush-note" style="margin:0">The brush paints only inside the selected region(s); nothing outside changes.</p>' : "");
+
+// -- Fit artwork to canvas: enlarge and centre the subject inside the same artwork aperture -----------
+// Mouse only: drag the framed subject to move it, drag the bottom-left handle to enlarge or shrink it
+// (aspect ratio locked; the opposite top-right corner stays put). The canvas preview is redrawn live
+// from the artwork's own pixels (no smoothing); on release the server checks the framing and returns the
+// exact edit. The subject always stays inside the artwork aperture. "Fit automatically" restores the
+// detected fit; "Apply fit" adds it to the working session like every artwork edit (Save Changes, then
+// Plan sheets from this artwork); the sheet size and perimeter never change.
+function freshFit() {
+  return { open: false, result: null, manual: null, drag: null, loading: false, error: null, seq: 0, acceptLoss: false };
+}
+const fitSize = (n, s) => Math.max(1, Math.floor(n * s + 1e-9));
+const FIT_MIN_PX = 8;  // the subject never shrinks below this many artwork pixels on its shorter side
+const FIT_HANDLE_CSS = 14;  // handle size on screen (CSS px)
+const FIT_STATUS = {
+  READY: ["ok", "Subject found"],
+  ALREADY_FITTED: ["neutral", "Already fills the canvas"],
+  AMBIGUOUS_BACKGROUND: ["warn", "Background unclear: choose it, then drag the subject"],
+  MULTIPLE_FOREGROUND_REGIONS: ["warn", "Several separate pieces: all are kept together"],
+  NO_FOREGROUND: ["warn", "No subject found"],
+};
+const fitImages = {};  // artwork image URL -> loaded Image (pixels drawn into the live preview)
+
+function fitImage(url) {
+  if (!url) return null;
+  if (!fitImages[url]) {
+    const img = new Image();
+    img.onload = () => drawFitCanvas();
+    img.src = url;
+    fitImages[url] = img;
+  }
+  return fitImages[url].complete && fitImages[url].naturalWidth ? fitImages[url] : null;
+}
+
+// Keep the scaled subject inside the canvas: the scale cannot exceed the canvas, the box cannot leave it.
+function fitClamp(m, ap) {
+  const [r0, c0, r1, c1] = m.source_box_px;
+  const bh = r1 - r0, bw = c1 - c0;
+  const most = Math.floor(Math.min(ap[0] / bh, ap[1] / bw) * 1e6) / 1e6;
+  const least = Math.max(0.05, FIT_MIN_PX / Math.min(bh, bw));
+  m.scale = Math.min(most, Math.max(least, m.scale));
+  const sh = fitSize(bh, m.scale), sw = fitSize(bw, m.scale);
+  m.offset_px = [Math.min(ap[0] - sh, Math.max(0, Math.round(m.offset_px[0]))), Math.min(ap[1] - sw, Math.max(0, Math.round(m.offset_px[1])))];
+  return m;
+}
+
+async function fitPreview(manual = null) {
+  const f = ui.fit;
+  const seq = ++f.seq;
+  f.loading = true;
+  f.error = null;
+  render();  // warnings of the previous framing are hidden until this one is checked
+  try {
+    const r = await artworkCall("fit", manual ? { manual } : {});
+    if (seq !== f.seq) return;  // a newer drag already asked again
+    f.result = r;
+    if (!manual) {
+      const start = r.op || r.analysis.manual;
+      f.manual = start ? { source_box_px: start.source_box_px, scale: start.scale ?? 1,
+                           offset_px: start.offset_px ?? start.source_box_px.slice(0, 2), background: start.background } : null;
+      if (f.manual && !r.op) fitClamp(f.manual, r.analysis.aperture_px);
+    }
+  } catch (err) {
+    if (seq !== f.seq) return;
+    f.error = err.message || String(err);
+  }
+  f.loading = false;
+  render();
+}
+
+// The framing the user dragged, checked by the server (exact pixels, the edit to apply).
+function fitCommit() {
+  const m = ui.fit.manual;
+  if (!m || !m.background) { render(); return; }
+  return fitPreview({ source_box_px: m.source_box_px, scale: m.scale, offset_px: m.offset_px, background: m.background,
+                      accept_clipping: ui.fit.acceptLoss });
+}
+
+const fitSynced = () => {
+  const { manual: m, result: r } = ui.fit;
+  return Boolean(m && r?.op && r.op.scale === m.scale && r.op.offset_px[0] === m.offset_px[0] && r.op.offset_px[1] === m.offset_px[1]
+    && r.op.background === m.background && r.op.source_box_px.every((v, i) => v === m.source_box_px[i])
+    && Boolean(r.op.accept_clipping) === Boolean(ui.fit.acceptLoss));
+};
+// The server's clipping report, only when it describes the framing on screen (never a stale one).
+const fitClip = () => (ui.fit.drag || ui.fit.loading || !fitSynced() ? null : ui.fit.result.clipping || null);
+
+async function fitApply() {
+  if (!fitSynced()) await fitCommit();
+  const r = ui.fit.result;
+  if (!r?.can_apply || !r.op || !fitSynced()) return;
+  if (!(await finalizeShape())) return;
+  if (await artworkAdd(r.op)) {
+    ui.fit = freshFit();
+    render();
+  }
+}
+
+// Where the scaled subject is, in canvas (artwork) pixels.
+function fitRect(m) {
+  const [r0, c0, r1, c1] = m.source_box_px;
+  return { x: m.offset_px[1], y: m.offset_px[0], w: fitSize(c1 - c0, m.scale), h: fitSize(r1 - r0, m.scale) };
+}
+
+function drawFitCanvas() {
+  const canvas = $("#fit-canvas");
+  const f = ui.fit;
+  if (!canvas || !f.manual) return;
+  const ctx = canvas.getContext("2d");
+  const ap = f.result.analysis.aperture_px;
+  const m = f.manual;
+  // The framing shown and the edit the server checked, readable from the page (tests, accessibility tools).
+  const clip = fitClip();
+  Object.assign(canvas.dataset, { manual: JSON.stringify(m), op: JSON.stringify(f.result.op || null), aperture: JSON.stringify(ap),
+                                  loading: f.loading ? "1" : "0", stale: clip ? "0" : "1", clipping: JSON.stringify(clip) });
+  const fill = m.background === "frame" ? f.result.frame_color : m.background;
+  ctx.imageSmoothingEnabled = false;
+  ctx.fillStyle = fill || "#d9dde3";
+  ctx.fillRect(0, 0, ap[1], ap[0]);
+  const img = fitImage(ui.state.artwork?.image);
+  const [r0, c0, r1, c1] = m.source_box_px;
+  const r = fitRect(m);
+  if (img) ctx.drawImage(img, c0, r0, c1 - c0, r1 - r0, r.x, r.y, r.w, r.h);
+  const px = ap[1] / canvas.getBoundingClientRect().width;  // canvas pixels per CSS pixel
+  ctx.lineWidth = 2 * px;
+  ctx.setLineDash([6 * px, 4 * px]);
+  ctx.strokeStyle = "#ff00ff";
+  ctx.strokeRect(r.x, r.y, r.w, r.h);
+  ctx.setLineDash([]);
+  const hs = FIT_HANDLE_CSS * px;
+  ctx.fillStyle = "#ffffff";
+  ctx.strokeStyle = "#1f2933";
+  ctx.fillRect(r.x - hs / 2, r.y + r.h - hs / 2, hs, hs);
+  ctx.strokeRect(r.x - hs / 2, r.y + r.h - hs / 2, hs, hs);
+  // Subject pushed past a canvas edge: that edge, along the subject, in red (the lost pixels are red on Before).
+  if (clip?.new_clipped_px) {
+    const band = 6 * px;
+    ctx.fillStyle = "rgba(255, 0, 0, 0.85)";
+    const x0 = Math.max(0, r.x), x1 = Math.min(ap[1], r.x + r.w), y0 = Math.max(0, r.y), y1 = Math.min(ap[0], r.y + r.h);
+    for (const e of clip.clipped_edges) {
+      if (e === "top") ctx.fillRect(x0, 0, x1 - x0, band);
+      if (e === "bottom") ctx.fillRect(x0, ap[0] - band, x1 - x0, band);
+      if (e === "left") ctx.fillRect(0, y0, band, y1 - y0);
+      if (e === "right") ctx.fillRect(ap[1] - band, y0, band, y1 - y0);
+    }
+  }
+}
+
+// A drag starts: the last check no longer describes the framing, so its warnings and Apply go away now.
+// Hidden in place (visibility), so nothing moves under the pointer while dragging.
+function fitMarkStale() {
+  document.querySelectorAll('[data-testid="art-fit-warning"], [data-testid="art-fit-clipped-overlay"], [data-testid="art-fit-source-cropped"]')
+    .forEach((n) => { n.style.visibility = "hidden"; });
+  const apply = $('[data-testid="art-fit-apply"]');
+  if (apply) apply.disabled = true;
+  const checking = $('[data-testid="art-fit-checking"]');
+  if (checking) checking.style.visibility = "visible";
+}
+
+function fitPoint(canvas, e) {
+  const b = canvas.getBoundingClientRect();
+  const ap = ui.fit.result.analysis.aperture_px;
+  return [((e.clientY - b.top) / b.height) * ap[0], ((e.clientX - b.left) / b.width) * ap[1]];
+}
+
+function bindFit() {
+  const canvas = $("#fit-canvas");
+  if (!canvas) return;
+  drawFitCanvas();
+  canvas.addEventListener("pointerdown", (e) => {
+    const f = ui.fit;
+    if (!f.manual || busy() || e.button !== 0) return;
+    const [y, x] = fitPoint(canvas, e);
+    const r = fitRect(f.manual);
+    const hs = (FIT_HANDLE_CSS * f.result.analysis.aperture_px[1]) / canvas.getBoundingClientRect().width;
+    const onHandle = Math.abs(x - r.x) <= hs && Math.abs(y - (r.y + r.h)) <= hs;
+    const inside = x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h;
+    if (!onHandle && !inside) return;
+    e.preventDefault();
+    canvas.setPointerCapture(e.pointerId);
+    f.drag = { kind: onHandle ? "resize" : "move", from: [y, x], scale: f.manual.scale, offset: f.manual.offset_px.slice(),
+               right: r.x + r.w, top: r.y };
+    f.acceptLoss = false;  // an approval covers only the loss it was given for
+    fitMarkStale();
+  });
+  canvas.addEventListener("pointermove", (e) => {
+    const f = ui.fit;
+    const d = f.drag;
+    const [y, x] = fitPoint(canvas, e);
+    if (!d) {
+      if (!f.manual) return;
+      const r = fitRect(f.manual);
+      const hs = (FIT_HANDLE_CSS * f.result.analysis.aperture_px[1]) / canvas.getBoundingClientRect().width;
+      canvas.style.cursor = Math.abs(x - r.x) <= hs && Math.abs(y - (r.y + r.h)) <= hs ? "nesw-resize"
+        : x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h ? "move" : "default";
+      return;
+    }
+    const m = f.manual;
+    const ap = f.result.analysis.aperture_px;
+    const [r0, c0, r1, c1] = m.source_box_px;
+    if (d.kind === "move") {
+      m.offset_px = [d.offset[0] + (y - d.from[0]), d.offset[1] + (x - d.from[1])];
+    } else {  // bottom-left handle: the top-right corner stays, one factor for both sides
+      const bh = r1 - r0, bw = c1 - c0;
+      const s = Math.max((d.right - x) / bw, (y - d.top) / bh);
+      const most = Math.min(d.right / bw, (ap[0] - d.top) / bh);  // the left and bottom edges stay inside
+      m.scale = Math.floor(Math.max(0.05, Math.min(most, s)) * 1e6) / 1e6;
+      m.offset_px = [d.top, d.right - fitSize(bw, m.scale)];
+    }
+    fitClamp(m, ap);
+    drawFitCanvas();
+  });
+  const end = () => {
+    if (!ui.fit.drag) return;
+    ui.fit.drag = null;
+    fitCommit();
+  };
+  canvas.addEventListener("pointerup", end);
+  canvas.addEventListener("pointercancel", end);
+}
+
+function fitCard() {
+  const f = ui.fit;
+  const off = busy() ? "disabled" : "";
+  if (!f.open) {
+    return `<div class="subpanel art-fit closed" data-testid="art-fit">
+      <div class="row"><button class="tool-btn" data-action="art-fit-open" data-testid="art-fit-open" ${off}>${ICON.fit}<span>Fit artwork to canvas</span></button>
+      ${infoTip("Enlarge and centre the subject inside the same artwork area. Drag it to move it; drag the bottom-left handle to resize it (proportions kept). Exact pixel copies, no new colors; the sheet size does not change, and sheets are planned only when you choose Plan sheets from this artwork.")}</div></div>`;
+  }
+  const r = f.result;
+  const an = r?.analysis;
+  const head = `<div class="art-selection-head"><strong>Fit artwork to canvas</strong>
+      <button class="art-clear" data-action="art-fit-close" data-testid="art-fit-close">${ICON.close}<span>Close</span></button></div>`;
+  if (!an) {
+    return `<div class="subpanel art-fit" data-testid="art-fit">${head}
+      <p class="small ${f.error ? "no" : "muted"}" style="margin:0" data-testid="art-fit-status">${f.error ? esc(f.error) : "Finding the subject…"}</p></div>`;
+  }
+  const [kind, label] = FIT_STATUS[an.status] || ["neutral", an.status];
+  const m = f.manual;
+  const needBackground = m && !m.background;
+  const palette = ui.state.artwork.palette || [];
+  const background = an.status === "AMBIGUOUS_BACKGROUND" && m ? `<div class="row small" data-testid="art-fit-background">Background
+      ${palette.map((c) => `<button class="art-swatch ${m.background === c.hex ? "chosen" : ""}" data-action="art-fit-bg" data-color="${esc(c.hex)}" aria-label="Background ${esc(c.hex)}"><span class="swatch-fill" style="background:${esc(c.hex)}"></span></button>`).join("")}</div>` : "";
+  const ap = an.aperture_px;
+  const before = ui.state.artwork?.image;
+  const clip = fitClip();
+  const overlay = clip?.new_clipped_px && r.images?.clipped
+    ? `<img class="art-fit-overlay" src="${esc(r.images.clipped)}" alt="pixels that would be cut off" data-testid="art-fit-clipped-overlay">` : "";
+  const stage = m ? `<div class="art-fit-stage">
+      <figure><div class="art-fit-before"><img src="${esc(before)}" alt="before" data-testid="art-fit-before">${overlay}</div>
+        <figcaption class="small muted">Before${overlay ? ' · <span class="no">red: would be cut off</span>' : ""}</figcaption></figure>
+      <figure><canvas id="fit-canvas" data-testid="fit-canvas" width="${ap[1]}" height="${ap[0]}" aria-label="Drag the subject to move it; drag the bottom-left handle to resize it"></canvas>
+        <figcaption class="small muted">After · drag to move · bottom-left handle to resize</figcaption></figure></div>` : "";
+  const warn = clip ? (r.warnings || []).map((w) => `<p class="small no" style="margin:0" data-testid="art-fit-warning">${esc(w)}</p>`).join("") : "";
+  const cropped = clip ? Object.entries(clip.source_cropped_edges || {}) : [];
+  const note = cropped.length ? `<p class="small muted" style="margin:0" data-testid="art-fit-source-cropped">Already cut off in the original image at the ${
+    cropped.map(([e, n]) => `${esc(e)} edge (${n} px)`).join(" and ")}; not caused by this fit.</p>` : "";
+  const checking = `<span class="small muted" data-testid="art-fit-checking" style="visibility:${f.loading || (r.op && !clip) ? "visible" : "hidden"}">Checking the framing…</span>`;
+  const approve = clip?.needs_approval || clip?.approved
+    ? `<button class="tool-btn" data-action="art-fit-accept" data-testid="art-fit-accept">${clip.approved ? "Loss approved: undo approval" : "Approve cutting off the red pixels"}</button>` : "";
+  const canApply = r.can_apply && clip && !busy() && !needBackground;
+  return `<div class="subpanel art-fit" data-testid="art-fit">${head}
+    <p class="small row" style="margin:0"><span data-testid="art-fit-status">${badge(kind, label)}</span>${checking}</p>
+    ${background}${stage}${warn}${note}
+    ${f.error ? `<p class="small no" style="margin:0">${esc(f.error)}</p>` : ""}
+    <div class="row">
+      <button class="tool-btn" data-action="art-fit-auto" data-testid="art-fit-auto" ${off}>Fit automatically</button>${approve}
+      <button class="primary small" data-action="art-fit-apply" data-testid="art-fit-apply" ${canApply ? "" : "disabled"}>${ICON.check}<span>Apply fit</span></button>
+    </div>
+  </div>`;
+}
 
 function artworkPanel() {
   const a = ui.state.artwork;
@@ -1162,6 +1437,7 @@ function artworkPanel() {
       <p class="small muted" style="margin:0">Edit the flat-color artwork: recolor and fill regions, draw lines and curves (they split regions), close contour gaps, paint inside a region. Sheets change only when you plan again. ${infoTip("The uploaded image is never changed and no sheet is edited here. Examples: unify two skin tones, change a necklace, or change one leg only with the Box tool.")}</p>
       ${banners}
       ${savebar}
+      ${fitCard()}
       <div class="grid2">
         <div class="stack" style="gap:8px">
           ${tools}
@@ -3435,6 +3711,12 @@ async function onClick(event) {
     case "art-undo": await artworkPost("undo", el.dataset.keep === undefined ? {} : { keep: Number(el.dataset.keep) }); break;
     case "art-verify": await artworkPost("verify", {}); break;
     case "art-replan": submit(`${project}/artwork/replan`, {}); break;
+    case "art-fit-open": ui.fit = { ...freshFit(), open: true }; await fitPreview(); break;
+    case "art-fit-close": ui.fit = freshFit(); render(); break;
+    case "art-fit-auto": ui.fit.acceptLoss = false; await fitPreview(); break;
+    case "art-fit-accept": ui.fit.acceptLoss = !ui.fit.acceptLoss; await fitCommit(); break;
+    case "art-fit-bg": if (ui.fit.manual) { ui.fit.manual.background = el.dataset.color; await fitCommit(); } break;
+    case "art-fit-apply": await fitApply(); break;
     case "toggle-kit-build": ui.kitBuildOpen = !ui.kitBuildOpen; render(); break;
     default: break;
   }

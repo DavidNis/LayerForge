@@ -38,8 +38,9 @@ ARTWORK_SCHEMA = "layerforge.artwork_edits"
 ARTWORK_VERSION = "1.0.0"
 COLOR_SOURCES = ("palette", "picker", "eyedropper")
 # Ops: recolor one region / several regions; paint a stroke (straight line, or freehand brush clipped to
-# selected regions); close a contour gap (a straight stroke between two snapped contour ends).
-OPS = ("recolor_region", "recolor_regions", "paint_stroke", "close_gap")
+# selected regions); close a contour gap (a straight stroke between two snapped contour ends); fit the
+# composition (enlarge and move the subject inside the artwork aperture, ``fit_composition``).
+OPS = ("recolor_region", "recolor_regions", "paint_stroke", "close_gap", "fit_composition")
 MAX_STROKE_POINTS = 4000
 GAP_SNAP_MM = 2.0
 # A stroke path: "line" (straight segments through the points) or "cubic" Bezier (start, control 1,
@@ -357,6 +358,8 @@ def check_op(op: Any) -> dict[str, Any]:
     kind = op.get("op") or ("recolor_regions" if "regions" in op else "recolor_region")
     if kind not in OPS:
         raise ArtworkError(f"an artwork edit needs op one of {', '.join(OPS)}")
+    if kind == "fit_composition":
+        return check_fit_op(op)
     source = op.get("source", "picker")
     if source not in COLOR_SOURCES:
         raise ArtworkError(f"source must be one of {', '.join(COLOR_SOURCES)}")
@@ -417,6 +420,8 @@ def plan_edit(image: np.ndarray, op: dict[str, Any], frame_hex: str | None,
               mm_per_pixel: float) -> tuple[np.ndarray, np.ndarray, dict[str, Any], dict[str, Any]]:
     """(after, mask, selection, change) of one checked op on ``image``; nothing is saved."""
 
+    if op["op"] == "fit_composition":
+        return plan_fit(image, op, frame_hex, mm_per_pixel)
     if op["source"] == "eyedropper":
         row, col = check_point(image, op["sampled_at_px"])
         sampled = hex_color(tuple(int(v) for v in image[row, col]))
@@ -478,6 +483,369 @@ def _stroke_selection(image: np.ndarray, op: dict[str, Any], frame_hex: str | No
         "clipped_to_regions": len(op.get("clip_regions") or []),
     }
     return mask, selection
+
+
+# -- composition: fit the subject to the artwork aperture -----------------------------------------
+# The artwork aperture is the whole square artwork grid; the sheet, its shared perimeter and the grid
+# are outside this edit and never change.  ``fit_composition`` keeps a source box of the current
+# artwork, scales it by ONE factor (aspect ratio kept, never stretched) with nearest-neighbour sampling
+# (every output pixel is a copy of one input pixel: no new color, no anti-aliasing) and places it at an
+# offset on a canvas filled with the background (a palette color, or the never-visible frame).  With a
+# factor >= 1 every input pixel of the box becomes a non-empty rectangular block, so the 4-connected
+# regions of each color inside the box keep their topology; below 1 pixels can drop out (reported).
+FIT_MARGIN = 0.08
+FIT_MARGIN_MAX = 0.4
+FIT_BACKGROUND_SHARE = 0.9   # a color covering this share of the artwork's outer border is the background
+FIT_SCALE_RANGE = (0.05, 32.0)
+FIT_MIN_GAIN = 1.0005        # an automatic fit must enlarge the subject at least this much
+FIT_STATUSES = ("READY", "ALREADY_FITTED", "AMBIGUOUS_BACKGROUND", "MULTIPLE_FOREGROUND_REGIONS", "NO_FOREGROUND")
+EDGES = ("top", "bottom", "left", "right")
+
+
+def _frame_mask(image: np.ndarray, frame_hex: str | None) -> np.ndarray:
+    return _color_mask(image, parse_hex(frame_hex)) if frame_hex else np.zeros(image.shape[:2], bool)
+
+
+def _bbox(mask: np.ndarray) -> list[int]:
+    rows, cols = np.nonzero(mask)
+    return [int(rows.min()), int(cols.min()), int(rows.max()) + 1, int(cols.max()) + 1]
+
+
+def detect_background(image: np.ndarray, frame_hex: str | None) -> dict[str, Any]:
+    """The artwork's background, or None when it is ambiguous.
+
+    The outer border of the artwork (its pixels on the image edge or next to the frame padding) is
+    examined.  When the artwork has an irregular outline (transparent source: the frame surrounds the
+    subject, so that border is the subject's outline), the never-visible frame is the background.
+    Otherwise a single color covering at least ``FIT_BACKGROUND_SHARE`` of the border is the background.
+    Anything else is ambiguous: no guess."""
+
+    frame = _frame_mask(image, frame_hex)
+    inside = ~frame
+    if not inside.any():
+        raise ArtworkError("the artwork has no pixels outside the frame")
+    pad = np.pad(inside, 1, constant_values=False)
+    border = inside & ~(pad[:-2, 1:-1] & pad[2:, 1:-1] & pad[1:-1, :-2] & pad[1:-1, 2:])
+    colors, counts = np.unique(image[border].reshape(-1, 3), axis=0, return_counts=True)
+    order = np.argsort(-counts, kind="stable")
+    top = [{"hex": hex_color(tuple(int(v) for v in colors[i])), "share": round(float(counts[i] / counts.sum()), 4)}
+           for i in order[:4]]
+    r0, c0, r1, c1 = _bbox(inside)
+    rectangular = int(inside.sum()) == (r1 - r0) * (c1 - c0)
+    out = {"border_pixels": int(border.sum()), "border_colors": top, "artwork_box_px": [r0, c0, r1, c1],
+           "artwork_is_rectangle": rectangular}
+    if frame.any() and not rectangular:  # its border is the subject's own outline, not a background
+        return {**out, "background": "frame", "kind": "frame", "share": None}
+    if top[0]["share"] >= FIT_BACKGROUND_SHARE:
+        return {**out, "background": top[0]["hex"], "kind": "color", "share": top[0]["share"]}
+    return {**out, "background": None, "kind": "ambiguous", "share": top[0]["share"]}
+
+
+def foreground_mask(image: np.ndarray, frame_hex: str | None, background: str) -> np.ndarray:
+    """Every artwork pixel that is not the background (and not the frame).  Background-colored pixels
+    inside the subject (e.g. eye whites of the background color) are kept by the box, not by this mask."""
+
+    inside = ~_frame_mask(image, frame_hex)
+    if background == "frame":
+        return inside
+    return inside & ~_color_mask(image, parse_hex(background))
+
+
+def scaled_size(n: int, scale: float) -> int:
+    return max(1, int(np.floor(n * scale + 1e-9)))
+
+
+def fit_placement(shape: tuple[int, int], box: list[int], margin: float,
+                  anchor: tuple[str, ...] = ()) -> tuple[float, list[int]]:
+    """The largest single scale factor that fits ``box`` inside the canvas minus ``margin`` (a fraction
+    of the canvas side, on each side) and the offset that centres it.  Sides in ``anchor`` get no
+    margin and the subject is placed against them (a subject cut off by the original image edge)."""
+
+    h, w = shape
+    bh, bw = box[2] - box[0], box[3] - box[1]
+    m = {"top": 0.0 if "top" in anchor else margin * h, "bottom": 0.0 if "bottom" in anchor else margin * h,
+         "left": 0.0 if "left" in anchor else margin * w, "right": 0.0 if "right" in anchor else margin * w}
+    avail_h, avail_w = h - m["top"] - m["bottom"], w - m["left"] - m["right"]
+    if avail_h <= 0 or avail_w <= 0:
+        raise ArtworkError("the margins leave no room for the artwork")
+    scale = float(np.floor(min(avail_w / bw, avail_h / bh) * 1e6) / 1e6)
+    sh, sw = scaled_size(bh, scale), scaled_size(bw, scale)
+
+    def place(size: int, room: int, low: str, high: str, m_low: float, avail: float) -> int:
+        if low in anchor and high not in anchor:
+            return 0
+        if high in anchor and low not in anchor:
+            return room - size
+        return int(round(m_low + (avail - size) / 2))
+
+    return scale, [place(sh, h, "top", "bottom", m["top"], avail_h), place(sw, w, "left", "right", m["left"], avail_w)]
+
+
+def _fit_op(box: list[int], scale: float, offset: list[int], background: str, mode: str,
+            margin: float | None, accept_clipping: bool = False) -> dict[str, Any]:
+    op = {"op": "fit_composition", "source_box_px": [int(v) for v in box], "scale": round(float(scale), 6),
+          "offset_px": [int(v) for v in offset], "background": background, "color": background, "source": "fit",
+          "mode": mode, "margin": None if margin is None else round(float(margin), 4)}
+    if accept_clipping:  # only present when the user approved visible loss (older ops are unchanged)
+        op["accept_clipping"] = True
+    return op
+
+
+def analyse_composition(image: np.ndarray, frame_hex: str | None, mm_per_pixel: float, margin: float = FIT_MARGIN,
+                        anchor_cut_edges: bool = False) -> dict[str, Any]:
+    """Where the subject is and the automatic fit, if one can be proposed without guessing.
+
+    ``status``: READY (``op`` is the automatic fit), ALREADY_FITTED (no enlargement possible with these
+    margins), AMBIGUOUS_BACKGROUND (no dominant background), MULTIPLE_FOREGROUND_REGIONS (separate
+    pieces: frame them manually), NO_FOREGROUND.  ``manual`` is a starting point for manual framing."""
+
+    if not (0.0 <= margin <= FIT_MARGIN_MAX):
+        raise ArtworkError(f"the margin must be between 0 and {int(FIT_MARGIN_MAX * 100)} %")
+    h, w = image.shape[:2]
+    bg = detect_background(image, frame_hex)
+    out: dict[str, Any] = {"aperture_px": [h, w], "aperture_mm": [round(h * mm_per_pixel, 2), round(w * mm_per_pixel, 2)],
+                           "background": bg, "margin": margin, "anchor_cut_edges": bool(anchor_cut_edges), "op": None}
+    art_box = bg["artwork_box_px"]
+    if bg["background"] is None:
+        out.update(status="AMBIGUOUS_BACKGROUND",
+                   reason="No single color covers the artwork's border, so the background cannot be told from the "
+                          "subject. Frame the subject manually: drag a Box around it and choose the background color.",
+                   manual={"source_box_px": art_box, "background": None})
+        return out
+    fg = foreground_mask(image, frame_hex, bg["background"])
+    if not fg.any():
+        out.update(status="NO_FOREGROUND", reason="every artwork pixel is the background color", manual=None)
+        return out
+    box = _bbox(fg)
+    labels, count = ndimage.label(fg, structure=np.ones((3, 3), bool))
+    sizes = np.bincount(labels.ravel())[1:]
+    pieces = [{"bbox_px": _bbox(labels == i + 1), "pixels": int(sizes[i])} for i in np.argsort(-sizes)[:12]]
+    touches = [e for e, hit in zip(EDGES, (box[0] == art_box[0], box[2] == art_box[2], box[1] == art_box[1],
+                                            box[3] == art_box[3])) if hit]
+    bh, bw = box[2] - box[0], box[3] - box[1]
+    out.update(foreground_box_px=box, foreground_px=int(fg.sum()), components=int(count), pieces=pieces,
+               foreground_share=[round(bh / h, 4), round(bw / w, 4)],
+               foreground_mm=[round(bh * mm_per_pixel, 2), round(bw * mm_per_pixel, 2)], touches_edges=touches)
+    scale, offset = fit_placement((h, w), box, margin, tuple(touches) if anchor_cut_edges else ())
+    out["manual"] = {"source_box_px": box, "background": bg["background"], "scale": scale, "offset_px": offset}
+    if count > 1:
+        out.update(status="MULTIPLE_FOREGROUND_REGIONS",
+                   reason=f"The subject is {count} separate pieces; which of them belong to the subject is not "
+                          "guessed. The box below covers all of them: check it (or drag a Box) and apply manually.")
+        return out
+    if scale < FIT_MIN_GAIN:
+        out.update(status="ALREADY_FITTED",
+                   reason="With these margins the subject cannot be enlarged; reduce the margin or frame manually.")
+        return out
+    out.update(status="READY", op=_fit_op(box, scale, offset, bg["background"], "auto", margin),
+               reason=None)
+    return out
+
+
+def check_fit_op(op: dict[str, Any]) -> dict[str, Any]:
+    try:
+        box = [int(v) for v in op.get("source_box_px") or []]
+        scale = float(op.get("scale"))
+        offset = [int(round(float(v))) for v in op.get("offset_px") or []]
+        margin = None if op.get("margin") is None else float(op["margin"])
+    except (TypeError, ValueError):
+        raise ArtworkError("a fit needs source_box_px [row0, col0, row1, col1], scale and offset_px [row, column]") from None
+    if len(box) != 4 or box[2] <= box[0] or box[3] <= box[1] or len(offset) != 2:
+        raise ArtworkError("a fit needs source_box_px [row0, col0, row1, col1] (end exclusive) and offset_px [row, column]")
+    if not (FIT_SCALE_RANGE[0] <= scale <= FIT_SCALE_RANGE[1]) or not np.isfinite(scale):
+        raise ArtworkError(f"the scale must be between {FIT_SCALE_RANGE[0]} and {FIT_SCALE_RANGE[1]}")
+    background = op.get("background")
+    if background != "frame":
+        background = "#%02X%02X%02X" % parse_hex(background)
+    mode = op.get("mode", "manual")
+    if mode not in ("auto", "manual"):
+        raise ArtworkError("mode must be auto or manual")
+    return _fit_op(box, scale, offset, background, mode, margin, op.get("accept_clipping") is True)
+
+
+def _full_mapping(op: dict[str, Any], shape: tuple[int, int]) -> tuple[np.ndarray, ...]:
+    """Every destination row / column of the scaled box (also those off the canvas), the source row /
+    column each one copies, and which of them land inside the canvas."""
+
+    r0, c0, r1, c1 = op["source_box_px"]
+    s = float(op["scale"])
+    oy, ox = op["offset_px"]
+    sh, sw = scaled_size(r1 - r0, s), scaled_size(c1 - c0, s)
+    dy, dx = np.arange(sh), np.arange(sw)
+    src_r = np.minimum(r0 + np.floor((dy + 0.5) / s).astype(np.int64), r1 - 1)
+    src_c = np.minimum(c0 + np.floor((dx + 0.5) / s).astype(np.int64), c1 - 1)
+    keep_r, keep_c = (oy + dy >= 0) & (oy + dy < shape[0]), (ox + dx >= 0) & (ox + dx < shape[1])
+    return oy + dy, ox + dx, src_r, src_c, keep_r, keep_c
+
+
+def _mapping(op: dict[str, Any], shape: tuple[int, int]) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Destination rows / columns inside the canvas and the source row / column each one copies."""
+
+    rows, cols, src_r, src_c, keep_r, keep_c = _full_mapping(op, shape)
+    return rows[keep_r], cols[keep_c], src_r[keep_r], src_c[keep_c]
+
+
+def subject_loss(image: np.ndarray, frame_hex: str | None, op: dict[str, Any]) -> tuple[dict[str, Any], np.ndarray]:
+    """What of the subject a fit loses, measured on the exact mapping ``compose`` uses.
+
+    Three different things, never mixed:
+    * new clipping: transformed subject pixels that land outside the canvas (``subject_clipped_px``;
+      ``subject_clipped_source_px`` source pixels vanish entirely).  Returned as a source-grid mask.
+    * downscale skipping: below 100 % nearest-neighbour sampling skips whole source rows / columns
+      (``subject_skipped_px``); they are inside the canvas, not clipped.
+    * cropped in the original: subject pixels on the artwork's own rectangular edge
+      (``source_cropped_edges``); the original image already cut the subject there, the fit did not."""
+
+    h, w = image.shape[:2]
+    r0, c0, r1, c1 = op["source_box_px"]
+    fg = foreground_mask(image, frame_hex, op["background"])
+    in_box = np.zeros_like(fg)
+    in_box[r0:r1, c0:c1] = fg[r0:r1, c0:c1]
+    rows, cols, src_r, src_c, keep_r, keep_c = _full_mapping(op, (h, w))
+    sampled_r, sampled_c, shown_r, shown_c = (np.zeros(n, bool) for n in (h, w, h, w))
+    sampled_r[src_r], sampled_c[src_c] = True, True
+    shown_r[src_r[keep_r]], shown_c[src_c[keep_c]] = True, True
+    sampled = np.outer(sampled_r, sampled_c)
+    clipped_mask = in_box & sampled & ~np.outer(shown_r, shown_c)
+    block = fg[np.ix_(src_r, src_c)]
+    cropped: dict[str, int] = {}
+    if op["background"] != "frame":  # a rectangular artwork: its edges are the original image's edges
+        a0, b0, a1, b1 = _bbox(~_frame_mask(image, frame_hex))
+        lines = {"top": in_box[a0, b0:b1], "bottom": in_box[a1 - 1, b0:b1], "left": in_box[a0:a1, b0], "right": in_box[a0:a1, b1 - 1]}
+        cropped = {e: int(v.sum()) for e, v in lines.items() if v.any()}
+    info = {"subject_px": int(in_box.sum()),
+            "foreground_outside_box_px": int(fg.sum() - in_box.sum()),
+            "subject_clipped_px": int(block.sum() - block[np.ix_(keep_r, keep_c)].sum()),
+            "subject_clipped_source_px": int(clipped_mask.sum()),
+            "subject_skipped_px": int((in_box & ~sampled).sum()),
+            "clipped_edges": [e for e, past in zip(EDGES, (block[rows < 0].any(), block[rows >= h].any(),
+                                                             block[:, cols < 0].any(), block[:, cols >= w].any())) if past],
+            "source_cropped_edges": cropped}
+    return info, clipped_mask
+
+
+def remap(array: np.ndarray, op: dict[str, Any], fill: Any) -> np.ndarray:
+    """``array`` (an image or a mask on the artwork grid) moved by the fit; outside the box: ``fill``."""
+
+    out = np.empty_like(array)
+    out[...] = fill
+    rows, cols, src_r, src_c = _mapping(op, array.shape[:2])
+    if rows.size and cols.size:
+        out[rows[0]:rows[-1] + 1, cols[0]:cols[-1] + 1] = array[np.ix_(src_r, src_c)]
+    return out
+
+
+def remap_box(box: list[int], op: dict[str, Any], shape: tuple[int, int]) -> list[int] | None:
+    """A [r0, c0, r1, c1] box after the fit (None when it ends up outside the canvas or the source box)."""
+
+    mask = np.zeros(shape, bool)
+    mask[box[0]:box[2], box[1]:box[3]] = True
+    moved = remap(mask, op, False)
+    return _bbox(moved) if moved.any() else None
+
+
+def compose(image: np.ndarray, frame_hex: str | None, op: dict[str, Any]) -> tuple[np.ndarray, dict[str, Any]]:
+    """The artwork after one checked fit, and what it kept, cut or left out."""
+
+    h, w = image.shape[:2]
+    r0, c0, r1, c1 = op["source_box_px"]
+    if r0 < 0 or c0 < 0 or r1 > h or c1 > w:
+        raise ArtworkError(f"the source box {op['source_box_px']} is outside the {h} x {w} artwork")
+    background = op["background"]
+    if background == "frame":
+        if not frame_hex:
+            raise ArtworkError("this artwork has no frame padding; choose a background color")
+        fill = np.asarray(parse_hex(frame_hex), np.uint8)
+    else:
+        if frame_hex and background.upper() == frame_hex.upper():
+            raise ArtworkError(f"{frame_hex} is the frame color; choose 'frame' as the background instead")
+        fill = np.asarray(parse_hex(background), np.uint8)
+    rows, cols, src_r, src_c = _mapping(op, (h, w))
+    if not (rows.size and cols.size):
+        raise ArtworkError("the scaled artwork does not reach the canvas; change the scale or position")
+    frame = _frame_mask(image, frame_hex)
+    block = image[np.ix_(src_r, src_c)].copy()
+    block[frame[np.ix_(src_r, src_c)]] = fill  # frame inside the box becomes background
+    after = np.empty_like(image)
+    after[:] = fill
+    after[rows[0]:rows[-1] + 1, cols[0]:cols[-1] + 1] = block
+    loss, _ = subject_loss(image, frame_hex, op)
+    oy, ox = op["offset_px"]
+    sh, sw = scaled_size(r1 - r0, float(op["scale"])), scaled_size(c1 - c0, float(op["scale"]))
+    info = {"dest_box_px": [int(rows[0]), int(cols[0]), int(rows[-1]) + 1, int(cols[-1]) + 1],
+            "scaled_size_px": [sh, sw], "transformed_box_px": [int(oy), int(ox), int(oy + sh), int(ox + sw)],
+            "accept_clipping": bool(op.get("accept_clipping")), **loss}
+    return after, info
+
+
+def _region_counts(image: np.ndarray, frame_hex: str | None) -> dict[str, int]:
+    inside = ~_frame_mask(image, frame_hex)
+    colors = np.unique(image[inside].reshape(-1, 3), axis=0)
+    return {hex_color(tuple(int(v) for v in c)): region_count(_color_mask(image, tuple(int(v) for v in c)) & inside)
+            for c in colors}
+
+
+def plan_fit(image: np.ndarray, op: dict[str, Any], frame_hex: str | None,
+             mm_per_pixel: float) -> tuple[np.ndarray, np.ndarray, dict[str, Any], dict[str, Any]]:
+    """(after, changed pixels, selection, change) of a fit, in the form every artwork edit has."""
+
+    after, info = compose(image, frame_hex, op)
+    mask = np.any(image != after, axis=2)
+    if not mask.any():
+        raise ArtworkError("this fit changes no pixel")
+    background = op["background"]
+    selection = {"color": "composition", "colors": [background], "regions": 1, "items": [],
+                 "pixels": int(mask.sum()), "area_mm2": round(float(mask.sum()) * mm_per_pixel**2, 3),
+                 "bbox_px": _bbox(mask), "regions_of_color": None, "limited_by_box": False,
+                 "whole_region_pixels": int(mask.sum()), "box_px": op["source_box_px"], "region_sha256": mask_sha256(mask)}
+    before_regions, after_regions = _region_counts(image, frame_hex), _region_counts(after, frame_hex)
+    fg_after = foreground_mask(after, frame_hex, background)
+    fg_before = foreground_mask(image, frame_hex, background)
+    keep = [h for h in before_regions if h != background]
+    changed_topology = {h: [before_regions[h], after_regions.get(h, 0)] for h in keep
+                        if before_regions[h] != after_regions.get(h, 0)}
+    box_before = _bbox(fg_before) if fg_before.any() else None
+    box_after = _bbox(fg_after) if fg_after.any() else None
+    size = lambda b: None if b is None else [round((b[2] - b[0]) * mm_per_pixel, 2), round((b[3] - b[1]) * mm_per_pixel, 2)]  # noqa: E731
+    change = {
+        "from": "composition", "from_colors": [background], "to": background, "pixels": int(mask.sum()),
+        "scale": op["scale"], "source_box_px": op["source_box_px"], **info,
+        "palette_size_before": len(before_regions), "palette_size_after": len(after_regions),
+        "colors_removed": sorted(set(before_regions) - set(after_regions)),
+        "colors_added": sorted(set(after_regions) - set(before_regions)),
+        "regions_before": before_regions, "regions_after": after_regions,
+        "subject_regions_changed": changed_topology,
+        "foreground_box_before_px": box_before, "foreground_box_after_px": box_after,
+        "foreground_mm_before": size(box_before), "foreground_mm_after": size(box_after),
+        "frame_pixels_before": int(_frame_mask(image, frame_hex).sum()), "frame_pixels_after": int(_frame_mask(after, frame_hex).sum()),
+        "merged_with_adjacent_regions": 0,
+    }
+    return after, mask, selection, change
+
+
+def composition_ops(log: dict[str, Any] | None) -> list[dict[str, Any]]:
+    """The fits of an edit log, in order (recolors and strokes do not move pixels)."""
+
+    return [e["op"] for e in (log or {}).get("edits", []) if e["op"].get("op") == "fit_composition"]
+
+
+def fit_preview(before: np.ndarray, after: np.ndarray, op: dict[str, Any], change: dict[str, Any],
+                size: int = 420) -> np.ndarray:
+    """Before | after side by side at the same scale, with the source box (cyan) and where it went (magenta)."""
+
+    def tile(image: np.ndarray, box: list[int] | None, color: tuple[int, int, int]) -> np.ndarray:
+        h, w = image.shape[:2]
+        f = size / max(h, w)
+        small = np.asarray(Image.fromarray(image).resize((max(1, round(w * f)), max(1, round(h * f))), Image.NEAREST)).copy()
+        if box:
+            r0, c0 = int(box[0] * f), int(box[1] * f)
+            r1, c1 = min(small.shape[0] - 1, int(box[2] * f)), min(small.shape[1] - 1, int(box[3] * f))
+            small[r0, c0:c1 + 1] = small[r1, c0:c1 + 1] = color
+            small[r0:r1 + 1, c0] = small[r0:r1 + 1, c1] = color
+        return np.pad(small, ((6, 6), (6, 6), (0, 0)), constant_values=255)
+
+    return np.concatenate([tile(before, op["source_box_px"], (0, 170, 255)),
+                           tile(after, change.get("dest_box_px"), (255, 0, 255))], axis=1)
 
 
 # -- previews ------------------------------------------------------------------------------------
@@ -589,6 +957,16 @@ def _entry(image: np.ndarray, op: dict[str, Any], frame: str | None, mpp: float,
     return after, entry
 
 
+def refuse_unapproved_clipping(entry: dict[str, Any]) -> None:
+    """A new fit that pushes subject pixels off the canvas needs the user's explicit approval
+    (``accept_clipping``).  Only new edits are checked; replaying a saved log never refuses."""
+
+    change = entry["change"]
+    if entry["op"]["op"] == "fit_composition" and change.get("subject_clipped_px") and not entry["op"].get("accept_clipping"):
+        raise ArtworkError(f"this fit pushes {change['subject_clipped_px']} subject pixels off the canvas "
+                           f"({', '.join(change['clipped_edges'])}); move or shrink the subject, or approve the loss")
+
+
 def apply(directory: Path, op: dict[str, Any]) -> tuple[np.ndarray, dict[str, Any]]:
     """Apply one checked op to ``current.png`` and append it to the log (saved)."""
 
@@ -601,6 +979,7 @@ def apply(directory: Path, op: dict[str, Any]) -> tuple[np.ndarray, dict[str, An
         raise ArtworkError("current.png does not match the edit log; verify or undo to rebuild it")
     frame, mpp = log["base"]["frame_color"], log["base"]["mm_per_pixel"]
     after, entry = _entry(image, op, frame, mpp, len(log["edits"]) + 1)
+    refuse_unapproved_clipping(entry)
     save_rgb(after, directory / "current.png")
     log["edits"].append(entry)
     log["current_sha256"] = rgb_sha256(after)
@@ -740,6 +1119,7 @@ def session_add(directory: Path, op: dict[str, Any]) -> tuple[np.ndarray, dict[s
     image = session_image(directory, log, session)
     after, entry = _entry(image, op, log["base"]["frame_color"], log["base"]["mm_per_pixel"],
                           len(log["edits"]) + len(session["ops"]) + 1)
+    refuse_unapproved_clipping(entry)
     session["ops"].append(entry)
     session["redo"] = []  # a new edit ends the redo chain
     _write_session(directory, session, after)
