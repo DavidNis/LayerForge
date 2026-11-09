@@ -9,6 +9,7 @@ and return a job id at once; the page polls ``/api/jobs/<id>`` for progress.
     POST /api/projects?filename=&scale=&...     body = image bytes -> project + L1 proposal job
     GET  /api/projects/<p>                      project state (+ active or latest job)
     GET  /api/projects/<p>/issues               issue inspector: located diagnostics and the images to show them on
+    POST /api/projects/<p>/issues/review        {keys, state}: Needs review / Fix later / Accept risk (decision only)
     POST /api/projects/<p>/propose              re-run the L1 proposal (before a review exists)
     POST /api/projects/<p>/artwork/preview      {"at_px", "box_px"?, "color"?, "source"?} -> region / recolor preview
     POST /api/projects/<p>/artwork/sample       {"at_px"} -> eyedropper color
@@ -245,6 +246,12 @@ class Handler(BaseHTTPRequestHandler):
             if active is not None:  # a running job writes into the folder
                 raise JobConflict(f"'{active.kind}' is still {active.status} for this project; delete it when it has finished")
             self._json(ws.delete_project(name))
+            return
+        if action == "issues" and len(parts) == 5 and parts[4] == "review":
+            active = app.jobs.active(name)
+            if active is not None:  # a running job may be replacing the stack the issues are about
+                raise JobConflict(f"'{active.kind}' is still {active.status} for this project; review issues when it has finished")
+            self._json(ws.review_issues(name, body.get("keys"), body.get("state")))
             return
         if action == "resize" and len(parts) == 5 and parts[4] in ("search", "preview", "retry"):
             ws.refuse_if_unsaved(name, "a physical resize")  # it plans the saved artwork: refused now

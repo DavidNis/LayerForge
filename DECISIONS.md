@@ -1092,3 +1092,54 @@ FDM thresholds remain generic assumptions until a print calibrates them).
     are unchanged. Oscariko planning only, alternating: 100.2 / 90.2 s off vs 56.5 / 48.6 s on (about 1.8x); peak
     267 vs 266 MB; all 46 candidate files, scores, validation and the selection identical to golden. Other
     projects not run (user instruction).
+
+## D-V3-041 | 2026-11-08 | Issue Visual Inspector: processed image beside the layer, cause, same place, review states
+
+**Status:** IMPLEMENTED; READY_FOR_USER_TEST. Not committed. Checks, thresholds, planner and geometry unchanged.
+
+- USER_REQUIRED: two synchronized zoomable views (the approved processed flat-color image used for planning, not
+  the upload, and the affected layer's material/cutouts); the exact problem region highlighted in both, with the
+  revealed color/region on the processed image; image detail vs planner-made issues told apart; type, severity,
+  measured vs threshold, layer, other layers with the same feature; repeated issues grouped by place with each
+  layer's own measurement; review states Needs review / Fix later / Accept risk, persisted by stable id and
+  revalidated when artwork, geometry or print settings change; Accept risk keeps geometry and warning.
+- DESIGN_CHOICE (`core/issue_review.py`, new; `core/issues.py` unchanged):
+  - Processed image = the stack's own target (review/target.png, else proposal/intake/target.png), shown padded
+    with the perimeter band (grey) so it spans the same sheet extent as the layer images; one sheet-mm mapping
+    serves both views. Views are synchronized in image fractions (zoom and centre), so differing preview
+    resolutions (layer previews are rendered at 2x) do not matter.
+  - Attribution for width-type sheet findings only (opening_may_close, narrow_slot_or_gap, narrow_neck_in_opening,
+    thin_material, narrow_connection, thin_visible_detail). Opening in layer k: revealed = issue pixels open in k
+    and shown (front view) by a layer behind k; hidden = open pixels under layers in front. Material: the layer's
+    own visible pixels. Each revealed 8-connected one-color image region is measured by local thickness (largest
+    inscribed disk covering a revealed pixel, odd pixel diameters; even widths read 1 px less, precision 1 px).
+    cause = "image" if some revealed region is narrower than the issue's own threshold there, else "planner"
+    (region wide enough, e.g. one color split across layers, or nothing visible). Review drafts with edits say
+    "the layer planner or a layer edit". Other kinds are not classified (no claim made).
+  - A first version measured the widest point near the issue and called tapering stroke tips "planner"; OBSERVED
+    wrong on chupa Layer 7 (pixel dump: the opening equals the tapering image stroke). Replaced by local thickness.
+  - Grouping: sheet issues whose footprints are within 3 px (union-find), any kind, across layers; members keep
+    their own measurements. Artwork/intake findings are not grouped.
+  - Stable key: kind + stable sheet id + bounding box rounded to 0.25 mm (+ intake detail id). Fingerprints (each
+    separately, so a lapse names what changed): processed image and layer geometry (retained, visible, color,
+    thickness, rim) in the bounding box + 2 mm, print settings/grid (the checks' thresholds and process), the
+    issue's measurement/severity/threshold. Decisions in `<project>/issue_reviews.json`; Needs review deletes a
+    decision. A decision applies only while all fingerprints match; otherwise "review again" with the reason; a
+    vanished key lapses onto an overlapping issue of the same kind and layer ("moved"), else it is counted as
+    matching no issue. Decisions never change severity, counts, geometry or which issues exist.
+  - API: `POST /api/projects/<p>/issues/review {keys, state}` (refused during a job; unknown keys/states 400).
+  - UI: Issues panel keeps chips, filters (+ review status), list, Prev/Next, Show on layer / Edit artwork. Sheet
+    chips show the processed image | layer side by side (stacked on narrow panels, card beside them only on wide
+    ones: container queries); switching layer keeps the view; Fit resets both. Processed image: revealed pixels
+    hatched (thin black/white stripes), small image regions dashed black/white; large regions are not outlined
+    (only measured near the issue). Card: cause tag + text, revealed colors with widths and the layers showing
+    them, "Same place" chips per other layer with its measurement (one click), review segmented control with
+    "Same for all N layers here", lapse notice. Rows: accepted / later / review again / xN tags.
+  - Bug fixed (pre-existing, all zoom views): a viewport measured 0 x 0 (page capture, closed section) stored a
+    zero scale as the last view, and the next pan became NaN / (0, 0). `viewGeometry` now ignores such viewports.
+- Thresholds unchanged (OBSERVED in code): openings 0.8 mm (`PrintProcess.min_opening_mm`, unsupported below the
+  0.4 mm nozzle); connection width 1.2 mm (`minimum_width_mm`). OPEN_QUESTION: the FDM thin_material check uses
+  `min_positive_feature_mm` 0.84 mm, not 1.2 mm; the user's "minimum retained-material width 1.2 mm" matches the
+  structural connection rule only. Not changed without approval. All measurements use the planning grid pitch
+  (aperture mm / artwork pixels = outer mm / outer pixels); the card states the position within the aperture.
+

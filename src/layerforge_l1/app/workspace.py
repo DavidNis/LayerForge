@@ -1743,12 +1743,60 @@ class Workspace:
             self._issue_cache[name] = (key, result)
         artwork = self._artwork_view(name, path, proposal)
         edited = bool(artwork.get("available") and (artwork.get("differs_from_planned") or (artwork.get("unsaved") or {}).get("count")))
-        out = {**result, "sources": [dict(src) for src in result["sources"]]}
+        out = {**result, "sources": [dict(src) for src in result["sources"]],
+               "issues": [dict(i) for i in result["issues"]]}
         for src in out["sources"]:
             if src["id"] in ("proposal", "candidate") and edited:
                 src["stale"] = True
                 src["stale_reason"] = "the artwork was edited after this proposal; plan again to check the edited artwork"
+        from ..core.issue_review import apply_decisions
+
+        out["review"] = {**apply_decisions(out["issues"], self._issue_decisions(path)), "artwork_edited": edited}
         return out
+
+    ISSUE_REVIEWS = "issue_reviews.json"
+
+    def _issue_decisions(self, path: Path) -> dict[str, Any]:
+        data = _read_json(path / self.ISSUE_REVIEWS)
+        return data.get("decisions", {}) if isinstance(data, dict) else {}
+
+    def review_issues(self, name: str, keys: Any, state: Any) -> dict[str, Any]:
+        """Save a review state (Needs review / Fix later / Accept risk) for issues of the current result.
+
+        Only the decision is saved (with the issue's fingerprints, ``core/issue_review.py``); the
+        geometry, the checks and the issue itself are unchanged, also for Accept risk.  Needs review
+        removes the decision."""
+
+        from ..core.issue_review import REVIEW_STATES, decision_record
+
+        if state not in REVIEW_STATES:
+            raise AppError(f"state must be one of {', '.join(REVIEW_STATES)}")
+        if not isinstance(keys, list) or not keys or not all(isinstance(k, str) for k in keys):
+            raise AppError("keys must be a non-empty list of issue keys")
+        path = self.path(name)
+        current = self.issues(name)
+        by_key = {i["key"]: i for i in current["issues"]}
+        missing = [k for k in keys if k not in by_key]
+        if missing:
+            raise AppError("these issues are no longer current; reload the issues: " + ", ".join(missing))
+        with self._artwork_lock:
+            file = path / self.ISSUE_REVIEWS
+            data = _read_json(file)
+            if not isinstance(data, dict) or not isinstance(data.get("decisions"), dict):
+                data = {"schema": "layerforge.issue_reviews", "version": 1, "decisions": {}}
+            when = _now()
+            for key in keys:
+                issue = by_key[key]
+                old = (issue["review"].get("lapsed") or {}).get("key")
+                if old:  # the decision this issue inherited when it moved: replaced by the new one
+                    data["decisions"].pop(old, None)
+                if state == "needs_review":
+                    data["decisions"].pop(key, None)
+                else:
+                    data["decisions"][key] = decision_record(issue, state, when)
+            data["updated_utc"] = when
+            _write_json(file, data)
+        return self.issues(name)
 
     def _compute_issues(self, name: str, path: Path, record: dict[str, Any], proposal: dict[str, Any],
                         review_manifest: Path, estimate_file: Path) -> dict[str, Any]:
@@ -1888,9 +1936,23 @@ class Workspace:
                       "min_positive_feature_mm": proc["min_positive_feature_mm"], "line_width_mm": proc["line_width_mm"]}
         draft_state = _read_json(path / "draft" / "state.json") if review_manifest.is_file() else None
         reviewed = draft_state is not None and stack is not None
+        issues = iss.number(issues, grid)
+        # What each issue shows in the processed image (the image the shown sheets were planned from),
+        # its cause, a stable key, the review fingerprints and the groups across layers.
+        from ..core import issue_review as rv
+
+        features = rv.FeatureMap(stack) if stack is not None and stack.target_rgb is not None else None
+        processed = load_rgb(path / target_rel)
+        settings = {"checks": checks, "geometry_process": (estimate if current else report)["process"] if stack is not None else None}
+        for issue in issues:
+            issue["feature"] = (features.attribute(issue) if features is not None else None) or rv.artwork_cause(issue)
+        rv.assign_keys(issues)
+        for issue in issues:
+            issue["fingerprint"] = rv.fingerprint(issue, grid, stack, processed, settings)
+        groups = rv.group_by_location(issues, grid)
         return {"grid": {"outer_sheet_mm": size, "mm_per_pixel": grid.mm_per_pixel,
                          "perimeter_pixels": grid.perimeter_pixels, "artwork_pixels": grid.artwork_pixels},
-                "issues": iss.number(issues, grid), "unlocalized": unlocalized, "sources": sources,
+                "issues": issues, "groups": groups, "unlocalized": unlocalized, "sources": sources,
                 "images": images, "sheets": sheets, "notice": notice, "computed_utc": _now(),
                 "has_review": review_manifest.is_file(), "checks": checks,
                 "basis": f"draft:{draft_state['updated_utc']}" if reviewed else f"candidate:{proposal.get('selected')}",

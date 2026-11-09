@@ -491,9 +491,45 @@ button.primary.large, .button.large { padding: 9px 18px; min-height: 40px; font-
 .flip { display: inline-flex; transform: scaleX(-1); }
 .history li.unsaved { opacity: 0.85; font-style: italic; }
 /* Issue inspector: the image with located issues beside a compact, filterable list. */
+/* Laid out by the panel's own width (it is narrower on Review layers than on Plan). */
+.insp .section-body { container-type: inline-size; }
 .insp-grid { display: grid; grid-template-columns: minmax(0, 3fr) minmax(280px, 2fr); gap: 16px; align-items: start; }
-@media (max-width: 900px) { .insp-grid { grid-template-columns: 1fr; } }
-.insp-filters { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.insp-main { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.insp-views { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
+@container (max-width: 760px) { .insp-grid { grid-template-columns: minmax(0, 1fr); } }
+/* Processed image | affected layer, synchronized; the card beside them only when both stay large. */
+.insp-grid.dual { grid-template-columns: minmax(0, 1fr); }
+.insp-grid.dual .insp-views { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+@container (min-width: 1180px) { .insp-grid.dual { grid-template-columns: minmax(0, 1fr) minmax(300px, 360px); } }
+@container (max-width: 560px) { .insp-grid.dual .insp-views { grid-template-columns: minmax(0, 1fr); } }
+.insp-view { margin: 0; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.insp-view figcaption { display: flex; align-items: center; gap: 6px; min-height: 22px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.insp-grid.dual .zoom-viewport { max-width: 100%; }
+.insp-viewbar { gap: 8px; flex-wrap: wrap; }
+.insp-legend { display: inline-flex; gap: 12px; flex-wrap: wrap; }
+.insp-legend > span { display: inline-flex; align-items: center; gap: 5px; }
+.insp-legend i { display: inline-block; width: 16px; height: 10px; border-radius: 2px; }
+.insp-legend .lg-issue { border: 2px solid #ff7a00; box-shadow: 0 0 0 1px rgba(0, 0, 0, .6); }
+.insp-legend .lg-revealed { background: repeating-linear-gradient(135deg, #000 0 2px, #fff 2px 4px); }
+.insp-legend .lg-region { border: 2px dashed #fff; box-shadow: 0 0 0 1.5px #000; }
+.insp-cause { display: flex; gap: 8px; align-items: baseline; padding: 6px 8px; border-radius: 6px; background: var(--panel); border-left: 3px solid var(--neutral); }
+.insp-cause.image { border-left-color: #2f8cff; }
+.insp-cause.planner { border-left-color: #8a5cf6; }
+.cause-tag { flex: none; font-size: 11.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; }
+.insp-cause.image .cause-tag { color: #1f6fd1; }
+.insp-cause.planner .cause-tag { color: #7442e0; }
+.insp-reveal { display: inline-flex; align-items: center; gap: 4px; margin-right: 8px; white-space: nowrap; }
+.insp-reveal .swatch { width: 12px; height: 12px; border-radius: 3px; }
+.insp-mate { display: inline-flex; align-items: center; gap: 4px; padding: 1px 7px; margin: 1px 2px; border-radius: 999px; font-size: 12px; min-height: 0; }
+.insp-mate .dot { width: 8px; height: 8px; border-radius: 50%; }
+.insp-review-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.insp-review .tool-btn { font-size: 12.5px; padding: 3px 9px; }
+button.link { border: none; background: none; padding: 0; color: var(--accent); text-decoration: underline; cursor: pointer; min-height: 0; }
+.insp-tag { flex: none; font-size: 10.5px; font-weight: 600; padding: 0 6px; border-radius: 8px; line-height: 17px; background: var(--neutral-bg); color: var(--neutral); }
+.insp-tag.accept { background: var(--ok-bg); color: var(--ok); }
+.insp-tag.later { background: var(--warn-bg); color: var(--warn); }
+.insp-tag.lapsed { background: var(--bad-bg); color: var(--bad); }
+.insp-filters { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; }
 .insp-filters select { width: 100%; font-size: 13px; }
 .insp-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .insp-chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 999px;

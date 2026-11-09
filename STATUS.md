@@ -1149,3 +1149,22 @@ follow the light-blue body). Not user approved; no CAD exported.
   61 passed. Oscariko planning only (only project run): 100.2 / 90.2 s -> 56.5 / 48.6 s, identical to golden.
   Rebuilt dist (exe 20:07, zip 20:08, SHA-256 3bfa064c966e052b0eb34be0282939419894d3417bd926087d7967c83434770b;
   support_reuse bundled); packaged smoke tests 4 PASS.
+
+- 2026-11-08 — Issue Visual Inspector (D-V3-041). State: READY_FOR_USER_TEST. Not committed.
+  Files: core/issue_review.py (new), app/workspace.py (issues: feature/cause, keys, fingerprints, groups, review;
+  `review_issues`), app/server.py (POST issues/review), app/static/app.js + app.css (dual synchronized views,
+  card, review states; zero-size viewport fix), tests/test_issue_review.py (new, 7), tests/e2e/drive_issue_review.mjs (new).
+  Tests PASS: test_issue_review 7 (incl. browser drive); test_issue_inspector 5 (incl. browser); test_review_layers 2;
+  test_l4_app::test_browser_workflow; test_artwork_recolor::test_browser_artwork_panel; test_artwork_fit browser.
+  Chupa Layer 7 (scratch copy of the user's project; the project itself only read): 7 issues (4 narrow parts,
+  3 openings that may close; RISK, 0.475-0.638 mm vs 0.8 mm), 5 image details (tapering stroke tips ~0.52 mm in
+  the image) and 2 planner-made (one color region split across layers 0/11 resp. 2; image region 1.22 / 0.87 mm);
+  each grouped with the same place on 6-11 layers; in the browser the processed-image pixel under every issue is
+  its revealed color and both views align exactly (0 px). Evidence: artifacts/issue_review_v1/ (contains the
+  user's artwork: do not commit). Issues endpoint on chupa: 11.7 s (attribution 0.9 s, grouping 0.01 s).
+  Exe/zip NOT rebuilt: dist\LayerForge\LayerForge.exe is running (PID 18332); dist\ holds the 2026-11-07 20:07 build.
+  Rebuilt after the app was closed: dist\LayerForge\LayerForge.exe (2026-11-08 12:06) and
+  dist\LayerForge-0.1.0-win64.zip (12:07, SHA-256 a4749c59dcf6353964360c6b9bd4cd1f75a847b502c46a345f7548774ff641c9);
+  bundled static files byte-identical to src. Packaged tests (one per process): info/static, issue inspector,
+  API workflow, browser workflow, startup/ports, stop during a job: 6 PASS. Not run: the 3 artwork-editor packaged tests.
+

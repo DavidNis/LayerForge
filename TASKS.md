@@ -359,3 +359,12 @@ No complete UI/server, arbitrary photographic depth estimation, frame design, gl
   so the kit's STEP read-back validity check (importStep + BRepCheck) alone would not catch them. The kit also
   checks solid count, volume vs area x thickness, and the reopened STL raster against the planned masks.
   Pre-existing; no change made.
+
+## Issue Visual Inspector (2026-11-08)
+
+- [x] Processed image | layer views (synchronized), revealed region highlighted, image-detail vs planner cause,
+  same place across layers, Needs review / Fix later / Accept risk persisted and revalidated (D-V3-041).
+- [x] Rebuild exe/zip (2026-11-08 12:06) and packaged tests: 6 PASS.
+- [x] Thresholds clarified (user, 2026-11-08): 1.2 mm stays the minimum retained-material width, 0.8 mm the cutout
+  threshold; the 0.84 mm FDM estimate level is unchanged. Physical suitability revisited after a print.
+- [ ] Physical print test still pending.

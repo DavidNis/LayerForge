@@ -39,6 +39,8 @@ const ui = {
   art: freshArt(),      // artwork recolor panel (flat-color target, not a sheet)
   fit: freshFit(),      // Fit artwork to canvas card (inside the Artwork editor)
   insp: freshInsp(),    // issue inspector: selection, filters, view and zoom
+  inspA: { zoom: null, pan: [0, 0], panning: null },  // issue inspector: processed-image view (follows insp)
+  inspPad: null,        // the processed image padded to the sheet extent ({src, url}) for the inspector
   issues: null,         // /issues of the current state (null: to be loaded)
   issuesLoading: false,
   issuesDirty: true,    // the shown issues may be older than the state: reload (keeping them shown meanwhile)
@@ -253,6 +255,7 @@ async function route() {
     ui.art = freshArt();
     ui.fit = freshFit();
     ui.insp = freshInsp();
+    ui.inspA = { zoom: null, pan: [0, 0], panning: null };
     ui.issues = null;
     ui.editView = { zoom: null, pan: [0, 0], panning: null };
     try {
@@ -1476,15 +1479,44 @@ function artworkPanel() {
 const VIEWS = {
   art: { state: () => ui.art, root: "#art-viewport", stage: "#art-stage", image: "#art-image", label: "#art-zoom-label", fitButton: '[data-testid="art-zoom-fit"]', redraw: () => drawArtOverlay() },
   edit: { state: () => ui.editView, root: "#edit-viewport", stage: "#edit-stage", image: "#edit-image", label: "#edit-zoom-label", fitButton: '[data-testid="edit-zoom-fit"]', redraw: () => drawOverlay() },
-  insp: { state: () => ui.insp, root: "#insp-viewport", stage: "#insp-stage", image: "#insp-image", label: "#insp-zoom-label", fitButton: '[data-testid="insp-zoom-fit"]', redraw: () => drawInspOverlay() },
+  insp: { state: () => ui.insp, root: "#insp-viewport", stage: "#insp-stage", image: "#insp-image", label: "#insp-zoom-label", fitButton: '[data-testid="insp-zoom-fit"]', redraw: () => drawInspOverlay(), sync: "inspa" },
+  // The processed image beside the layer in the Issue inspector: same sheet extent, zoom and pan follow each other.
+  inspa: { state: () => ui.inspA, root: "#insp-art-viewport", stage: "#insp-art-stage", image: "#insp-art-image", label: null, fitButton: null, redraw: () => drawInspOverlay(), sync: "insp" },
 };
+
+// Synchronized views (both images span the same sheet extent): the follower gets the leader's zoom
+// and the same image point at its centre.
+let syncingViews = false;
+function syncView(from, to) {
+  const a = viewGeometry(from);
+  const b = viewGeometry(to);
+  if (!a || !b || syncingViews) return;
+  syncingViews = true;
+  try {
+    b.state.zoom = a.state.zoom;
+    b.state.free = a.state.free;
+    if (a.state.zoom !== null) {
+      const fx = (a.vw / 2 - a.state.pan[0]) / (a.img.naturalWidth * a.scale);
+      const fy = (a.vh / 2 - a.state.pan[1]) / (a.img.naturalHeight * a.scale);
+      const scale = b.fit * b.state.zoom;
+      b.state.pan = [b.vw / 2 - fx * b.img.naturalWidth * scale, b.vh / 2 - fy * b.img.naturalHeight * scale];
+    }
+    // The pan is set for the follower's current size: no "keep the centre after a resize" correction.
+    b.state.lastView = { vw: b.vw, vh: b.vh, scale: b.fit * (b.state.zoom ?? 1) };
+    applyView(to);
+  } finally {
+    syncingViews = false;
+  }
+}
 const ZOOM_MAX = 40;  // x the fitted size
 
 function viewGeometry(key) {
   const v = VIEWS[key];
   const vp = $(v.root);
   const img = $(v.image);
-  if (!vp || !img || !img.naturalWidth) return null;
+  // A viewport that is not laid out (0 x 0, e.g. while the page is captured or a section is closed) is
+  // left alone: a zero scale would be stored as the last view and turn the next pan into NaN.
+  if (!vp || !img || !img.naturalWidth || !vp.clientWidth || !vp.clientHeight) return null;
   const vw = vp.clientWidth;
   const vh = vp.clientHeight;
   const fit = Math.min(vw / img.naturalWidth, vh / img.naturalHeight);
@@ -1511,10 +1543,11 @@ function applyView(key) {
   stage.style.width = `${w}px`;
   stage.style.height = `${h}px`;
   stage.style.transform = `translate(${g.state.pan[0]}px, ${g.state.pan[1]}px)`;
-  const label = $(g.v.label);
+  const label = g.v.label && $(g.v.label);
   if (label) label.textContent = `${Math.round(g.scale * 100)}%`;
-  $(g.v.fitButton)?.classList.toggle("active", g.state.zoom === null);
+  if (g.v.fitButton) $(g.v.fitButton)?.classList.toggle("active", g.state.zoom === null);
   g.v.redraw();
+  if (g.v.sync && !syncingViews) syncView(key, g.v.sync);
 }
 
 // Zoom by a factor (or "fit"), keeping the image point under the screen point (cx, cy) still
@@ -2077,7 +2110,7 @@ const ISSUE_SOURCES = { validation: ["validation", "candidate"], fdm_estimate: [
   planner: ["proposal"], intake: ["proposal"] };
 
 function freshInsp() {
-  return { selected: null, kind: "", severity: "", view: "auto", zoom: null, pan: [0, 0], panning: null, shown: null };
+  return { selected: null, selectedKey: null, kind: "", severity: "", status: "", view: "auto", zoom: null, pan: [0, 0], panning: null, shown: null };
 }
 
 async function loadIssues() {
@@ -2094,12 +2127,75 @@ async function loadIssues() {
     if (ui.name !== name) return;
     changed = wasStale || !ui.issues || !same(ui.issues, data);
     ui.issues = data;
+    keepIssueSelection(data);
   } catch (err) {
     if (ui.name === name) ui.issues = { error: err.message || String(err) };
   } finally {
     ui.issuesLoading = false;
   }
   if (changed) render();  // nothing new: no re-render (it would interrupt a drag or a pan in progress)
+}
+
+// Issue numbers follow the current result; the selection follows the issue's stable key across
+// recomputations (or is dropped when the issue is gone).
+function keepIssueSelection(data) {
+  if (!ui.insp.selectedKey || !data?.issues) return;
+  const same = data.issues.find((i) => i.key === ui.insp.selectedKey);
+  ui.insp.selected = same ? same.id : null;
+  if (!same) ui.insp.selectedKey = null;
+}
+
+// Review decisions (Needs review / Fix later / Accept risk): saved on the server with the issue's
+// fingerprints; they never change the geometry, the severity or the warning itself.
+const REVIEW_STATES = [
+  ["needs_review", "Needs review", "Not decided yet."],
+  ["fix_later", "Fix later", "Keep it on the to-do list. Nothing is changed."],
+  ["accept_risk", "Accept risk", "Print as it is. The geometry and this warning stay unchanged. The decision lapses if the image, the layer or the print settings change here."],
+];
+const REVIEW_LABEL = Object.fromEntries(REVIEW_STATES.map(([s, l]) => [s, l]));
+
+async function inspReview(keys, state) {
+  const name = ui.name;
+  try {
+    const data = await api("POST", `/api/projects/${encodeURIComponent(name)}/issues/review`, { keys, state });
+    if (ui.name !== name) return;
+    ui.issues = data;
+    keepIssueSelection(data);
+  } catch (err) {
+    showError(err, "Issue review");
+    return;
+  }
+  render();
+}
+
+// The processed image padded with the perimeter band, so it spans the same sheet extent (and the same
+// pixel grid) as the layer images: one view transform serves both. Built once per image.
+function paddedArtwork(d) {
+  const art = d.images.find((i) => i.key === "artwork");
+  if (!art) return "";
+  if (ui.inspPad?.src === art.url) return ui.inspPad.url || "";
+  if (ui.inspPad?.url) URL.revokeObjectURL(ui.inspPad.url);
+  const pad = { src: art.url, url: null };
+  ui.inspPad = pad;
+  const img = new Image();
+  img.onload = () => {
+    const band = Math.round(d.grid.perimeter_pixels * (img.naturalWidth / d.grid.artwork_pixels));
+    const canvas = document.createElement("canvas");
+    canvas.width = img.naturalWidth + 2 * band;
+    canvas.height = img.naturalHeight + 2 * band;
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#b9bdc4";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(img, band, band);
+    canvas.toBlob((blob) => {
+      if (ui.inspPad !== pad || !blob) return;
+      pad.url = URL.createObjectURL(blob);
+      const el = $("#insp-art-image");
+      if (el) el.src = pad.url;
+    }, "image/png");
+  };
+  img.src = art.url;
+  return "";
 }
 
 // The sheets the shown issues were computed for, and the sheets the state has now: after a layer edit
@@ -2163,7 +2259,80 @@ function filteredIssues(d) {
   const f = ui.insp;
   const key = ui.insp.shown?.key;
   return d.issues.filter((i) => (!f.kind || i.kind === f.kind) && (!f.severity || i.severity === f.severity)
-    && (!key || issueHome(i) === key));
+    && (!f.status || (i.review?.state || "needs_review") === f.status) && (!key || issueHome(i) === key));
+}
+
+const layerShort = (d, id) => { const s = d.sheets.find((x) => x.id === id); return s ? `L${s.layer_from_front}` : id; };
+
+// Hatch for pixels revealed through the selected opening: black and white stripes stay visible on any color,
+// with gaps that keep the revealed color itself visible.
+let hatch = null;
+function hatchPattern(ctx) {
+  if (!hatch) {
+    hatch = document.createElement("canvas");
+    hatch.width = hatch.height = 8;
+    const h = hatch.getContext("2d");
+    h.lineWidth = 1.25;  // thin black and white stripes; the revealed color shows between them
+    for (const [color, off] of [["rgba(0,0,0,0.8)", 0], ["rgba(255,255,255,0.85)", 2]]) {
+      h.strokeStyle = color;
+      h.beginPath();
+      for (const k of [-8, 0, 8]) { h.moveTo(k + off, 8); h.lineTo(k + off + 8, 0); }
+      h.stroke();
+    }
+  }
+  return ctx.createPattern(hatch, "repeat");
+}
+
+// Card parts: cause, what the issue reveals in the image, the same place on other layers, review state.
+function inspCauseHtml(d, issue) {
+  const f = issue.feature;
+  if (!f) return "";
+  const tag = f.cause === "image" ? "Image detail" : "Layer planner";
+  const tip = f.cause === "image"
+    ? "The processed image itself is narrower than the threshold here: every layer in front of this color needs an opening this small. Changing the image is the usual fix."
+    : "The image is wide enough here (or nothing of it shows through): the narrow shape comes from how the planner split the image into layers.";
+  let reveals = "";
+  if (f.regions?.length) {
+    reveals = f.regions.map((r) => `<span class="insp-reveal" title="${esc(`Image region ${r.color}: ${r.width_at_least ? "at least" : "about"} ${fmt(r.width_mm, 2)} mm wide at this place (±${fmt(f.width_precision_mm, 2)} mm, one pixel)${r.shown_by.length ? `; shown by ${r.shown_by.map((id) => layerShort(d, id)).join(", ")}` : ""}`)}">
+      <span class="swatch" style="background:${esc(r.color)}"></span><span class="mono">${esc(r.color)}</span>
+      <span class="muted">${r.width_at_least ? "≥" : "≈"} ${fmt(r.width_mm, 2)} mm${r.shown_by.length ? ` · ${r.shown_by.map((id) => layerShort(d, id)).join(", ")}` : ""}</span></span>`).join(" ");
+  } else if (f.role) {
+    reveals = `<span class="muted">nothing visible${f.covered_by?.length ? ` (under ${f.covered_by.map((id) => layerShort(d, id)).join(", ")})` : ""}</span>`;
+  }
+  return `<div class="insp-cause ${esc(f.cause)}" data-testid="insp-cause" data-cause="${esc(f.cause)}">
+      <span class="cause-tag tip" tabindex="0" data-tip="${esc(tip)}">${tag}</span> <span class="small">${esc(f.cause_text)}</span>
+    </div>
+    ${reveals ? `<dl class="kv small"><dt>${f.role === "material" ? "Shows" : "Reveals"}</dt><dd data-testid="insp-reveals">${reveals}</dd></dl>` : ""}`;
+}
+
+function inspGroupMates(d, issue) {
+  const group = issue.group && d.groups?.find((g) => g.id === issue.group);
+  if (!group) return [];
+  const front = (i) => d.sheets.find((s) => s.id === i.sheet)?.layer_from_front ?? 99;
+  return group.members.filter((m) => m !== issue.id).map((m) => d.issues.find((i) => i.id === m)).filter(Boolean)
+    .sort((a, b) => front(a) - front(b));
+}
+
+function inspReviewHtml(d, issue, mates) {
+  const rv = issue.review || { state: "needs_review" };
+  const buttons = REVIEW_STATES.map(([s, label, tip]) => `<button class="tool-btn tip ${rv.state === s ? "active" : ""}" aria-pressed="${rv.state === s}"
+      data-action="insp-review" data-state="${s}" data-testid="insp-review-${s}" data-tip="${esc(tip)}" ${busy() ? "disabled" : ""}>${label}</button>`).join("");
+  const differ = mates.filter((m) => (m.review?.state || "needs_review") !== rv.state);
+  return `<div class="insp-review-row">
+      <div class="segmented insp-review" role="group" aria-label="Review decision" data-testid="insp-review" data-state="${esc(rv.state)}">${buttons}</div>
+      ${differ.length ? `<button class="link small" data-action="insp-review" data-state="${esc(rv.state)}" data-scope="group" data-testid="insp-review-group" ${busy() ? "disabled" : ""}>Same for all ${mates.length + 1} layers here</button>` : ""}
+    </div>
+    ${rv.state === "accept_risk" ? '<p class="small muted" style="margin:0" data-testid="insp-accepted">Risk accepted. The geometry and the warning are unchanged.</p>' : ""}
+    ${rv.lapsed ? `<p class="small warn-text" style="margin:0" data-testid="insp-lapsed">Earlier decision “${esc(REVIEW_LABEL[rv.lapsed.state] || rv.lapsed.state)}” no longer applies: ${esc(rv.lapsed.reason)}. Please review again.</p>` : ""}`;
+}
+
+function inspTags(d, i) {
+  const st = i.review?.state;
+  const n = i.group ? (d.groups?.find((g) => g.id === i.group)?.sheets.length || 1) : 1;
+  return [st === "accept_risk" ? '<span class="insp-tag accept" title="Risk accepted (warning kept)">accepted</span>' : "",
+    st === "fix_later" ? '<span class="insp-tag later" title="Marked to fix later">later</span>' : "",
+    i.review?.lapsed ? '<span class="insp-tag lapsed" title="An earlier decision no longer applies">review again</span>' : "",
+    n > 1 ? `<span class="insp-tag group" title="The same place has an issue on ${n} layers">×${n}</span>` : ""].join("");
 }
 
 function checkedText(d, shown) {
@@ -2199,6 +2368,8 @@ function issuesPanel() {
   const here = d.issues.filter((i) => issueHome(i) === shown?.key);
   const kinds = [...new Set(here.map((i) => i.kind))].map((k) => [k, here.find((i) => i.kind === k).title]);
   const sevs = SEV_ORDER.filter((s) => here.some((i) => i.severity === s)).map((s) => [s, s]);
+  const statuses = REVIEW_STATES.map(([s, l]) => [s, `${l} (${here.filter((i) => (i.review?.state || "needs_review") === s).length})`]);
+  const dual = Boolean(shown && shown.key !== "artwork" && d.images.some((i) => i.key === "artwork"));
   const index = issue ? list.indexOf(issue) : -1;
   const hasDraft = Boolean(ui.state.draft && d.has_review);
   const chips = inspImages(d).map((img) => {
@@ -2214,52 +2385,86 @@ function issuesPanel() {
     const thText = !th ? "–" : th.text ? esc(th.text) : `${esc(th.label)} <strong>${fmt(th.value, 3)} ${esc(th.unit)}</strong>${th.nominal_mm != null ? ` <span class="muted">(nominal ${fmt(th.nominal_mm, 2)} mm)</span>` : ""}${th.unsupported_below_mm != null ? ` <span class="muted">(unsupported below ${fmt(th.unsupported_below_mm, 3)} mm)</span>` : ""}`;
     const fromCandidate = issue.destination === "layer" && !hasDraft && issue.sheet && d.sheet_source === "candidate";
     const layerBtn = issue.destination === "layer"
-      ? `<button class="primary" data-action="insp-edit-layer" data-testid="insp-edit-layer" ${busy() || (!hasDraft && !fromCandidate) ? "disabled" : ""}>Edit layer</button>` : "";
+      ? `<button class="primary" data-action="insp-edit-layer" data-testid="insp-edit-layer" ${busy() || (!hasDraft && !fromCandidate) ? "disabled" : ""}>Show on layer</button>` : "";
     const artBtn = issue.artwork_box_px ? `<button class="${issue.destination === "artwork" ? "primary" : ""}" data-action="insp-edit-artwork" data-testid="insp-edit-artwork" ${busy() ? "disabled" : ""}>Edit artwork</button>` : "";
     const crop = issue.details?.image_url ? `<img class="insp-crop" src="${esc(issue.details.image_url)}" alt="original | default intake | as planned" data-testid="insp-detail-image">
       <p class="small muted" style="margin:0">original · default intake · as planned</p>` : "";
-    return `<div class="subpanel insp-card" data-testid="insp-card">
+    const mates = inspGroupMates(d, issue);
+    const mateLayers = new Set(mates.map((m) => m.sheet)).size;
+    const group = mates.length ? `<dt>Same place</dt><dd data-testid="insp-group"><span class="muted">${mateLayers} other layer${mateLayers === 1 ? "" : "s"}:</span>
+        ${mates.map((m) => `<button class="insp-mate tip" data-action="insp-goto" data-issue="${esc(m.id)}" data-testid="insp-mate" data-tip="${esc(`${m.title} on ${sheetLabel(d, m.sheet)}: ${m.measured?.value != null ? `${fmt(m.measured.value, 3)} ${m.measured.unit}` : "–"}`)}">
+          <span class="dot" style="background:${SEV_COLOR[m.severity] || "#888"}"></span>${esc(layerShort(d, m.sheet))}${m.measured?.value != null ? ` <span class="muted">${fmt(m.measured.value, 2)}</span>` : ""}</button>`).join("")}</dd>` : "";
+    return `<div class="subpanel insp-card" data-testid="insp-card" data-key="${esc(issue.key || "")}">
       <div class="spread"><strong><span class="insp-no">${issueNo(issue)}</span> <span data-testid="insp-title">${esc(issue.title)}</span></strong>${badge(SEV_CLASS[issue.severity] || "neutral", issue.severity)}</div>
       <dl class="kv small">
         <dt>Measured</dt><dd data-testid="insp-measured">${measure(issue.measured)}</dd>
         <dt>Threshold</dt><dd data-testid="insp-threshold">${thText}</dd>
-        <dt>Where</dt><dd data-testid="insp-sheet">${esc(issue.sheet ? sheetLabel(d, issue.sheet) : issue.destination === "artwork" ? "Artwork (flat color) — not a sheet defect" : "Whole stack (front view)")}${issue.outline_exact ? "" : ' <span class="muted">(bounding box only)</span>'}</dd>
+        <dt>Where</dt><dd data-testid="insp-sheet">${issue.sheet ? `<span class="swatch" style="background:${esc(d.sheets.find((s) => s.id === issue.sheet)?.color || "#888")}"></span> ` : ""}${esc(issue.sheet ? sheetLabel(d, issue.sheet) : issue.destination === "artwork" ? "Artwork (flat color) — not a sheet defect" : "Whole stack (front view)")}${issue.outline_exact ? "" : ' <span class="muted">(bounding box only)</span>'}</dd>
+        ${group}
       </dl>
+      ${inspCauseHtml(d, issue)}
+      ${inspReviewHtml(d, issue, mates)}
       ${crop}
       ${st ? `<p class="small warn-text" data-testid="insp-stale" style="margin:0">Out of date: ${esc(st.stale_reason || "re-check")}</p>` : ""}
       <div class="row">${layerBtn}${artBtn}</div>
-      ${fromCandidate ? '<p class="small muted" style="margin:0">Edit layer starts the review of this candidate (layers are edited in a review).</p>' : ""}
+      ${fromCandidate ? '<p class="small muted" style="margin:0">Show on layer starts the review of this candidate.</p>' : ""}
+      ${issue.destination === "layer" && issue.artwork_box_px ? '<p class="small muted" style="margin:0">A sheet problem: changing the artwork may or may not remove it.</p>' : ""}
       <details class="small"><summary>Technical details</summary>
         <dl class="kv"><dt>Code</dt><dd><code>${esc(issue.kind)}</code></dd><dt>Source</dt><dd>${esc(issue.source)}</dd>
-          <dt>Box (mm)</dt><dd class="mono">${esc((issue.bbox_mm || []).join(", "))}</dd></dl>
+          <dt>Box (mm)</dt><dd class="mono">${esc((issue.bbox_mm || []).join(", "))}</dd>
+          ${issue.bbox_mm ? (() => { const g = d.grid; const band = g.perimeter_pixels * g.mm_per_pixel; const top = g.outer_sheet_mm - band;
+            return `<dt>In the artwork</dt><dd class="mono" data-testid="insp-aperture-pos">${fmt(issue.bbox_mm[0] - band, 2)} mm from the left, ${fmt(top - issue.bbox_mm[3], 2)} mm from the top of the ${fmt(g.artwork_pixels * g.mm_per_pixel, 1)} mm aperture</dd>`; })() : ""}
+          ${issue.key ? `<dt>Key</dt><dd class="mono">${esc(issue.key)}</dd>` : ""}</dl>
         <pre class="mono small">${esc(JSON.stringify({ measured: issue.measured, threshold: issue.threshold, details: { ...issue.details, held_material_outline_mm: undefined } }, null, 2))}</pre></details>
     </div>`;
   })() : list.length ? `<div class="small muted" data-testid="insp-card-empty">Click a highlighted area or a row.</div>`
     : `<div class="subpanel small ${here.length ? "muted" : "ok-text"}" data-testid="insp-card-empty">${here.length ? "No issue here matches the filters." : checkedText(d, shown)}</div>`;
   const rows = list.map((i) => `<li class="${i.id === ui.insp.selected ? "active" : ""} ${issueStale(d, i) ? "stale" : ""}"><button class="insp-row" data-action="insp-select" data-issue="${esc(i.id)}" data-testid="insp-row">
       <span class="insp-no" style="background:${SEV_COLOR[i.severity] || "#888"}">${issueNo(i)}</span><span class="insp-row-title">${esc(i.title)}</span>
-      <span class="small muted">${i.measured && i.measured.value != null ? `${fmt(i.measured.value, i.measured.unit === "px" ? 0 : 2)} ${esc(i.measured.unit)}` : ""}</span></button></li>`).join("");
+      ${inspTags(d, i)}<span class="small muted">${i.measured && i.measured.value != null ? `${fmt(i.measured.value, i.measured.unit === "px" ? 0 : 2)} ${esc(i.measured.unit)}` : ""}</span></button></li>`).join("");
+  const rc = d.review?.counts || {};
+  const decided = [rc.accept_risk ? `${rc.accept_risk} accepted` : "", rc.fix_later ? `${rc.fix_later} to fix later` : ""].filter(Boolean).join(", ");
   const summary = [sheetIssues.length ? `<span class="small muted">sheets</span> ${countBadges(sheetIssues)}` : '<span class="small ok-text">sheets: no issues</span>',
-    artIssues.length ? `<span class="small muted">artwork</span> ${countBadges(artIssues)}` : ""].filter(Boolean).join(" ");
+    artIssues.length ? `<span class="small muted">artwork</span> ${countBadges(artIssues)}` : "",
+    decided ? `<span class="small muted" data-testid="insp-decided">· ${esc(decided)}</span>` : ""].filter(Boolean).join(" ");
+  const reviewNotes = [d.review?.lapsed ? `${d.review.lapsed} earlier decision${d.review.lapsed === 1 ? " no longer applies" : "s no longer apply"} because the image, the layers or the print settings changed there (marked “review again”).` : "",
+    d.review?.unmatched ? `${d.review.unmatched} earlier decision${d.review.unmatched === 1 ? " matches" : "s match"} no current issue (the issue is gone or changed).` : "",
+    d.review?.artwork_edited && (rc.accept_risk || rc.fix_later) ? "The artwork was edited after planning: decisions refer to the planned image until you plan again." : ""].filter(Boolean);
   return `<details class="panel section insp" data-section="issues" data-testid="issue-inspector" ${openAttr("issues", true)}>
     <summary><h3>Issues</h3><span class="small" data-testid="insp-summary">${summary}${stale.length || basisStale ? " " + badge("warn", "out of date") : ""}</span></summary>
     <div class="section-body stack">
       ${d.notice ? `<div class="banner info small" data-testid="insp-notice">${esc(d.notice)}</div>` : ""}
       ${basisStale ? `<div class="banner warn small" data-testid="insp-basis-stale">The sheets changed: the locations shown are from before the edit. ${ui.issuesLoading ? "Re-checking…" : "They are checked again shortly."}</div>` : ""}
       ${stale.map((s) => `<div class="banner warn small" data-testid="insp-source-stale"><strong>${esc(s.label)}</strong> is out of date: ${esc(s.stale_reason || "re-check")}.</div>`).join("")}
+      ${reviewNotes.length ? `<div class="banner info small" data-testid="insp-review-notes">${reviewNotes.map(esc).join("<br>")}</div>` : ""}
       <div class="insp-chips" role="tablist" aria-label="Layer" data-testid="insp-layers">${chips}</div>
-      <div class="insp-grid">
-        <div class="stack" style="gap:6px">
+      <div class="insp-grid ${dual ? "dual" : ""}">
+        <div class="insp-main">
+        <div class="insp-views">
+        ${dual ? `<figure class="insp-view insp-art" data-testid="insp-art-view">
+          <figcaption class="small"><strong>Processed image</strong> <span class="muted">as planned</span>
+            ${infoTip("The flat-color image from the intake that the layers were planned from (not the uploaded original). The grey band is the sheet border, not part of the image. Zoom and pan follow the layer view.")}</figcaption>
+          <div class="zoom-viewport insp-viewport ${ui.artSpace ? "space" : ""}" id="insp-art-viewport" data-testid="insp-art-viewport" tabindex="0" aria-label="Processed image (mouse wheel zooms; + / - / 0 with focus)">
+            <div class="zoom-stage" id="insp-art-stage"><img id="insp-art-image" src="${esc(paddedArtwork(d))}" alt="Processed image (as planned)" draggable="false"></div>
+            <canvas id="insp-art-overlay" data-testid="insp-art-canvas" aria-label="Issue locations on the processed image"></canvas>
+          </div>
+        </figure>` : ""}
+        <figure class="insp-view insp-layer">
+          <figcaption class="small"><strong data-testid="insp-shown">${esc(shown?.label || "")}</strong>${shown?.layer ? ` <span class="muted">material in color, cutouts grey</span>` : ""}</figcaption>
           <div class="zoom-viewport insp-viewport ${ui.artSpace ? "space" : ""}" id="insp-viewport" data-testid="insp-viewport" tabindex="0" aria-label="Issues (mouse wheel zooms; + / - / 0 with focus)">
             <div class="zoom-stage" id="insp-stage"><img id="insp-image" src="${esc(shown?.url || "")}" alt="${esc(shown?.label || "")}" draggable="false"></div>
             <canvas id="insp-overlay" data-testid="insp-canvas" aria-label="Issue locations"></canvas>
           </div>
-          <div class="spread"><span class="small muted" data-testid="insp-shown">${esc(shown?.label || "")}</span>${zoomBar("insp")}</div>
+        </figure>
+        </div>
+        <div class="spread insp-viewbar">${dual ? `<span class="small muted insp-legend">
+            <span><i class="lg-issue"></i>issue</span><span><i class="lg-revealed"></i>revealed through it</span><span><i class="lg-region"></i>image region</span></span>` : "<span></span>"}${zoomBar("insp")}</div>
         </div>
         <div class="stack insp-side" style="gap:8px">
           ${here.length ? `<div class="row insp-filters">
             <select id="insp-kind" data-testid="insp-filter-kind" aria-label="Type"><option value="">All types</option>${options(kinds, ui.insp.kind)}</select>
             <select id="insp-severity" data-testid="insp-filter-severity" aria-label="Severity"><option value="">All severities</option>${options(sevs, ui.insp.severity)}</select>
+            <select id="insp-status" data-testid="insp-filter-status" aria-label="Review status"><option value="">All statuses</option>${options(statuses, ui.insp.status)}</select>
           </div>
           <div class="row"><button class="tool-btn" data-action="insp-step" data-step="-1" data-testid="insp-prev" ${list.length ? "" : "disabled"}>◀</button>
             <span class="small" data-testid="insp-position">${index >= 0 ? index + 1 : "–"} / ${list.length}</span>
@@ -2284,16 +2489,21 @@ function inspOnImage(d, i) {
   return Boolean(ui.insp.shown && i.outline_mm && issueHome(i) === ui.insp.shown.key);
 }
 
-// Screen geometry of the issues drawn on the shown image (shared by drawing and hit testing).
-function inspScreen() {
-  const img = $("#insp-image");
-  const canvas = $("#insp-overlay");
-  const entry = ui.insp.shown;
-  if (!img || !canvas || !img.naturalWidth || !entry) return null;
+// Screen geometry of the issues drawn on one of the inspector images (shared by drawing and hit
+// testing): the layer / front view ("layer") or the processed image beside it ("art"). The padded
+// processed image spans the same sheet extent as the layer images, so one mm-to-image map serves both.
+const INSP_SIDES = { layer: ["#insp-image", "#insp-overlay"], art: ["#insp-art-image", "#insp-art-overlay"] };
+function inspScreen(side = "layer") {
+  const [imgSel, canvasSel] = INSP_SIDES[side];
+  const img = $(imgSel);
+  const canvas = $(canvasSel);
+  const shown = ui.insp.shown;
+  const entry = side === "art" ? { extent_mm: [0, 0, ui.issues.grid.outer_sheet_mm, ui.issues.grid.outer_sheet_mm] } : shown;
+  if (!img || !canvas || !img.naturalWidth || !entry || !img.getAttribute("src")) return null;
   const c = canvas.getBoundingClientRect();
   const r = img.getBoundingClientRect();
   const at = (p) => { const [px, py] = inspToImage(entry, img, p); return [r.left - c.left + (px * r.width) / img.naturalWidth, r.top - c.top + (py * r.height) / img.naturalHeight]; };
-  return { img, canvas, c, r, at };
+  return { img, canvas, c, r, at, side };
 }
 
 const MARKER_R = 9;
@@ -2309,7 +2519,11 @@ function inspMarker(g, issue) {  // numbered marker beside the issue (above-righ
 function drawInspOverlay() {
   const d = ui.issues;
   if (!d || d.error) return;
-  const g = inspScreen();
+  for (const side of ["layer", "art"]) drawInspSide(d, side);
+}
+
+function drawInspSide(d, side) {
+  const g = inspScreen(side);
   if (!g) return;
   const { canvas, c } = g;
   const dpr = window.devicePixelRatio || 1;
@@ -2325,14 +2539,15 @@ function drawInspOverlay() {
   };
   const list = filteredIssues(d).filter((i) => inspOnImage(d, i));
   const sel = list.find((i) => i.id === ui.insp.selected);
-  // Outlines only (no fill) so small holes and thin features stay visible: a dark halo, then the color.
+  const art = side === "art";
+  // Outlines only (no fill on the image) so small holes and thin features stay visible: a dark halo, then the color.
   const outline = (issue, width, selected) => {
     const color = SEV_COLOR[issue.severity] || "#888";
     const stale = Boolean(issueStale(d, issue));
     ctx.save();
     if (stale) ctx.setLineDash([4, 3]);
     trace(issue.outline_mm);
-    if (selected) { ctx.globalAlpha = 0.22; ctx.fillStyle = color; ctx.fill("evenodd"); ctx.globalAlpha = 1; }
+    if (selected && !art) { ctx.globalAlpha = 0.22; ctx.fillStyle = color; ctx.fill("evenodd"); ctx.globalAlpha = 1; }
     ctx.lineJoin = "round";
     ctx.strokeStyle = selected ? "#fff" : "rgba(0,0,0,0.75)";
     ctx.lineWidth = width + 2.5;
@@ -2342,13 +2557,29 @@ function drawInspOverlay() {
     ctx.stroke();
     ctx.restore();
   };
-  for (const issue of list) if (issue !== sel) outline(issue, 1.5, false);
+  for (const issue of list) if (issue !== sel) outline(issue, art ? 1 : 1.5, false);
   if (sel) {
     if (sel.details?.held_material_outline_mm) {  // the piece a narrow connection holds: thin dashed
       ctx.save(); ctx.setLineDash([5, 4]); ctx.strokeStyle = SEV_COLOR[sel.severity]; ctx.lineWidth = 1;
       trace(sel.details.held_material_outline_mm); ctx.stroke(); ctx.restore();
     }
     outline(sel, 2.5, true);
+  }
+  // On the processed image, on top: what the selected issue reveals (hatched) and the image region it
+  // belongs to (black + white dashed outline), so the responsible detail is visible on any color. A large
+  // region is not outlined (only its part near the issue was measured); its revealed pixels are hatched.
+  if (art && sel?.feature) {
+    const f = sel.feature;
+    for (const r of f.regions || []) {
+      if (r.outline_clipped) continue;
+      ctx.save(); trace(r.outline_mm); ctx.lineJoin = "round";
+      ctx.strokeStyle = "rgba(0,0,0,0.85)"; ctx.lineWidth = 3.5; ctx.stroke();
+      ctx.setLineDash([5, 4]); ctx.strokeStyle = "#fff"; ctx.lineWidth = 1.5; ctx.stroke(); ctx.restore();
+    }
+    if (f.revealed_outline_mm) {
+      ctx.save(); trace(f.revealed_outline_mm); ctx.fillStyle = hatchPattern(ctx); ctx.fill("evenodd");
+      ctx.strokeStyle = "rgba(0,0,0,0.9)"; ctx.lineWidth = 1; ctx.stroke(); ctx.restore();
+    }
   }
   for (const issue of list) {  // rings around features too small to see, and the numbered markers
     const m = inspMarker(g, issue);
@@ -2410,11 +2641,15 @@ function focusInspIssue(issue) {
 function selectIssue(id) {
   const issue = ui.issues?.issues?.find((i) => i.id === id);
   ui.insp.selected = id;
+  ui.insp.selectedKey = issue?.key || null;
   if (issue && ui.insp.view !== "auto" && issueHome(issue) !== ui.insp.view) ui.insp.view = issueHome(issue);
+  if (issue && ui.insp.status && (issue.review?.state || "needs_review") !== ui.insp.status) ui.insp.status = "";  // keep it listed
   render();
   if (issue) focusInspIssue(issue);
 }
 
+// Another layer in the strip: the view keeps its zoom and position (all layer images and the processed
+// image share the sheet extent), so the same place stays in view; Fit resets it.
 function inspShowLayer(key) {
   const d = ui.issues;
   if (!d || d.error) return;
@@ -2422,18 +2657,11 @@ function inspShowLayer(key) {
   ui.insp.kind = "";
   ui.insp.severity = "";
   const sel = d.issues.find((i) => i.id === ui.insp.selected);
-  if (sel && issueHome(sel) !== key) ui.insp.selected = null;
-  ui.insp.zoom = null;  // a new image starts at Fit
-  ui.insp.free = false;
+  if (sel && issueHome(sel) !== key) { ui.insp.selected = null; ui.insp.selectedKey = null; }
   render();
 }
 
-function bindInspector() {
-  const canvas = $("#insp-overlay");
-  if (!canvas) return;
-  bindViewport("insp", canvas);
-  $("#insp-image")?.addEventListener("load", () => applyView("insp"));
-  applyView("insp");
+function bindInspHits(canvas, side) {
   let down = null;
   canvas.addEventListener("pointerdown", (e) => { if (e.button === 0 && !ui.artSpace) down = [e.clientX, e.clientY]; });
   canvas.addEventListener("pointerup", (e) => {
@@ -2441,8 +2669,8 @@ function bindInspector() {
     const moved = Math.hypot(e.clientX - down[0], e.clientY - down[1]);
     down = null;
     const d = ui.issues;
-    const g = inspScreen();
-    if (moved > 4 || !d || d.error || !g) return;
+    const g = d && !d.error ? inspScreen(side) : null;
+    if (moved > 4 || !g) return;
     const x = e.clientX - g.c.left, y = e.clientY - g.c.top;
     const tol = 6;
     const hits = filteredIssues(d).filter((i) => inspOnImage(d, i) && i.bbox_mm).map((i) => {
@@ -2456,6 +2684,21 @@ function bindInspector() {
     hits.sort((p, q) => (q.onMarker - p.onMarker) || p.area - q.area);
     selectIssue(hits[0].i.id);
   });
+}
+
+function bindInspector() {
+  const canvas = $("#insp-overlay");
+  if (!canvas) return;
+  bindViewport("insp", canvas);
+  $("#insp-image")?.addEventListener("load", () => applyView("insp"));
+  bindInspHits(canvas, "layer");
+  const artCanvas = $("#insp-art-overlay");
+  if (artCanvas) {
+    bindViewport("inspa", artCanvas);
+    $("#insp-art-image")?.addEventListener("load", () => { applyView("insp"); syncView("insp", "inspa"); });
+    bindInspHits(artCanvas, "art");
+  }
+  applyView("insp");
 }
 
 // Open the sheet editor on the issue: its layer selected, a marker on the location, zoomed onto it.
@@ -3377,6 +3620,14 @@ async function onClick(event) {
     case "art-color": await artworkChoose(el.dataset.color, "palette"); break;
     case "art-cancel": ui.art = keepArtView(); render(); break;
     case "insp-select": selectIssue(el.dataset.issue); break;
+    case "insp-goto": selectIssue(el.dataset.issue); break;  // the same place on another layer
+    case "insp-review": {
+      const sel = ui.issues?.issues?.find((i) => i.id === ui.insp.selected);
+      if (!sel?.key) break;
+      const keys = el.dataset.scope === "group" ? [sel, ...inspGroupMates(ui.issues, sel)].map((i) => i.key) : [sel.key];
+      await inspReview(keys, el.dataset.state);
+      break;
+    }
     case "insp-layer": inspShowLayer(el.dataset.key); break;
     case "insp-step": {
       const list = ui.issues && !ui.issues.error ? filteredIssues(ui.issues) : [];
@@ -3412,7 +3663,7 @@ function onChange(event) {
   const el = event.target;
   if (el.id === "project-select") {
     location.hash = el.value ? `#/${encodeURIComponent(el.value)}` : "#/";
-  } else if (["insp-kind", "insp-severity"].includes(el.id)) {
+  } else if (["insp-kind", "insp-severity", "insp-status"].includes(el.id)) {
     ui.insp[el.id.slice(5)] = el.value;
     render();
   } else if (el.id === "art-picker") {
