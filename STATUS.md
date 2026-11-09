@@ -1201,3 +1201,11 @@ follow the light-blue body). Not user approved; no CAD exported.
   thin-decorative warnings on Chupa, Oscariko, turtle_on_leaf, US, vaporion; unsupported openings 0 -> 0;
   risky cutouts 106->22, 7->6, 28->16, 29->12, 49->13. Smaller reported slot widths explained (residue-piece
   measure; no cutout pixel narrower). tests/test_widening.py +2 tests.
+- 2026-11-09 — Committed per feature (user-approved plan): 9c4d0c3 Fit Artwork to Canvas, 9557745 Review Layers,
+  bfef185 speckle cleanup, 90b660b Issue Visual Inspector, 9cd96ce cutout widening (+ .gitignore). Each commit
+  checked in a clean worktree: node --check, imports, its non-browser tests (13 / 1 / 7 / 6 PASS); the last commit
+  equals the tested working tree. Untracked docs (interview, Hebrew textbook, user guide) left uncommitted.
+  Rebuilt: dist\LayerForge\LayerForge.exe (2026-11-09 07:51) and dist\LayerForge-0.1.0-win64.zip (07:52, SHA-256
+  bd5a4c261ee6a82762e52ef0922a95e9854a07ae32855ac76d83f9c2b53b7986); bundled static files identical to src.
+  Packaged tests (one per process): 9 PASS. Five-project CAD-kit re-run not done (low memory earlier).
+  Physical print test: PENDING.

@@ -377,7 +377,8 @@ No complete UI/server, arbitrary photographic depth estimation, frame design, gl
 - [x] Chupa regression on a scratch copy (106 -> 20 risky cutouts; kit CAD_VALID); original unchanged.
 - [x] User approved the implementation (2026-11-08); default ON for new projects.
 - [x] Final audit: no new thin material below 1.2 mm (`_ThinGuard` + gate), no new unsupported cutouts.
-- [ ] Commit per feature (plan awaiting approval), then rebuild exe/zip and run packaged tests.
+- [x] Committed per feature (user-approved plan, 2026-11-09): 9c4d0c3 fit, 9557745 review layers, bfef185
+  speckle cleanup, 90b660b issue inspector, 9cd96ce widening; exe/zip rebuilt; packaged tests 9 PASS.
 - [x] Review round: performance (+19.3 s -> +11.8 s on Chupa), idempotent repeated widening, no automatic
   widening of existing projects, edge-connected removal + "no new cutout" gate; validated on 5 projects.
 - [ ] Physical print test (pending).
