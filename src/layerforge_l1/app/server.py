@@ -252,9 +252,12 @@ class Handler(BaseHTTPRequestHandler):
             decisions = body.get("detail_decisions")
             if decisions is not None:
                 decisions = check_detail_decisions(decisions)  # a bad request fails now, not in the job
+            clean = body.get("clean_speckles")
+            if clean is not None and not isinstance(clean, bool):
+                raise AppError("clean_speckles must be true or false")
             ws.refuse_if_artwork_edited(name, "re-running intake")
             job = app.submit("propose", name, partial(ws.propose, name, decisions=decisions,
-                                                      plan=body.get("plan", True) is not False))
+                                                      plan=body.get("plan", True) is not False, clean_speckles=clean))
         elif action == "resize" and len(parts) == 5 and parts[4] == "analyze":
             ws.resize_subject(name)  # something to assess; checked now, not in the job
             job = app.submit("resize_analysis", name, partial(ws.resize_analysis, name, body.get("process"),

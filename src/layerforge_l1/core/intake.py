@@ -59,6 +59,13 @@ class IntakeConfig:
     unmatched_min_area_mm2: float = 2.0
     max_non_flat_fraction: float = 0.05
     max_snap_changed_fraction: float = 0.02
+    # Speckle cleanup (``merge_undrawn_boundaries``): two touching color regions are one region when
+    # the source barely changes across their boundary.  Measured on the workspace illustrations:
+    # drawn edges change the source by >= 0.75 of the palette difference, grain splits by <= 0.48.
+    clean_speckles: bool = True
+    undrawn_step_ratio: float = 0.4
+    undrawn_max_delta: float = 40.0  # OpenCV 8-bit Lab units; larger differences are never merged
+    undrawn_min_boundary_px: int = 6
 
 
 def load_image(path: Path) -> tuple[np.ndarray, np.ndarray | None, dict[str, Any]]:
@@ -162,6 +169,98 @@ def _thin_feature_pixels(mask: np.ndarray, width_px: int) -> int:
     return int((mask & ~opened).sum())
 
 
+def _color_regions(labels: np.ndarray, inside: np.ndarray) -> tuple[np.ndarray, int]:
+    """4-connected regions of one color each, numbered 1..n over the artwork (0 outside)."""
+
+    region = np.zeros(labels.shape, np.int32)
+    count = 0
+    for color in np.unique(labels[inside]):
+        pieces, found = ndimage.label((labels == color) & inside)
+        region[pieces > 0] = pieces[pieces > 0] + count
+        count += found
+    return region, count
+
+
+def merge_undrawn_boundaries(labels: np.ndarray, inside: np.ndarray, smooth_lab: np.ndarray, palette: np.ndarray,
+                             config: IntakeConfig) -> tuple[np.ndarray, np.ndarray]:
+    """Merge touching color regions whose shared boundary the source does not draw.
+
+    Grain or texture in one drawn color (an outline, a shaded collar) can sit across the threshold
+    between two palette colors; snapping then cuts it into a patchwork of both, which become extra
+    cutouts and sheets.  Across a drawn edge the source changes by about the palette difference;
+    across such a split it barely changes.  For each boundary between two regions the median source
+    step (smoothed Lab, one pixel beyond each side) is compared with the palette difference; regions
+    joined by undrawn boundaries become one region with the member color closest to their mean.
+    Drawn details keep their edges whatever their size.  Returns the labels and the changed pixels.
+    """
+
+    out = labels.copy()
+    palette_lab = _lab(palette)
+    side_h, side_w = labels.shape
+    for _ in range(4):
+        region, count = _color_regions(out, inside)
+        if count < 2:
+            break
+        color = np.zeros(count + 1, np.int64)
+        color[region[inside]] = out[inside]
+        first, second, steps = [], [], []
+        for axis, size in ((0, side_h), (1, side_w)):
+            if size < 4:
+                continue
+            a = region.take(range(1, size - 2), axis=axis)
+            b = region.take(range(2, size - 1), axis=axis)
+            across = (a != b) & (a > 0) & (b > 0)
+            before = smooth_lab.take(range(0, size - 3), axis=axis)[across]
+            after = smooth_lab.take(range(3, size), axis=axis)[across]
+            first.append(np.minimum(a[across], b[across]))
+            second.append(np.maximum(a[across], b[across]))
+            steps.append(np.linalg.norm(before - after, axis=1))
+        if not first or not sum(len(f) for f in first):
+            break
+        lo, hi, step = (np.concatenate(v) for v in (first, second, steps))
+        key = lo.astype(np.int64) * (count + 1) + hi
+        order = np.argsort(key, kind="stable")
+        key, lo, hi, step = key[order], lo[order], hi[order], step[order]
+        starts = np.r_[0, np.nonzero(np.diff(key))[0] + 1]
+        lengths = np.diff(np.r_[starts, len(key)])
+        median = np.array([np.median(step[s:s + n]) for s, n in zip(starts, lengths)])
+        lo, hi = lo[starts], hi[starts]
+        delta = np.linalg.norm(palette_lab[color[lo]] - palette_lab[color[hi]], axis=1)
+        undrawn = ((lengths >= config.undrawn_min_boundary_px) & (delta <= config.undrawn_max_delta)
+                   & (median < config.undrawn_step_ratio * delta))
+        if not undrawn.any():
+            break
+        parent = np.arange(count + 1)
+
+        def root(x: int) -> int:
+            while parent[x] != x:
+                parent[x] = parent[parent[x]]
+                x = parent[x]
+            return x
+
+        for x, y in zip(lo[undrawn], hi[undrawn]):
+            rx, ry = root(int(x)), root(int(y))
+            if rx != ry:
+                parent[max(rx, ry)] = min(rx, ry)
+        roots = np.array([root(x) for x in range(count + 1)])
+        group = roots[region]
+        merged = np.unique(roots[np.r_[lo[undrawn], hi[undrawn]]])
+        sums = np.stack([np.bincount(group[inside], weights=smooth_lab[inside][:, k], minlength=count + 1)
+                         for k in range(3)], 1)
+        sizes = np.maximum(np.bincount(group[inside], minlength=count + 1), 1)
+        mean = sums / sizes[:, None]
+        best = color.copy()
+        for g in merged:
+            options = np.unique(color[np.nonzero(roots == g)[0]])
+            best[g] = options[np.argmin(np.linalg.norm(palette_lab[options] - mean[g], axis=1))]
+        relabel = np.isin(group, merged) & inside
+        new = best[group[relabel]].astype(out.dtype)
+        if (new == out[relabel]).all():
+            break
+        out[relabel] = new
+    return out, inside & (out != labels)
+
+
 # -- details changed by intake ---------------------------------------------------------------
 # A detail is a coherent drawn piece, not anti-aliasing: at least this area, at least two pixels
 # wide somewhere, and (for removed pieces) its smoothed color close to the palette color it had.
@@ -191,7 +290,8 @@ def _width_mm(mask: np.ndarray, mm_per_pixel: float) -> float:
 
 
 def detect_details(canvas: np.ndarray, inside: np.ndarray, palette: np.ndarray, smooth_labels: np.ndarray,
-                   labels: np.ndarray, smooth: np.ndarray, mm_per_pixel: float, config: IntakeConfig) -> list[dict[str, Any]]:
+                   labels: np.ndarray, smooth: np.ndarray, mm_per_pixel: float, config: IntakeConfig,
+                   cleaned: np.ndarray | None = None) -> list[dict[str, Any]]:
     """Recognizable details that the default intake recolored or removed.
 
     * ``color_not_in_palette``: a coherent piece whose (smoothed) color is far from every palette
@@ -199,7 +299,8 @@ def detect_details(canvas: np.ndarray, inside: np.ndarray, palette: np.ndarray, 
       (e.g. red lips, a gold necklace).
     * ``removed_by_cleanup``: a coherent piece that took a palette color after smoothing but was
       erased by the majority filter / small-fragment merge (e.g. eye whites).
-    Anti-aliasing (blends, one-pixel rims) is not a detail.  Each entry keeps its pixel mask under
+    Anti-aliasing (blends, one-pixel rims) is not a detail, nor is a piece merged by the speckle
+    cleanup (``cleaned``: it had no drawn edge).  Each entry keeps its pixel mask under
     ``_mask``; nothing is changed here.
     """
 
@@ -245,6 +346,8 @@ def detect_details(canvas: np.ndarray, inside: np.ndarray, palette: np.ndarray, 
             lost = labels[box][local] != color
             if lost.mean() < 0.5 or not ndimage.binary_erosion(local).any():
                 continue
+            if cleaned is not None and (lost & cleaned[box][local]).sum() * 2 >= lost.sum():
+                continue  # merged by the speckle cleanup, not erased by the filters
             residual = np.linalg.norm(smooth_lab[box][local] - palette_lab[color], axis=1)
             if np.median(residual) > config.flat_residual_delta:
                 continue  # a blend that happened to snap to this color
@@ -458,10 +561,26 @@ def prepare_target(
     smooth = cv2.bilateralFilter(canvas, flatten.bilateral_diameter, flatten.bilateral_sigma_color, flatten.bilateral_sigma_space)
     smooth_lab = _lab(smooth)
     smooth_labels = _nearest_palette(smooth_lab, _lab(palette))[0].reshape(side, side)
-    details = detect_details(canvas, inside, palette, smooth_labels, default_labels, smooth, mm_per_pixel, config)
+    snapped_labels = default_labels
+    cleaned = np.zeros((side, side), bool)
+    if config.clean_speckles:
+        default_labels, cleaned = merge_undrawn_boundaries(default_labels, inside, smooth_lab.reshape(side, side, 3),
+                                                           palette, config)
+    details = detect_details(canvas, inside, palette, smooth_labels, default_labels, smooth, mm_per_pixel, config,
+                             cleaned)
     default_palette = palette
     labels, palette = apply_detail_decisions(default_labels, smooth, palette, details, decisions, config.merge_delta)
     frame_rgb = choose_frame_color(palette)
+    before_cleanup = None
+    if cleaned.any():  # the same intake with the cleanup off, shown as "before" (choices that still apply)
+        plain = detect_details(canvas, inside, default_palette, smooth_labels, snapped_labels, smooth, mm_per_pixel, config)
+        known = {d["id"] for d in plain}
+        plain_labels, plain_palette = apply_detail_decisions(
+            snapped_labels, smooth, default_palette, plain, {k: v for k, v in (decisions or {}).items() if k in known},
+            config.merge_delta)
+        before_cleanup = np.empty((side, side, 3), np.uint8)
+        before_cleanup[:] = choose_frame_color(plain_palette)
+        before_cleanup[inside] = plain_palette[plain_labels[inside]]
 
     # Measurements on the artwork area only (never on the frame padding).
     canvas_lab = _lab(canvas[inside])
@@ -503,6 +622,10 @@ def prepare_target(
             "smallest_region_mm2": round(float(sizes.min()) * mm_per_pixel**2, 3) if sizes.size else 0.0,
             "sub_width_feature_mm2": round(_thin_feature_pixels(mask, width_px) * mm_per_pixel**2, 2),
         })
+    cleanup = {"enabled": config.clean_speckles, "pixels": int(cleaned.sum()),
+               "area_mm2": round(float(cleaned.sum()) * mm_per_pixel**2, 2),
+               "regions_before": _color_regions(snapped_labels, inside)[1] if cleaned.any() else None,
+               "regions_after": _color_regions(default_labels, inside)[1] if cleaned.any() else None}
     used_lab = palette_lab[used]
     distances = np.linalg.norm(used_lab[:, None] - used_lab[None], axis=2)
     np.fill_diagonal(distances, np.inf)
@@ -513,6 +636,7 @@ def prepare_target(
     overview, crops = detail_images(canvas, default_rgb, target, details)
     return {
         "target_rgb": target,
+        "target_before_cleanup_rgb": before_cleanup,
         "details": [{k: v for k, v in d.items() if not k.startswith("_")} for d in details],
         "detail_overview": overview,
         "source_canvas": canvas,
@@ -543,7 +667,8 @@ def prepare_target(
             "unmatched_regions_at_least_min_area": int(large_unmatched.size),
             "unmatched_area_mm2": round(float(large_unmatched.sum()), 2),
             "palette_min_share": min_share,
-            "snap_changed_fraction": round(float((labels[inside] != nearest).mean()), 5),
+            "snap_changed_fraction": round(float(((labels[inside] != nearest) & ~cleaned[inside]).mean()), 5),
+            "speckle_cleanup": cleanup,
             "structural_width_mm": width["enforced_connection_width_mm"],
             "structural_width_px": width_px,
             "transparency": "alpha below threshold becomes frame" if opaque is not None else "none",

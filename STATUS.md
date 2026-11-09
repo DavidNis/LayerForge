@@ -1072,6 +1072,17 @@ follow the light-blue body). Not user approved; no CAD exported.
   dist\LayerForge-0.1.0-win64.zip (01:48, SHA-256 0dd73e1f38318576c2578795b53656b899d7a9b9965954e55928c59b1b571d72);
   bundled static files byte-identical to src (Artwork editor below the Issues).
   Packaged tests (one per process): 9 PASS.
+- 2026-11-06 Color artifacts in candidate review (Happy_Cream_Dog_Avatar): root cause traced to intake (three
+  k-means centers on one grainy outline tone, per-pixel snapping); the planner reproduces the target exactly.
+  Fix: intake speckle cleanup (`core/intake.py` merge_undrawn_boundaries; see DECISIONS 2026-11-06), on by default,
+  "Color cleanup" section on the Plan page (collapsed; After/Before; one switch + Re-run), `clean_speckles` in the
+  propose API. Dog intake: 208 -> 71 color regions; turtle_on_leaf/US unchanged. Planner, validators, CAD unchanged.
+  New tests: tests/test_speckle_cleanup.py (8: core 6, API 1, browser 1 via tests/e2e/drive_cleanup.mjs).
+  Rebuilt with the speckle cleanup (user request): dist\LayerForge\LayerForge.exe (2026-11-06 13:30) and
+  dist\LayerForge-0.1.0-win64.zip (13:31, SHA-256 7361fcede8c4a90b575d854174f384f397236c1e5cc680dd395fd58c78e396af);
+  bundled static files byte-identical to src. Packaged tests (one per process): 9 PASS.
+  Full source suite NOT complete: stopped by Claude Code for low system memory after test_artwork_fit (14 PASS)
+  and test_artwork_paint (21 PASS); not re-run.
 
 - 2026-11-06 — Performance audit (diagnosis only, no code changed). Evidence and scripts: artifacts/perf_audit_v1/.
   Dog, clean runs: packaged exe proposal 1048 s (planning 4 candidates 611 s, CAD 402 s); print kit 516 s

@@ -988,6 +988,26 @@ FDM thresholds remain generic assumptions until a print calibrates them).
   the Issues, as before; only the page was to be cleaner. The separate artwork tab is removed again; the "Edit
   artwork" step opens Review and scrolls to the editor (Plan page before a review exists, unchanged). The rest of
   the Stage 1 cleanup (no sheet-geometry tools, collapsed Layer settings, layout) stays.
+- 2026-11-06 Intake speckle cleanup: merge color regions whose shared boundary the source does not draw.
+  - OBSERVED_IN_FILE (Happy_Cream_Dog_Avatar, read-only): the collar/outline patches exist already in the intake
+    target; planning, CAD and previews reproduce it exactly (stack mismatch 0). k-means put three centers on the
+    one grainy dark outline tone (#000000, #18130D, #281F17, 16.3-16.6 Lab apart, above merge_delta 14) and
+    per-pixel snapping let the grain choose between them: 122 regions instead of 21, 8 of 19 sheets near-black.
+  - Measured on the four workspace images whose target is aligned with the source (dog, turtle_on_leaf, US,
+    vaporion): across a drawn edge the source changes by >= 0.75 of the palette difference; across the grain
+    splits by 0.13-0.48. A larger merge_delta was rejected (tested: tongue merged with ear, outline still split).
+  - DESIGN_CHOICE: after snapping, touching regions are merged when the median source step across their boundary
+    (smoothed Lab, one pixel beyond each side) is < 0.4 x the palette difference, the difference is <= 40 and the
+    boundary is >= 6 px; a merged group takes its member color closest to its mean. Drawn details keep their
+    edges whatever their size. 0.5 chained the dog's outline to the black background (outline became black);
+    0.4 keeps them apart. Result: dog 208 -> 71 regions; turtle and US unchanged; vaporion 5 tiny pieces.
+  - Merged pieces are not reported as intake details (they had no drawn edge). snap_changed_fraction excludes
+    them; the cleanup is reported as COLOR_SPECKLES_MERGED (INFO) with before/after region counts.
+  - USER-facing: on by default (project setting `clean_speckles`; older projects get it on their next intake
+    run). Plan page: a collapsed "Color cleanup" section (one line: regions before -> after), one image with
+    After/Before, one switch with Re-run. "Before" is exactly the intake with the cleanup off.
+  - LIMITATION: very strong grain (synthetic: 9 RGB units at 1.5 px correlation) is merged only partly; smooth
+    gradients meant as printed bands are flattened unless the switch is turned off.
 - 2026-11-07 Performance Step 2: the proposal no longer exports or verifies STEP; the print kit does (user approved).
   - OBSERVED_IN_FILE (golden baselines, 5 projects): the print kit's CAD files were identical to the proposal's in
     every project, and STEP read-back (importStep + isValid) was 82-89% of each CAD stage, so the proposal repeated

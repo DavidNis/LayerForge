@@ -26,6 +26,8 @@ const ui = {
   kitNotice: null,     // result of the last kit delete / open-folder action
   kitBuildOpen: false, // kit creation form shown via "+ New Print Kit" (always shown before the first kit)
   detailChoices: {},   // intake detail id -> {action, color} chosen but not yet re-run
+  cleanupChoice: null, // speckle cleanup on/off chosen but not yet re-run (null: as planned)
+  cleanupView: "after", // Color cleanup image: "after" | "before"
   upscaleFactor: 2,    // Upscale & Retry: processing-resolution factor shown
   upscaleApproved: {}, // preview id -> the user approved its visible changes
   resizePrinter: null, // Bambu printer whose usable area limits the sheet size ("" = the process bed; null = as last checked)
@@ -244,6 +246,7 @@ async function route() {
     ui.name = name;
     ui.state = null;
     ui.pending = null;
+    ui.cleanupChoice = null;
     ui.marker = null;
     ui.sheet = null;
     ui.job = null;
@@ -617,6 +620,7 @@ function proposalView() {
     ${ui.state.draft ? `<p class="small muted panel tight">The artwork is edited in <a href="#/${encodeURIComponent(ui.name)}/review" data-action="tab" data-tab="review" data-focus="artwork">Review layers</a> while a review exists.</p>` : artworkPanel()}
     ${resizePanel()}
     ${upscalePanel()}
+    ${cleanupPanel(p, reviewing)}
     ${detailsPanel(p, reviewing)}
     ${attemptsPanel()}
     <details class="panel section" data-section="proposal-previews" ${openAttr("proposal-previews", !ready && !notPlanned)}>
@@ -843,6 +847,33 @@ function attemptsPanel() {
 }
 
 // Details intake would recolor or erase: original | default intake | as planned, with a choice each.
+// Intake speckle cleanup: patches with no drawn edge in the source were merged into the color
+// around them. Shown only when it changed something or is turned off; one switch, before/after.
+function cleanupPanel(p, reviewing) {
+  const c = p.cleanup;
+  if (!c || (c.enabled && !c.pixels)) return "";
+  const on = ui.cleanupChoice ?? c.enabled;
+  const changed = on !== c.enabled;
+  const before = p.images?.before_cleanup;
+  const view = before && ui.cleanupView === "before" ? "before" : "after";
+  const blocked = reviewing || p.intake_rerun_blocked;
+  const status = !c.enabled ? "off" : `${fmt(c.regions_before)} → ${fmt(c.regions_after)} color regions`;
+  return `<details class="panel section" data-section="cleanup" data-testid="cleanup-panel" ${openAttr("cleanup", changed)}>
+    <summary><h3>Color cleanup</h3><span class="small muted">${status}</span></summary>
+    <div class="section-body stack">
+      <p class="small muted" style="margin:0">Patches with no drawn edge in the source are merged into the color around them.</p>
+      ${before ? `<div class="segmented" role="tablist" aria-label="Cleanup view" data-testid="cleanup-view">${[["after", "After"], ["before", "Before"]].map(([v, l]) =>
+        `<button class="small ${view === v ? "active" : ""}" data-action="cleanup-view" data-view="${v}" role="tab" aria-selected="${view === v}">${l}</button>`).join("")}</div>
+      <img class="img cleanup-img" src="${esc(view === "before" ? before : p.images.target)}" alt="flat-color artwork ${view} the cleanup" data-testid="cleanup-image">` : ""}
+      <div class="row">
+        <label class="check"><input type="checkbox" id="cleanup-on" data-testid="cleanup-toggle" ${on ? "checked" : ""} ${blocked || busy() ? "disabled" : ""}> Merge patches without a drawn edge</label>
+        ${changed && !blocked ? `<button class="primary small" data-action="apply-cleanup" data-testid="apply-cleanup" ${busy() ? "disabled" : ""}>Re-run</button>` : ""}
+      </div>
+      ${blocked ? `<p class="small muted" style="margin:0">${reviewing ? "A review has started; the cleanup can no longer change for this project." : esc(p.intake_rerun_blocked)}</p>` : ""}
+    </div>
+  </details>`;
+}
+
 function detailChoice(p, d) {
   return ui.detailChoices[d.id] || p.detail_decisions?.[d.id] || { action: d.action.action, color: d.action.color };
 }
@@ -3251,6 +3282,13 @@ async function onClick(event) {
       ui.detailChoices = {};
       break;
     }
+    case "cleanup-view": ui.cleanupView = el.dataset.view; render(); break;
+    case "apply-cleanup": {
+      const p = ui.state.proposal;
+      submit(`${project}/propose`, { clean_speckles: ui.cleanupChoice ?? p.cleanup.enabled, plan: p.status !== "ARTWORK_READY_NOT_PLANNED" });
+      ui.cleanupChoice = null;
+      break;
+    }
     case "upscale-preview": submit(`${project}/upscale/preview`, { factor: ui.upscaleFactor }); break;
     case "resize-analyze": submit(`${project}/resize/analyze`, { process: processPayload(), bambu_printer: (ui.resizePrinter ?? ui.state.resize?.analysis?.bambu_printer) || null }); break;
     case "resize-preview": submit(`${project}/resize/preview`, { size_mm: Number($("#resize-size").value) }); break;
@@ -3408,6 +3446,9 @@ function onChange(event) {
     render();
   } else if (el.dataset.upscaleApprove) {
     ui.upscaleApproved[el.dataset.upscaleApprove] = el.checked;
+    render();
+  } else if (el.id === "cleanup-on") {
+    ui.cleanupChoice = el.checked;
     render();
   } else if (el.dataset.detail && el.type === "radio") {
     const p = ui.state.proposal;

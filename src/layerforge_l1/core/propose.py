@@ -97,6 +97,14 @@ def intake_flags(measurements: dict[str, Any], config: IntakeConfig) -> list[dic
             "SUB_WIDTH_FEATURES", "INFO",
             f"Visible features narrower than {m['structural_width_mm']} mm; the planner must reveal them through "
             "cutouts in front sheets, or planning fails.", area_mm2_by_color=thin))
+    cleanup = m.get("speckle_cleanup") or {}
+    if cleanup.get("pixels"):
+        flags.append(_flag(
+            "COLOR_SPECKLES_MERGED", "INFO",
+            "Color patches with no drawn edge in the source (grain splitting one color in two) were merged "
+            "into the color around them. Drawn edges are kept.",
+            pixels=cleanup["pixels"], area_mm2=cleanup["area_mm2"],
+            regions_before=cleanup["regions_before"], regions_after=cleanup["regions_after"]))
     if m["transparency"] != "none":
         flags.append(_flag("TRANSPARENCY", "INFO", "Transparent pixels became the frame (solid, never visible)."))
     return flags
@@ -158,6 +166,8 @@ def propose(
              seconds=round(time.perf_counter() - started, 1))
 
     _save_image(prepared["target_rgb"], output / "intake" / "target.png")
+    if prepared.get("target_before_cleanup_rgb") is not None:
+        _save_image(prepared["target_before_cleanup_rgb"], output / "intake" / "target_before_cleanup.png")
     _save_image((prepared["unmatched_mask"] * 255).astype(np.uint8), output / "intake" / "unmatched_regions.png")
     details = prepared["details"]
     if details:

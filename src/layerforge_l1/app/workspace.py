@@ -379,13 +379,23 @@ class Workspace:
             raise AppError("outer size and thickness must be positive; max colors 2..32")
         return out
 
-    def propose(self, name: str, progress: Callable[..., None],
-                decisions: dict[str, Any] | None = None, plan: bool = True) -> dict[str, Any]:
-        """Run the L1 proposal; ``decisions`` (intake detail id -> action) replace the saved ones.
-
-        ``plan=False`` stops after intake so the artwork colors can be edited before planning."""
+    @staticmethod
+    def intake_config(record: dict[str, Any]) -> Any:
+        """Intake settings of a project; projects saved before the speckle cleanup get it on re-run."""
 
         from ..core.intake import IntakeConfig
+
+        s = record["proposal_settings"]
+        return IntakeConfig(max_colors=s["max_colors"], clean_speckles=s.get("clean_speckles", True) is not False)
+
+    def propose(self, name: str, progress: Callable[..., None],
+                decisions: dict[str, Any] | None = None, plan: bool = True,
+                clean_speckles: bool | None = None) -> dict[str, Any]:
+        """Run the L1 proposal; ``decisions`` (intake detail id -> action) replace the saved ones.
+
+        ``plan=False`` stops after intake so the artwork colors can be edited before planning.
+        ``clean_speckles`` (when given) turns the intake speckle cleanup on or off for the project."""
+
         from ..core.planning import PlanningConfig
         from ..core.propose import ProposalConfig, propose
 
@@ -395,6 +405,23 @@ class Workspace:
         self.refuse_if_artwork_edited(name, "re-running intake")
         if decisions is not None:
             record["detail_decisions"] = check_detail_decisions(decisions)
+        if clean_speckles is not None:
+            changed = record["proposal_settings"].get("clean_speckles", True) is not bool(clean_speckles)
+            record["proposal_settings"]["clean_speckles"] = bool(clean_speckles)
+            if changed and record.get("detail_decisions"):
+                # The cleanup changes which details intake reports; choices for details that no
+                # longer exist are dropped (and reported), the others are kept.
+                from ..core.intake import load_image, prepare_target
+                from ..core.model import StackGrid
+
+                rgb, opaque, _ = load_image(path / record["source"]["file"])
+                grid = StackGrid.for_planner(self.sheet_outer_mm(record), self.processing_scale(record))
+                ids = {d["id"] for d in prepare_target(rgb, opaque, grid, self.intake_config(record))["details"]}
+                dropped = sorted(set(record["detail_decisions"]) - ids)
+                record["detail_decisions"] = {k: v for k, v in record["detail_decisions"].items() if k in ids}
+                if dropped:
+                    progress("INTAKE_DETAIL_CHOICES_DROPPED", details=dropped)
+        if decisions is not None or clean_speckles is not None:
             self._save_record(name, record)
         shutil.rmtree(path / "proposal", ignore_errors=True)
         shutil.rmtree(path / "upscale", ignore_errors=True)  # previews of the replaced proposal
@@ -402,7 +429,7 @@ class Workspace:
         planning = PlanningConfig(outer_sheet_mm=self.sheet_outer_mm(record), scale=self.processing_scale(record),
                                   thickness_mm=s["thickness_mm"])
         shutil.rmtree(path / "artwork", ignore_errors=True)  # an empty log on the replaced artwork
-        result = propose(path / record["source"]["file"], path / "proposal", IntakeConfig(max_colors=s["max_colors"]),
+        result = propose(path / record["source"]["file"], path / "proposal", self.intake_config(record),
                          ProposalConfig(planning=planning, plan=plan), progress, record.get("detail_decisions") or None)
         return {"status": result["status"], "selected": result["selected"]}
 
@@ -451,7 +478,6 @@ class Workspace:
     def upscale_preview(self, name: str, factor: Any, progress: Callable[..., None]) -> dict[str, Any]:
         """Intake of the failed proposal's image at ``factor`` x the processing resolution (no planning)."""
 
-        from ..core.intake import IntakeConfig
         from ..core.upscale import preview_upscale
 
         path, record, _ = self.failed_proposal(name)
@@ -459,7 +485,7 @@ class Workspace:
         out = path / "upscale" / f"x{factor}"
         shutil.rmtree(out, ignore_errors=True)
         result = preview_upscale(path / record["source"]["file"], path / "proposal", out, factor,
-                                 IntakeConfig(max_colors=record["proposal_settings"]["max_colors"]),
+                                 self.intake_config(record),
                                  record.get("detail_decisions"), progress)
         _write_json(out / "preview.json", {**result, "preview_id": self._preview_id(record, factor)})
         return {"status": result["status"], "changes": len(result.get("changes", []))}
@@ -494,7 +520,6 @@ class Workspace:
         ``attempts/``.  On any error the current proposal stays untouched.
         """
 
-        from ..core.intake import IntakeConfig
         from ..core.planning import PlanningConfig
         from ..core.propose import ProposalConfig, propose
 
@@ -508,7 +533,7 @@ class Workspace:
                                   thickness_mm=s["thickness_mm"])
         progress("UPSCALE_RETRY_STARTING", scale=saved["to_scale"], factor=saved["factor"])
         try:
-            result = propose(path / record["source"]["file"], staging, IntakeConfig(max_colors=s["max_colors"]),
+            result = propose(path / record["source"]["file"], staging, self.intake_config(record),
                              ProposalConfig(planning=planning), progress, saved["decisions"] or None)
         except MemoryError:
             shutil.rmtree(staging, ignore_errors=True)
@@ -622,13 +647,12 @@ class Workspace:
         """Trial planning (no CAD) to find the smallest sheet that plans, for a failed proposal."""
 
         from ..core import resize
-        from ..core.intake import IntakeConfig
 
         path, record, analysis = self.current_analysis(name)
         if not analysis.get("trial_search", {}).get("available"):
             raise AppError("trial planning is only offered for a failed proposal whose failure widths cannot predict")
         previous = _read_json(path / "proposal" / "proposal.json")
-        intake = IntakeConfig(max_colors=record["proposal_settings"]["max_colors"])
+        intake = self.intake_config(record)
         source = path / record["source"]["file"]
         decisions = record.get("detail_decisions") or None
         edited = self.edited_artwork(name)
@@ -660,7 +684,6 @@ class Workspace:
     def resize_preview(self, name: str, size_mm: Any, progress: Callable[..., None]) -> dict[str, Any]:
         """Intake at a proposed sheet size (same pixels) with checks and the predicted findings."""
 
-        from ..core.intake import IntakeConfig
         from ..core.resize import preview_resize
 
         path, record, analysis = self.current_analysis(name)
@@ -668,7 +691,7 @@ class Workspace:
         out = path / "resize" / "preview"
         shutil.rmtree(out, ignore_errors=True)
         result = preview_resize(path / record["source"]["file"], path / "proposal", out, size, analysis,
-                                IntakeConfig(max_colors=record["proposal_settings"]["max_colors"]),
+                                self.intake_config(record),
                                 record.get("detail_decisions"), progress, self.edited_artwork(name))
         result["preview_id"] = self._resize_preview_id(record, analysis, size)
         _write_json(out / "preview.json", result)
@@ -723,7 +746,6 @@ class Workspace:
         proposal (``proposal/artwork_edits/``); the archived attempt keeps the previous state.
         """
 
-        from ..core.intake import IntakeConfig
         from ..core.model import load_stack
         from ..core.planning import PlanningConfig
         import numpy as np
@@ -745,7 +767,7 @@ class Workspace:
                                   thickness_mm=s["thickness_mm"])
         progress("RESIZE_RETRY_STARTING", from_mm=saved["from_mm"], to_mm=saved["to_mm"])
         try:
-            result = propose(path / record["source"]["file"], staging, IntakeConfig(max_colors=s["max_colors"]),
+            result = propose(path / record["source"]["file"], staging, self.intake_config(record),
                              ProposalConfig(planning=planning), progress, saved["decisions"] or None,
                              artwork=None if edited is None else {
                                  "target_rgb": edited["target_rgb"], "frame_color": edited["frame_color"],
@@ -1554,7 +1576,6 @@ class Workspace:
         (kits stay listed); the artwork log moves with the new proposal as its provenance."""
 
         from ..core import artwork as art
-        from ..core.intake import IntakeConfig
         from ..core.model import load_stack
         from ..core.planning import PlanningConfig
         from ..core.propose import NOT_PLANNED, ProposalConfig, propose
@@ -1581,7 +1602,7 @@ class Workspace:
                       "log": "artwork_edits/edits.json" if edits else None}
         progress("ARTWORK_REPLAN_STARTING", edits=len(edits))
         try:
-            result = propose(path / record["source"]["file"], staging, IntakeConfig(max_colors=s["max_colors"]),
+            result = propose(path / record["source"]["file"], staging, self.intake_config(record),
                              ProposalConfig(planning=planning), progress, record.get("detail_decisions") or None,
                              artwork={"target_rgb": edited, "provenance": provenance,
                                       "frame_color": log["base"]["frame_color"],
@@ -1934,6 +1955,11 @@ class Workspace:
         if (path / "proposal" / "intake" / "details_overview.png").is_file():
             view["images"]["details_overview"] = self.url(name, "proposal/intake/details_overview.png", stamp)
         view["palette_added"] = proposal["intake"].get("palette_added_by_decisions", [])
+        cleanup = proposal["intake"].get("speckle_cleanup")
+        if cleanup is not None:  # proposals made before the speckle cleanup carry no entry
+            view["cleanup"] = dict(cleanup)
+            if (path / "proposal" / "intake" / "target_before_cleanup.png").is_file():
+                view["images"]["before_cleanup"] = self.url(name, "proposal/intake/target_before_cleanup.png", stamp)
         if (path / "proposal" / "intake" / "unmatched_regions.png").is_file():
             view["images"]["unmatched"] = self.url(name, "proposal/intake/unmatched_regions.png", stamp)
         selected = path / "proposal" / "selected" / "previews"

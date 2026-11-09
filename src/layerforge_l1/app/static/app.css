@@ -527,3 +527,5 @@ button.primary.large, .button.large { padding: 9px 18px; min-height: 40px; font-
 .art-fit-before { position: relative; max-width: 520px; }
 .art-fit-stage img.art-fit-overlay { position: absolute; inset: 0; border-color: transparent; background: transparent; pointer-events: none; }
 
+/* Color cleanup (Plan): one image, before/after toggle */
+.cleanup-img { max-width: 520px; width: 100%; image-rendering: pixelated; }
