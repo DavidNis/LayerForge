@@ -35,7 +35,7 @@ from scipy import ndimage
 from .connectivity_repair import _width_parameters
 from .hidden_width_repair import WidthRepairConfig, validation_poc_config
 from .layer_optimization import DEFAULT_OPTIMIZATION_CONFIG, OptimizationConfig
-from .subtractive_poc import DEFAULT_CONFIG, PocConfig, _outer_and_perimeter
+from .subtractive_poc import DEFAULT_CONFIG, PocConfig, RectPocConfig, _outer_and_perimeter
 
 
 @dataclass(frozen=True)
@@ -64,15 +64,58 @@ class RevealConfig:
     # "area": most covered area first; "colors": fewest unfinished colors first.
     beam_score: str = "area"
     max_sheets: int = 24
+    # Outer sheet height (y) when it differs from the width ``outer_sheet_mm`` (x); None: a square sheet.
+    outer_sheet_height_mm: float | None = None
+
+    @property
+    def square(self) -> bool:
+        return self.outer_sheet_height_mm is None or self.outer_sheet_height_mm == self.outer_sheet_mm
 
 
 def physical_grid(
     config: RevealConfig, native: PocConfig = DEFAULT_CONFIG
 ) -> PocConfig:
-    return validation_poc_config(
-        native,
-        WidthRepairConfig(physical_size_mm=config.outer_sheet_mm, validation_scale=config.scale),
-    )
+    if config.square:
+        return validation_poc_config(
+            native,
+            WidthRepairConfig(physical_size_mm=config.outer_sheet_mm, validation_scale=config.scale),
+        )
+    return rect_grid(config.outer_sheet_mm, float(config.outer_sheet_height_mm), config.scale, native)
+
+
+def rect_grid(width_mm: float, height_mm: float, scale: int, native: PocConfig = DEFAULT_CONFIG) -> PocConfig:
+    """Grid of a rectangular sheet, with square pixels.
+
+    The longer side has the square grid's pixels (``native.outer_pixels * scale``, so the same mm per
+    pixel as a square sheet of that side); the shorter side has whole native pixels: it is the requested
+    length rounded to the native pixel (< half a native pixel off; the grid reports the actual size).
+    The perimeter band is the same number of pixels, so the same width in mm, on all four sides.
+    """
+
+    if scale < 1:
+        raise ValueError("scale must be positive")
+    long_mm, short_mm = max(width_mm, height_mm), min(width_mm, height_mm)
+    native_mm = long_mm / native.outer_pixels
+    short_native = int(round(short_mm / native_mm))
+    if short_native - 2 * native.perimeter_pixels < 1:
+        raise ValueError(f"a {width_mm:g} x {height_mm:g} mm sheet leaves no artwork inside the perimeter band")
+    long_px, short_px = native.outer_pixels * scale, short_native * scale
+    band = native.perimeter_pixels * scale
+    cols, rows = (long_px, short_px) if width_mm >= height_mm else (short_px, long_px)
+    if cols == rows:  # rounds to a square
+        return validation_poc_config(native, WidthRepairConfig(physical_size_mm=long_mm, validation_scale=scale))
+    return RectPocConfig(**{**native.__dict__, "analysis_pixels": cols - 2 * band, "outer_pixels": cols,
+                            "perimeter_pixels": band, "sheet_size_mm": cols * long_mm / long_px,
+                            "outer_rows": rows, "analysis_rows": rows - 2 * band})
+
+
+def native_mm_per_pixel(config: RevealConfig, native_width: int) -> float:
+    """Millimetres per pixel of a native (artwork-grid) array ``native_width`` pixels wide."""
+
+    if config.square:  # unchanged arithmetic for square sheets
+        return config.outer_sheet_mm * DEFAULT_CONFIG.analysis_pixels / DEFAULT_CONFIG.outer_pixels / native_width
+    grid = physical_grid(config)
+    return grid.sheet_size_mm / grid.outer_pixels * grid.analysis_pixels / native_width
 
 
 def width_kernel(
@@ -112,7 +155,7 @@ def build_cells(
         )
 
     # Tile and fragment sizes are physical, so cells match at any resolution.
-    mm_per_pixel = config.outer_sheet_mm * DEFAULT_CONFIG.analysis_pixels / DEFAULT_CONFIG.outer_pixels / width
+    mm_per_pixel = native_mm_per_pixel(config, width)
     tile = max(2, int(round(config.cell_tile_mm / mm_per_pixel)))
     min_pixels = max(1, int(round(config.min_cell_mm2 / mm_per_pixel**2)))
     cell_map = np.full(labels.shape, -1, dtype=np.int32)
@@ -165,9 +208,11 @@ def _merge_small_cells(
 def embed(native: np.ndarray, grid: PocConfig, fill: int) -> np.ndarray:
     """Nearest-upsample an artwork-sized array into the full physical grid."""
 
-    scale = grid.analysis_pixels // native.shape[0]
+    scale = grid.analysis_pixels // native.shape[1]
+    if tuple(native.shape[:2]) != (grid.analysis_shape[0] // scale, grid.analysis_shape[1] // scale):
+        raise ValueError(f"artwork array {native.shape[:2]} does not fit the {grid.analysis_shape} px artwork grid")
     p = grid.perimeter_pixels
-    out = np.full((grid.outer_pixels, grid.outer_pixels), fill, dtype=native.dtype)
+    out = np.full(grid.outer_shape, fill, dtype=native.dtype)
     out[p:-p, p:-p] = np.repeat(np.repeat(native, scale, axis=0), scale, axis=1)
     return out
 
@@ -521,8 +566,7 @@ class RevealPlanner:
     def refined(self, targets: np.ndarray, tile_mm: float, min_cell_mm2: float) -> "RevealPlanner":
         """A planner whose ``targets`` cells are cut finer; physics and every other cell unchanged."""
 
-        mm_per_pixel = (self.config.outer_sheet_mm * DEFAULT_CONFIG.analysis_pixels / DEFAULT_CONFIG.outer_pixels
-                        / self.native_cells.shape[1])
+        mm_per_pixel = native_mm_per_pixel(self.config, self.native_cells.shape[1])
         tile = max(2, int(round(tile_mm / mm_per_pixel)))
         min_pixels = max(1, int(round(min_cell_mm2 / mm_per_pixel**2)))
         cells = refine_cells(self.native_cells, self.cell_region, targets, tile, min_pixels)
@@ -673,7 +717,7 @@ class RevealPlanner:
         regions = len(np.unique(self.cell_region))
         return {
             "seam_edge_length_native_pixels": seam_pixels,
-            "seam_edge_length_mm": seam_pixels * self.width_parameters["mm_per_pixel"] * self.grid.analysis_pixels / cells.shape[0],
+            "seam_edge_length_mm": seam_pixels * self.width_parameters["mm_per_pixel"] * self.grid.analysis_pixels / cells.shape[1],
             "source_regions": regions,
             "source_regions_split_across_sheets": len(split_regions),
             "split_region_ids": sorted(split_regions),

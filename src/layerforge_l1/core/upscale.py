@@ -91,13 +91,15 @@ def available_memory_bytes() -> int | None:
 
 
 def estimate_peak_bytes(grid: StackGrid) -> int:
-    return int(PEAK_BASE_BYTES + PEAK_BYTES_PER_PIXEL * grid.outer_pixels**2)
+    return int(PEAK_BASE_BYTES + PEAK_BYTES_PER_PIXEL * grid.outer_pixels * grid.rows)
 
 
-def resource_check(outer_mm: float, scale: int, available: int | None = None) -> dict[str, Any]:
-    """Whether a proposal at ``scale`` is expected to fit in the available memory."""
+def resource_check(outer_mm: float, scale: int, available: int | None = None,
+                   height_mm: float | None = None) -> dict[str, Any]:
+    """Whether a proposal at ``scale`` is expected to fit in the available memory (``height_mm``: a
+    rectangular sheet's height, None if square)."""
 
-    grid = StackGrid.for_planner(outer_mm, scale)
+    grid = StackGrid.for_planner(outer_mm, scale, height_mm)
     peak = estimate_peak_bytes(grid)
     available = available_memory_bytes() if available is None else available
     gib = 2.0**30
@@ -114,7 +116,7 @@ def resource_check(outer_mm: float, scale: int, available: int | None = None) ->
         out["reason"] = (f"estimated peak {out['estimated_peak_gb']} GB exceeds {int(MEMORY_HEADROOM * 100)} % of the "
                          f"{out['available_gb']} GB available now; close other programs or choose a smaller factor")
     # A failed proposal stops early, so its own time says little about a full run.
-    out["estimated_minutes"] = round(SECONDS_PER_PIXEL * grid.outer_pixels**2 / 60, 1)
+    out["estimated_minutes"] = round(SECONDS_PER_PIXEL * grid.outer_pixels * grid.rows / 60, 1)
     out["time_basis"] = "measured on one 5-color illustration; varies with the artwork"
     return out
 
@@ -143,8 +145,9 @@ def boundary_check(old_grid: StackGrid, old: dict[str, Any], old_inside: np.ndar
     def check(name: str, ok: bool, **values: Any) -> None:
         checks.append({"check": name, "pass": bool(ok), **values})
 
-    check("sheet size unchanged", abs(new_grid.outer_sheet_mm - old_grid.outer_sheet_mm) < 1e-9,
-          previous_mm=old_grid.outer_sheet_mm, new_mm=new_grid.outer_sheet_mm)
+    check("sheet size unchanged", max(abs(a - b) for a, b in zip(new_grid.outer_mm, old_grid.outer_mm)) < 1e-9,
+          previous_mm=old_grid.outer_sheet_mm if old_grid.square else list(old_grid.outer_mm),
+          new_mm=new_grid.outer_sheet_mm if new_grid.square else list(new_grid.outer_mm))
     check("artwork aperture unchanged", abs(new_grid.artwork_mm - old_grid.artwork_mm) < 1e-6,
           previous_mm=round(old_grid.artwork_mm, 4), new_mm=round(new_grid.artwork_mm, 4))
     old_perimeter = old_grid.perimeter_pixels * old_grid.mm_per_pixel
@@ -152,7 +155,7 @@ def boundary_check(old_grid: StackGrid, old: dict[str, Any], old_inside: np.ndar
     check("shared outer perimeter unchanged", abs(new_perimeter - old_perimeter) < 1e-6,
           previous_mm=round(old_perimeter, 4), new_mm=round(new_perimeter, 4))
     check("pixel resolution only", new_grid.outer_pixels == factor * old_grid.outer_pixels
-          and new_grid.scale == factor * old_grid.scale,
+          and new_grid.rows == factor * old_grid.rows and new_grid.scale == factor * old_grid.scale,
           previous_px=old_grid.outer_pixels, new_px=new_grid.outer_pixels, factor=factor)
 
     a, b = _placement_mm(old), _placement_mm(new)
@@ -167,10 +170,11 @@ def boundary_check(old_grid: StackGrid, old: dict[str, Any], old_inside: np.ndar
     check("aspect ratio preserved", abs(aspect - source_aspect) <= source_aspect * (1 / new_w + 1 / new_h) + 1e-9,
           source=round(source_aspect, 5), new=round(aspect, 5))
     side = new["artwork_grid_px"]
+    side_w, side_h = (side, side) if isinstance(side, int) else side
     x0, y0 = new["placement"]["offset_px"]
     rect = np.zeros_like(new_inside)
     rect[max(y0, 0):y0 + new_h, max(x0, 0):x0 + new_w] = True
-    inside_rect = x0 >= 0 and y0 >= 0 and x0 + new_w <= side and y0 + new_h <= side and not (new_inside & ~rect).any()
+    inside_rect = x0 >= 0 and y0 >= 0 and x0 + new_w <= side_w and y0 + new_h <= side_h and not (new_inside & ~rect).any()
     check("complete artwork inside the aperture", inside_rect, placed_px=[new_w, new_h], aperture_px=side)
     # The opaque area may move only along its outline (one previous pixel), never elsewhere.
     old_up = np.kron(old_inside, np.ones((factor, factor), bool))
@@ -337,9 +341,9 @@ def preview_upscale(image_path: Path, previous_dir: Path, output: Path, factor: 
     previous = json.loads((Path(previous_dir) / "proposal.json").read_text(encoding="utf-8"))
     planning = PlanningConfig(**{k: v for k, v in previous["planning_config"].items()
                                  if k in PlanningConfig.__dataclass_fields__})
-    old_grid = StackGrid.for_planner(planning.outer_sheet_mm, planning.scale)
+    old_grid = StackGrid.for_planner(planning.outer_sheet_mm, planning.scale, planning.outer_sheet_height_mm)
     new_scale = planning.scale * factor
-    resources = resource_check(planning.outer_sheet_mm, new_scale)
+    resources = resource_check(planning.outer_sheet_mm, new_scale, height_mm=planning.outer_sheet_height_mm)
     output = Path(output)
     result: dict[str, Any] = {
         "schema": PREVIEW_SCHEMA, "factor": factor, "from_scale": planning.scale, "to_scale": new_scale,
@@ -358,7 +362,7 @@ def preview_upscale(image_path: Path, previous_dir: Path, output: Path, factor: 
     rgb, opaque, source = load_image(image_path)
     if source["sha256"] != previous["source"]["sha256"]:
         raise StackError("the source image differs from the one of the previous proposal")
-    new_grid = StackGrid.for_planner(planning.outer_sheet_mm, new_scale)
+    new_grid = StackGrid.for_planner(planning.outer_sheet_mm, new_scale, planning.outer_sheet_height_mm)
     first = prepare_target(rgb, opaque, new_grid, intake)  # default actions: find the new details
     carried, carry_report = carry_decisions(previous.get("intake_details", []), previous_decisions,
                                             first["details"], factor)

@@ -157,7 +157,7 @@ def assess_printability(stack: SheetStack, process: PrintProcess,
 
     from .cad import perimeter_band, polygons, sheet_geometry
 
-    size = stack.grid.outer_sheet_mm
+    raster_w, raster_h = stack.grid.raster_mm  # the sheet geometry's frame (the outer size if square)
     names = stack.export_names()
     geometries = [sheet_geometry(stack, index) for index in range(len(stack.sheets))]
     front_of: list[Any] = [None] * len(geometries)
@@ -172,7 +172,7 @@ def assess_printability(stack: SheetStack, process: PrintProcess,
     for index, (sheet, name, geometry) in enumerate(zip(stack.sheets, names, geometries)):
         hidden_by = front_of[index]
         found: list[dict[str, Any]] = []
-        holes = [h for h in polygons(box(0, 0, size, size).difference(geometry)) if h.area > 1e-9]
+        holes = [h for h in polygons(box(0, 0, raster_w, raster_h).difference(geometry)) if h.area > 1e-9]
         for hole in holes:
             width = inscribed_diameter_mm(hole, process.min_opening_mm)
             severity = _severity(width, process.nozzle_diameter_mm, process.min_opening_mm)
@@ -209,10 +209,15 @@ def assess_printability(stack: SheetStack, process: PrintProcess,
                 found.append({"sheet_id": sheet.id, "file": name, "kind": "rim_step_not_layer_multiple",
                               "severity": "INFO", "note": f"rim step {rim_layers:.2f} layers; the slicer will round it"})
         row = exported_rows[index] if exported_rows else None
-        x0, y0, x1, y1 = geometry.bounds
+        # Not exported yet: the sheet's outline (a rectangular sheet's physical outer size, both axes).
+        x0, y0, x1, y1 = geometry.bounds if stack.grid.square else (0.0, 0.0, *stack.grid.outer_mm)
         extent = (row["stl_bounds_mm"] if row else [[x0, y0, 0.0], [x1, y1, height]])
         dx, dy, dz = (extent[1][k] - extent[0][k] for k in range(3))
         fits = (dx <= process.bed_x_mm and dy <= process.bed_y_mm) or (dy <= process.bed_x_mm and dx <= process.bed_y_mm)
+        if fits and not (dx <= process.bed_x_mm and dy <= process.bed_y_mm):  # never for a square sheet
+            found.append({"sheet_id": sheet.id, "file": name, "kind": "turn_on_the_bed", "severity": "INFO",
+                          "note": f"part {dx:.2f} x {dy:.2f} mm fits the {process.bed_x_mm} x {process.bed_y_mm} mm bed "
+                                  "only turned 90 degrees: turn it in the slicer (the files are not rotated)"})
         if not fits or dz > process.max_z_mm:
             found.append({"sheet_id": sheet.id, "file": name, "kind": "exceeds_build_volume", "severity": "UNSUPPORTED",
                           "note": f"part {dx:.2f} x {dy:.2f} x {dz:.2f} mm, build volume "
@@ -254,8 +259,8 @@ def side_section(stack: SheetStack, cad_dir: Path, path: Path, y_mm: float | Non
     import trimesh
     from shapely.ops import polygonize, unary_union
 
-    size = stack.grid.outer_sheet_mm
-    y = size / 2 if y_mm is None else y_mm
+    size, height_mm = stack.grid.outer_mm  # the reopened STL spans the physical outer sheet
+    y = height_mm / 2 if y_mm is None else y_mm
     scale_full, scale_detail, detail_mm = 8, 40, 30.0
     total = sum(s.stack_height_mm for s in stack.sheets)
     sections = []
@@ -336,8 +341,8 @@ def printability_maps(stack: SheetStack, report: dict[str, Any], output: Path) -
 
 
 def _pixel(stack: SheetStack, point: list[float]) -> tuple[int, int]:
-    mm, n = stack.grid.mm_per_pixel, stack.grid.outer_pixels
-    return min(n - 1, max(0, n - 1 - int(point[1] / mm))), min(n - 1, max(0, int(point[0] / mm)))
+    mm, (rows, cols) = stack.grid.mm_per_pixel, stack.grid.shape
+    return min(rows - 1, max(0, rows - 1 - int(point[1] / mm))), min(cols - 1, max(0, int(point[0] / mm)))
 
 
 # -- kit -----------------------------------------------------------------------------------
@@ -457,7 +462,9 @@ def _guide(stack: SheetStack, kit: dict[str, Any]) -> str:
         "1. Print every file flat as exported (back face on the bed, no rotation). STL has no color: "
         "load the filament listed for each file.",
         "2. Stack from order 00 (back) upwards; the highest order is the front. Every sheet has the same "
-        f"{stack.grid.outer_sheet_mm:g} mm square outline: align the outer edges (temporary clamps or tape "
+        + (f"{stack.grid.outer_sheet_mm:g} mm square outline" if stack.grid.square else
+           f"{stack.grid.outer_mm[0]:g} x {stack.grid.outer_mm[1]:g} mm outline (width x height)")
+        + ": align the outer edges (temporary clamps or tape "
         "are enough for a test; no frame, housing or glue is required by the design).",
         "3. A sheet with a rim carries the next sheet on its rim; the gap above its interior is intended.",
         "",
@@ -552,6 +559,7 @@ def build_print_kit(source: Path, output: Path, process: PrintProcess | None = N
         "cad_problems": problems,
         "units": "mm",
         "outer_sheet_mm": stack.grid.outer_sheet_mm,
+        **({} if stack.grid.square else {"outer_sheet_height_mm": stack.grid.outer_sheet_height_mm}),
         "total_stack_height_mm": round(sum(s.stack_height_mm for s in stack.sheets), 6),
         "assembly_back_to_front": _assembly(stack, manifest, process),
         "filament_by_color": {},

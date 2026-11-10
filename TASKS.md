@@ -403,3 +403,25 @@ No complete UI/server, arbitrary photographic depth estimation, frame design, gl
 - [x] Suggestion (core/tips.py), simplify_tips edit, endpoint, Artwork editor card, tests, Chupa check.
 - [x] Shared concurrent issue checks; stale-planning note and per-tip mark.
 - [ ] User review; then commit, rebuild exe/zip and packaged tests (when approved).
+
+## Candidate switching and Windows-safe review saving (2026-11-10, D-V3-045, D-V3-046)
+
+- [x] Park / restore reviews per candidate; UI in the existing Compare candidates table; tests (API, browser,
+  failed-switch rollback).
+- [x] Staged review saving with rollback, bounded retries, per-project lock; deterministic tests holding files open.
+- [x] Cutout widening: no new reported thin-material issue (D-V3-042 amendment).
+- [x] Committed with D-V3-047; exe/zip rebuilt.
+
+## Physical size: smaller and rectangular sheets (2026-11-10, D-V3-047)
+
+- [x] Step 1: rectangular grid, model, planner, validators (square output identical).
+- [x] Step 2: rectangular CAD and print kit at the exact requested outer size; previews keep the aspect.
+- [x] Step 3: intake, Physical size (width and height, 100 mm minimum, either orientation), review, editing, issues,
+  widening, persistence; rotation-only sheets: no Bambu project claimed.
+- [x] Verification: padding-only edit carry-over; real-browser rectangular review (inspector, Fill tool, reload);
+  scale 2 planning, validation and CAD read-back.
+- [x] Widening browser tests keep failure evidence (`artifacts/widening_failures/`); the one unexplained failure
+  (2026-11-10) did not recur in 17 attempts; not investigated further (user decision).
+- [x] Committed; exe/zip rebuilt.
+- [ ] Untested: Upscale & Retry and trial planning on a failed rectangular proposal; scale 4 rectangular.
+- [ ] Physical print test of a rectangular stack (pending).

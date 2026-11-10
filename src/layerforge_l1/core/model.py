@@ -1,8 +1,8 @@
 """Sheet-stack data model and versioned manifest serialization.
 
 A ``SheetStack`` is the mask-based physical stack produced by the reveal
-planner: every sheet is one filament color, all sheets share one square
-raster grid (identical outer XY size and a solid shared perimeter), and the
+planner: every sheet is one filament color, all sheets share one raster grid
+(identical outer XY size, square or rectangular, and a solid shared perimeter), and the
 order is back to front.  Masks are boolean arrays; ``True`` is retained
 material and ``False`` is a through-cutout.
 
@@ -29,8 +29,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import threading
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -77,54 +79,128 @@ def mask_bits_sha256(mask: np.ndarray) -> str:
 
 
 def file_sha256(path: Path) -> str:
-    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+    return hashlib.sha256(read_bytes(path)).hexdigest()
 
 
 @dataclass(frozen=True)
 class StackGrid:
-    """Shared raster: square outer sheet with a solid perimeter band."""
+    """Shared raster: outer sheet (square, or rectangular) with a solid perimeter band.
+
+    ``outer_pixels``, ``outer_sheet_mm`` and ``artwork_pixels`` are the width (x).  A rectangular grid
+    also has ``outer_rows`` and the sheet height ``sheet_height_mm`` (y); both None for a square one.
+
+    Pixels are square (``mm_per_pixel`` for both axes; the longer side has the square grid's pixels).
+    A rectangular sheet's outer size is exactly the requested width x height, while its raster covers
+    ``raster_mm``: the shorter side rounded to a native pixel.  The difference (``edge_mm``, less than a
+    quarter of a native pixel per side) is added to or trimmed from the solid perimeter band in CAD only
+    (``cad.physical_outline``): no artwork pixel, cutout or visible area is moved or scaled.
+    """
 
     outer_pixels: int
     perimeter_pixels: int
     outer_sheet_mm: float
     scale: int
+    outer_rows: int | None = None
+    sheet_height_mm: float | None = None
 
     @classmethod
-    def for_planner(cls, outer_sheet_mm: float, scale: int) -> StackGrid:
-        poc = physical_grid(RevealConfig(outer_sheet_mm=outer_sheet_mm, scale=scale))
-        return cls(poc.outer_pixels, poc.perimeter_pixels, poc.sheet_size_mm, scale)
+    def for_planner(cls, outer_sheet_mm: float, scale: int, outer_sheet_height_mm: float | None = None) -> StackGrid:
+        poc = physical_grid(RevealConfig(outer_sheet_mm=outer_sheet_mm, scale=scale,
+                                         outer_sheet_height_mm=outer_sheet_height_mm))
+        if outer_sheet_height_mm is None or outer_sheet_height_mm == outer_sheet_mm:
+            return cls(poc.outer_pixels, poc.perimeter_pixels, poc.sheet_size_mm, scale)
+        return cls(poc.outer_pixels, poc.perimeter_pixels, float(outer_sheet_mm), scale, poc.outer_shape[0],
+                   float(outer_sheet_height_mm))
+
+    @property
+    def square(self) -> bool:
+        return self.outer_rows is None
+
+    @property
+    def rows(self) -> int:
+        return self.outer_pixels if self.outer_rows is None else self.outer_rows
+
+    @property
+    def shape(self) -> tuple[int, int]:
+        """(rows, columns) of every sheet mask."""
+
+        return (self.rows, self.outer_pixels)
 
     @property
     def mm_per_pixel(self) -> float:
-        return self.outer_sheet_mm / self.outer_pixels
+        if self.outer_rows is None:
+            return self.outer_sheet_mm / self.outer_pixels
+        # The longer side is exact: its pixel count is the square grid's (``reveal_planner.rect_grid``).
+        return max(self.outer_sheet_mm, float(self.sheet_height_mm)) / max(self.outer_pixels, self.outer_rows)
+
+    @property
+    def outer_sheet_height_mm(self) -> float:
+        return self.outer_sheet_mm if self.sheet_height_mm is None else self.sheet_height_mm
+
+    @property
+    def outer_mm(self) -> tuple[float, float]:
+        """(width x, height y) of the physical outer sheet."""
+
+        return (self.outer_sheet_mm, self.outer_sheet_height_mm)
+
+    @property
+    def raster_mm(self) -> tuple[float, float]:
+        """(width x, height y) covered by the pixel grid; the outer size for a square sheet."""
+
+        if self.outer_rows is None:
+            return (self.outer_sheet_mm, self.outer_sheet_mm)
+        return (self.outer_pixels * self.mm_per_pixel, self.outer_rows * self.mm_per_pixel)
+
+    @property
+    def edge_mm(self) -> tuple[float, float]:
+        """Per side (x, y): the outer sheet edge beyond (+) or inside (-) the pixel grid's edge."""
+
+        if self.outer_rows is None:
+            return (0.0, 0.0)
+        return tuple(0.0 if abs(o - r) < 1e-9 else (o - r) / 2 for o, r in zip(self.outer_mm, self.raster_mm))
+
+    @property
+    def perimeter_band_mm(self) -> float:
+        """Narrowest physical width of the solid perimeter band."""
+
+        return self.perimeter_pixels * self.mm_per_pixel + min(0.0, *self.edge_mm)
 
     @property
     def artwork_pixels(self) -> int:
         return self.outer_pixels - 2 * self.perimeter_pixels
 
     @property
+    def artwork_rows(self) -> int:
+        return self.rows - 2 * self.perimeter_pixels
+
+    @property
     def artwork_mm(self) -> float:
         return self.artwork_pixels * self.mm_per_pixel
+
+    @property
+    def artwork_height_mm(self) -> float:
+        return self.artwork_mm if self.outer_rows is None else self.artwork_rows * self.mm_per_pixel
 
     def poc_config(self) -> PocConfig:
         """The validator grid (``PocConfig``) this stack was planned on."""
 
-        poc = physical_grid(RevealConfig(outer_sheet_mm=self.outer_sheet_mm, scale=self.scale))
-        if (poc.outer_pixels, poc.perimeter_pixels) != (self.outer_pixels, self.perimeter_pixels):
+        poc = physical_grid(RevealConfig(outer_sheet_mm=self.outer_sheet_mm, scale=self.scale,
+                                         outer_sheet_height_mm=self.sheet_height_mm))
+        if (poc.outer_shape, poc.perimeter_pixels) != (self.shape, self.perimeter_pixels):
             raise ManifestError(
-                f"grid {self.outer_pixels}/{self.perimeter_pixels} px does not match the planner grid "
-                f"{poc.outer_pixels}/{poc.perimeter_pixels} px at scale {self.scale}"
+                f"grid {self.shape}/{self.perimeter_pixels} px does not match the planner grid "
+                f"{poc.outer_shape}/{poc.perimeter_pixels} px at scale {self.scale}"
             )
         return poc
 
     def perimeter_mask(self) -> np.ndarray:
-        mask = np.ones((self.outer_pixels, self.outer_pixels), dtype=bool)
+        mask = np.ones(self.shape, dtype=bool)
         p = self.perimeter_pixels
         mask[p:-p, p:-p] = False
         return mask
 
     def to_json(self) -> dict[str, Any]:
-        return {
+        out = {
             "outer_pixels": self.outer_pixels,
             "perimeter_pixels": self.perimeter_pixels,
             "outer_sheet_mm": self.outer_sheet_mm,
@@ -134,12 +210,20 @@ class StackGrid:
             "artwork_mm": self.artwork_mm,
             "raster_origin": "top-left pixel; CAD x right, y up, z toward viewer",
         }
+        if self.outer_rows is not None:  # rectangular: the values above are x, these y
+            out.update(outer_rows=self.outer_rows, outer_sheet_height_mm=self.outer_sheet_height_mm,
+                       artwork_rows=self.artwork_rows, artwork_height_mm=self.artwork_height_mm,
+                       raster_mm=list(self.raster_mm), edge_mm_per_side=list(self.edge_mm))
+        return out
 
     @classmethod
     def from_json(cls, data: dict[str, Any]) -> StackGrid:
         try:
-            grid = cls(int(data["outer_pixels"]), int(data["perimeter_pixels"]),
-                       float(data["outer_sheet_mm"]), int(data["scale"]))
+            rows, height = data.get("outer_rows"), data.get("outer_sheet_height_mm")
+            if (rows is None) != (height is None):
+                raise ValueError("a rectangular grid needs both outer_rows and outer_sheet_height_mm")
+            grid = cls(int(data["outer_pixels"]), int(data["perimeter_pixels"]), float(data["outer_sheet_mm"]),
+                       int(data["scale"]), None if rows is None else int(rows), None if height is None else float(height))
         except (KeyError, TypeError, ValueError) as error:
             raise ManifestError(f"invalid grid block: {error}") from error
         grid.poc_config()
@@ -151,6 +235,21 @@ class StackGrid:
         if outer_pixels % base:
             raise ManifestError(f"mask size {outer_pixels} px is not a multiple of the planner grid {base} px")
         return cls.for_planner(outer_sheet_mm, outer_pixels // base)
+
+
+def check_target_shape(target_rgb: np.ndarray, grid: StackGrid) -> None:
+    """An artwork target fits the grid: RGB, and the artwork grid is the same whole multiple of it in both
+    axes (so pixels stay square)."""
+
+    rows, cols = grid.poc_config().analysis_shape
+    if target_rgb.ndim != 3:
+        raise StackError(f"target must be an RGB image, got {target_rgb.shape}")
+    height, width = target_rgb.shape[:2]
+    if cols % width or rows * width != cols * height:
+        if grid.square:  # the message square stacks always had
+            raise StackError(f"target must be a square RGB image whose size divides {cols} px, got {target_rgb.shape}")
+        raise StackError(f"target must divide the {cols} x {rows} px artwork grid by the same factor in both axes, "
+                         f"got {width} x {height} px")
 
 
 _TARGET_LABELS: dict[tuple, tuple[np.ndarray, list[str]]] = {}
@@ -201,7 +300,7 @@ class SheetStack:
         ids = [sheet.id for sheet in self.sheets]
         if len(set(ids)) != len(ids):
             raise StackError(f"duplicate sheet ids: {ids}")
-        shape = (self.grid.outer_pixels, self.grid.outer_pixels)
+        shape = self.grid.shape
         for sheet in self.sheets:
             if not _HEX.match(sheet.color):
                 raise StackError(f"{sheet.id}: color must be '#RRGGBB' upper case, got {sheet.color!r}")
@@ -216,20 +315,14 @@ class SheetStack:
         if self.frame_color is not None and not _HEX.match(self.frame_color):
             raise StackError(f"frame color must be '#RRGGBB' upper case, got {self.frame_color!r}")
         if self.target_rgb is not None:
-            height, width = self.target_rgb.shape[:2]
-            poc = self.grid.poc_config()
-            if self.target_rgb.ndim != 3 or height != width or poc.analysis_pixels % height:
-                raise StackError(
-                    f"target must be a square RGB image whose size divides {poc.analysis_pixels} px, "
-                    f"got {self.target_rgb.shape}"
-                )
+            check_target_shape(self.target_rgb, self.grid)
 
     def check_rim(self, rim: dict[str, Any], thickness_mm: float, sheet_id: str) -> None:
         """A rim must lie on the solid shared perimeter and stand above the sheet."""
 
         if set(rim) != {"width_mm", "total_height_mm"}:
             raise StackError(f"{sheet_id}: rim needs exactly width_mm and total_height_mm, got {sorted(rim)}")
-        band_mm = self.grid.perimeter_pixels * self.grid.mm_per_pixel
+        band_mm = self.grid.perimeter_band_mm
         if not 0 < float(rim["width_mm"]) <= band_mm:
             raise StackError(f"{sheet_id}: rim width must be in (0, {band_mm:g}] mm (the shared perimeter band)")
         if not float(rim["total_height_mm"]) > thickness_mm:
@@ -282,10 +375,10 @@ class SheetStack:
         """Artwork-grid pixels of the frame color (solid on every sheet, never visible)."""
 
         if self.frame_color is None:  # same result, without indexing the whole target (~1 s at 1024 px)
-            return np.zeros((self.grid.outer_pixels,) * 2, dtype=bool)
+            return np.zeros(self.grid.shape, dtype=bool)
         found = self.target_labels()
         if found is None or self.frame_color is None:
-            return np.zeros((self.grid.outer_pixels,) * 2, dtype=bool)
+            return np.zeros(self.grid.shape, dtype=bool)
         labels, palette = found
         if self.frame_color not in palette:
             raise StackError(f"frame color {self.frame_color} is not in the target palette")
@@ -294,16 +387,98 @@ class SheetStack:
     def composite_sheet_index(self) -> np.ndarray:
         """Back-to-front index of the frontmost sheet with material (-1 = none)."""
 
-        shown = np.full((self.grid.outer_pixels,) * 2, -1, dtype=np.int16)
+        shown = np.full(self.grid.shape, -1, dtype=np.int16)
         for index in range(len(self.sheets) - 1, -1, -1):
             shown[(shown < 0) & self.sheets[index].retained] = index
         return shown
 
 
 # -- serialization -------------------------------------------------------------
-def _write_mask(mask: np.ndarray, path: Path) -> None:
+# On Windows a file that another handle has open (a request reading it, a virus scanner) can be neither
+# deleted nor replaced until it is closed (WinError 32 / 5); POSIX allows both.  Replacing is retried
+# for at most REPLACE_WAIT_S; readers hold such files for milliseconds.
+REPLACE_WAIT_S = 2.0
+_IN_USE = (5, 32)  # ERROR_ACCESS_DENIED, ERROR_SHARING_VIOLATION
+
+
+def _pause(seconds: float) -> None:  # the wait between attempts (replaced by tests)
+    time.sleep(seconds)
+
+
+def _retrying(action: Any, transient: Any, wait_s: float) -> Any:
+    delay, waited = 0.005, 0.0
+    while True:
+        try:
+            return action()
+        except PermissionError as error:
+            if os.name != "nt" or not transient(error) or waited >= wait_s:
+                raise
+        _pause(delay)
+        waited += delay
+        delay = min(delay * 2, 0.25)
+
+
+def replace_path(source: Path, target: Path, wait_s: float = REPLACE_WAIT_S) -> None:
+    """``os.replace``, retried while Windows reports the file (or a file in the folder) in use."""
+
+    _retrying(lambda: os.replace(source, target), lambda e: getattr(e, "winerror", None) in _IN_USE, wait_s)
+
+
+def read_bytes(path: Path, wait_s: float = REPLACE_WAIT_S) -> bytes:
+    """``Path.read_bytes``, retried while Windows denies opening a file that is being replaced
+    (the replaced file is briefly "delete pending"): for files read while a review is saved."""
+
+    return _retrying(Path(path).read_bytes, lambda e: True, wait_s)
+
+
+class _Replacing:
+    """Files of one save, written beside the old ones (``stage``) and then swapped in (``commit``), in order.
+
+    A reader sees each file whole, old or new.  A file with unchanged bytes is not touched.  If a swap
+    fails, the files already swapped get their old bytes back and the partial files are removed, so the
+    previous save stays complete and consistent."""
+
+    def __init__(self) -> None:
+        self.pending: list[tuple[Path, Path]] = []
+
+    def stage(self, path: Path, save: Any) -> None:
+        partial = path.with_name(path.name + ".partial" + path.suffix)  # same suffix: PIL picks the format
+        self.pending.append((path, partial))
+        save(partial)
+
+    def discard(self) -> None:
+        for _, partial in self.pending:
+            partial.unlink(missing_ok=True)
+
+    def commit(self) -> None:
+        done: list[tuple[Path, bytes | None]] = []
+        try:
+            for path, partial in self.pending:
+                old = path.read_bytes() if path.is_file() else None
+                if old is not None and old == partial.read_bytes():
+                    partial.unlink()
+                    continue
+                replace_path(partial, path)
+                done.append((path, old))
+        except BaseException:
+            self.discard()
+            for path, old in reversed(done):
+                if old is None:
+                    path.unlink(missing_ok=True)
+                else:
+                    restore = path.with_name(path.name + ".partial" + path.suffix)
+                    restore.write_bytes(old)
+                    replace_path(restore, path)
+            raise
+
+
+def _write_mask(mask: np.ndarray, path: Path, replacing: _Replacing | None = None) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    Image.fromarray(mask.astype(np.uint8) * 255).save(path)
+    image = Image.fromarray(mask.astype(np.uint8) * 255)
+    if replacing is not None:
+        replacing.stage(path, image.save)
+    else:
+        image.save(path)
 
 
 def _read_mask(path: Path) -> np.ndarray:
@@ -330,15 +505,27 @@ def _read_geometry(root: Path, entry: dict[str, Any], manifest: Path) -> Any:
     return geometry
 
 
-def save_stack(stack: SheetStack, directory: Path) -> Path:
-    """Write the manifest, masks and target; return the manifest path."""
+def save_stack(stack: SheetStack, directory: Path, replacing: bool = False) -> Path:
+    """Write the manifest, masks and target; return the manifest path.
+
+    ``replacing``: all files are first written beside the old ones, then swapped in, the manifest
+    last (``_Replacing``): files read concurrently are never missing or partial, and a failed save
+    leaves the previous one intact (review projects are saved while the app reads them)."""
 
     stack.check()
+    staged = _Replacing() if replacing else None
+
+    def write(path: Path, save: Any) -> None:
+        if staged is not None:
+            staged.stage(path, save)
+        else:
+            save(path)
+
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=True)
     artwork: dict[str, Any] = {"target_image": None, "frame_color": stack.frame_color}
     if stack.target_rgb is not None:
-        Image.fromarray(stack.target_rgb).save(directory / "target.png")
+        write(directory / "target.png", Image.fromarray(stack.target_rgb).save)
         artwork.update(
             target_image="target.png",
             target_pixel_size=[int(stack.target_rgb.shape[1]), int(stack.target_rgb.shape[0])],
@@ -348,8 +535,8 @@ def save_stack(stack: SheetStack, directory: Path) -> Path:
     for order, (sheet, z) in enumerate(zip(stack.sheets, stack.assembly_z_mm())):
         retained = f"layers/{sheet.id}/{RETAINED_MASK_NAME}"
         visible = f"layers/{sheet.id}/{VISIBLE_MASK_NAME}"
-        _write_mask(sheet.retained, directory / retained)
-        _write_mask(sheet.visible, directory / visible)
+        _write_mask(sheet.retained, directory / retained, staged)
+        _write_mask(sheet.visible, directory / visible, staged)
         rows.append(
             {
                 "id": sheet.id,
@@ -371,7 +558,7 @@ def save_stack(stack: SheetStack, directory: Path) -> Path:
 
             relative = f"layers/{sheet.id}/{GEOMETRY_NAME}"
             data = shapely.to_wkb(sheet.geometry)
-            (directory / relative).write_bytes(data)
+            write(directory / relative, lambda f, data=data: f.write_bytes(data))
             rows[-1]["geometry"] = {
                 "file": relative,
                 "sha256": hashlib.sha256(data).hexdigest(),
@@ -402,7 +589,15 @@ def save_stack(stack: SheetStack, directory: Path) -> Path:
     if stack.review is not None:
         manifest["review"] = stack.review
     path = directory / MANIFEST_NAME
-    path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    text = json.dumps(manifest, indent=2) + "\n"
+    try:
+        write(path, lambda f: f.write_text(text, encoding="utf-8"))
+        if staged is not None:
+            staged.commit()
+    except BaseException:
+        if staged is not None:
+            staged.discard()
+        raise
     return path
 
 

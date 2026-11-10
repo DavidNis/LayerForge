@@ -427,7 +427,7 @@ def test_physical_resize_keeps_region_recolors(app):
     analysis = client.state(name)["resize"]["analysis"]
     assert analysis["basis"]["artwork"] == {"sha256": art.rgb_sha256(edited), "region_recolors": 1, "pending": True}
     assert "previous artwork" in analysis["measured"]["source"]
-    size = analysis["options"]["recommended"]["sheet_mm"]
+    size = max(100.0, analysis["options"]["recommended"]["sheet_mm"])  # sheets are at least 100 mm
     client.run(name, "resize/preview", {"size_mm": size})
     preview = client.state(name)["resize"]["preview"]
     assert preview["current"] and preview["status"] == "READY_TO_RESIZE" and preview["boundaries"]["pass"]
@@ -651,3 +651,91 @@ def test_browser_artwork_panel(app):
     assert result["review_tools"]["tools"] == 0 and result["review_tools"]["artwork_panel"] == 1
     assert result["review_tools"]["artwork_tab"].endswith("/review")
     assert "Plan sheets from this artwork" in result["try_again"] and result["try_again_in_view"] and result["replan_label"] == "Plan sheets from this artwork"
+
+
+def test_artwork_edits_are_not_resampled_to_other_proportions(app):
+    """A width x height with other proportions fits the artwork again (resampled): region recolors cannot
+    move with it pixel for pixel, so the preview is refused and nothing changes (never re-applied approximately)."""
+
+    client, workspace, _ = app
+    name = _import(client, "&outer_mm=200")
+    _recolor(client, name, PORTHOLES[0], SUN, "palette")
+    client.run(name, "resize/analyze", {"process": None, "bambu_printer": None})
+    failed = client.run(name, "resize/preview", {"width_mm": 200, "height_mm": 150}, "failed")
+    assert "cannot be carried to these proportions" in failed["error"]["message"]
+    state = client.state(name)
+    assert state["record"].get("sheet_outer_height_mm") is None and state["resize"]["sheet_size_mm"] == [200.0, 200.0]
+    # The same proportions keep the edits pixel for pixel, as before.
+    client.run(name, "resize/preview", {"width_mm": 250, "height_mm": 250})
+    preview = client.state(name)["resize"]["preview"]
+    assert preview["status"] == "READY_TO_RESIZE" and not preview["refit"] and preview["artwork_edits"]["region_recolors"] == 1
+
+
+def _wide_artwork() -> bytes:
+    """Original 2:1 flat-color test art (made here, no external image): sky, a hill, a house with a window."""
+
+    import io
+
+    from PIL import Image
+
+    rgb = np.zeros((512, 1024, 3), np.uint8)
+    rgb[:] = (120, 190, 235)                       # sky
+    rgb[330:, :] = (60, 150, 70)                   # hill
+    rgb[180:400, 380:640] = (190, 60, 50)          # house
+    rgb[220:300, 440:520] = (250, 210, 60)         # window
+    rgb[60:140, 820:900] = (250, 210, 60)          # sun (same yellow)
+    buffer = io.BytesIO()
+    Image.fromarray(rgb).save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+def test_artwork_edits_move_with_the_artwork_when_only_the_padding_changes(app):
+    """A 2:1 image on a square 200 mm sheet sits in a 512 x 256 px box with padding above and below.  On a
+    200 x 150 mm sheet the aperture is 512 x 368 px: the same box fits, only the padding shrinks.  The region
+    recolor moves with the artwork pixel for pixel through the preview, the approval and the re-plan."""
+
+    client, workspace, _ = app
+    name = client.ok("POST", "/api/projects?filename=house_wide.png&scale=1&outer_mm=200", raw=_wide_artwork())["project"]
+    assert client.wait({"id": client.state(name)["job"]["id"]})["status"] == "done"
+    proposal = json.loads((workspace / name / "proposal" / "proposal.json").read_text(encoding="utf-8"))
+    placement = proposal["intake"]["placement"]
+    assert placement["placed_px"] == [512, 256] and placement["offset_px"] == [0, 128]
+    window = [128 + 130, 240]                      # [row, col]: inside the window ((220..300)/2, (440..520)/2)
+    _recolor(client, name, window, "#BE3C32", "palette")  # the window becomes house red
+    edited = art.load_rgb(workspace / name / "artwork" / "current.png")
+    assert art.hex_color(edited[window[0], window[1]]) == "#BE3C32"
+
+    client.run(name, "resize/analyze", {"process": None, "bambu_printer": None})
+    client.run(name, "resize/preview", {"width_mm": 200, "height_mm": 150})
+    preview = client.state(name)["resize"]["preview"]
+    assert preview["status"] == "READY_TO_RESIZE" and preview["current"] and preview["refit"]
+    assert preview["artwork_edits"]["region_recolors"] == 1
+    shown = art.load_rgb(workspace / name / "resize" / "preview" / "target.png")
+    assert shown.shape[:2] == (368, 512)
+    # The artwork box moved up by 72 px, unchanged pixel for pixel; outside it only frame padding.
+    assert np.array_equal(shown[56:56 + 256], edited[128:128 + 256])
+    frame = np.array([int(preview["frame_color"][i:i + 2], 16) for i in (1, 3, 5)], np.uint8)
+    assert (shown[:56] == frame).all() and (shown[56 + 256:] == frame).all()
+    assert art.hex_color(shown[window[0] - 72, window[1]]) == "#BE3C32"
+
+    status, error = client.call("POST", f"/api/projects/{name}/resize/retry",
+                                {"preview_id": preview["preview_id"], "approve_size": True})
+    assert status == 400 and "fitted into the new proportions" in error["error"]["message"]
+    client.run(name, "resize/retry", {"preview_id": preview["preview_id"], "approve_size": True, "approve_changes": True})
+    state = client.state(name)
+    p = state["proposal"]
+    assert p["status"] == "PROPOSAL_READY_FOR_REVIEW" and state["resize"]["sheet_size_mm"] == [200.0, 150.0]
+    assert p["artwork_edits"]["region_recolors"] == 1 and p["artwork_edits"]["carried_by"] == "physical_resize"
+    planned = art.load_rgb(workspace / name / "proposal" / "intake" / "target.png")
+    assert np.array_equal(planned, shown)          # exactly the approved artwork, with the recolor
+    assert not state["artwork"]["differs_from_planned"]
+    log = json.loads((workspace / name / "proposal" / "artwork_edits" / "edits.json").read_text(encoding="utf-8"))
+    assert len(log["edits"]) == 1                  # the history moves with the proposal
+    # The sheets reproduce the edited artwork exactly.
+    from layerforge_l1.core.model import load_stack
+    from layerforge_l1.core.validation import validate_stack
+
+    stack = load_stack(workspace / name / "proposal" / "candidates" / p["selected"] / "stack")
+    assert stack.grid.outer_mm == (200.0, 150.0) and np.array_equal(stack.target_rgb, planned)
+    result = validate_stack(stack)
+    assert result["status"] == "PASS" and result["reconstruction"]["mismatched_pixels"] == 0

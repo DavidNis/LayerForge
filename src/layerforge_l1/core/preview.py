@@ -22,6 +22,15 @@ EXPLODED_SHEET_PIXELS = 480
 CUTOUT_RGB = (235, 235, 235)
 
 
+def _fit(shape: tuple[int, ...], longer: int) -> tuple[int, int]:
+    """(width, height) in pixels with the longer side ``longer``, aspect kept (square sheets: square)."""
+
+    rows, cols = shape[:2]
+    if rows == cols:
+        return longer, longer
+    return (longer, max(1, round(longer * rows / cols))) if cols > rows else (max(1, round(longer * cols / rows)), longer)
+
+
 def _rgb(color: str) -> tuple[int, int, int]:
     return tuple(int(color[i : i + 2], 16) for i in (1, 3, 5))
 
@@ -48,18 +57,19 @@ def exploded_view(stack: SheetStack, masks: list[np.ndarray]) -> np.ndarray:
     """Oblique back-to-front stack of sheared sheets; cutouts are transparent."""
 
     size = EXPLODED_SHEET_PIXELS
+    sheet_w, sheet_h = _fit(masks[0].shape, size)
     shear, lift = 0.45, size * 0.16
-    height = int(size * 0.55 + lift * (len(masks) - 1)) + 20
-    width = int(size + size * 0.55 * shear) + 20
+    height = int(sheet_h * 0.55 + lift * (len(masks) - 1)) + 20
+    width = int(sheet_w + sheet_h * 0.55 * shear) + 20
     canvas = np.full((height, width, 3), 255, dtype=np.float32)
     for depth, (sheet, mask) in enumerate(zip(stack.sheets, masks)):
-        small = cv2.resize(mask.astype(np.float32), (size, size), interpolation=cv2.INTER_AREA)
-        y0 = height - 10 - size * 0.55 - lift * depth
-        # Square sheet -> parallelogram seen from above-front.
+        small = cv2.resize(mask.astype(np.float32), (sheet_w, sheet_h), interpolation=cv2.INTER_AREA)
+        y0 = height - 10 - sheet_h * 0.55 - lift * depth
+        # Sheet -> parallelogram seen from above-front.
         matrix = np.float32([[1, shear * 0.55, 10], [0, 0.55, y0]])
         alpha = cv2.warpAffine(small, matrix, (width, height), flags=cv2.INTER_LINEAR)[..., None]
         canvas = canvas * (1 - alpha) + np.array(_rgb(sheet.color), np.float32) * alpha
-        edge = cv2.warpAffine(np.pad(np.zeros((size - 2, size - 2), np.float32), 1, constant_values=1),
+        edge = cv2.warpAffine(np.pad(np.zeros((sheet_h - 2, sheet_w - 2), np.float32), 1, constant_values=1),
                               matrix, (width, height), flags=cv2.INTER_LINEAR)[..., None]
         canvas = canvas * (1 - 0.6 * edge) + 90 * 0.6 * edge
     return np.clip(canvas, 0, 255).astype(np.uint8)
@@ -72,7 +82,7 @@ def source_comparison(stack: SheetStack, assembled: np.ndarray) -> tuple[np.ndar
         return None
     grid = stack.grid
     p = grid.perimeter_pixels
-    target = cv2.resize(stack.target_rgb, (grid.artwork_pixels,) * 2, interpolation=cv2.INTER_NEAREST)
+    target = cv2.resize(stack.target_rgb, (grid.artwork_pixels, grid.artwork_rows), interpolation=cv2.INTER_NEAREST)
     shown = assembled[p:-p, p:-p]
     frame = stack.frame_mask()[p:-p, p:-p]
     differ = (target != shown).any(-1) & ~frame
@@ -96,7 +106,7 @@ def generate_previews(
     for sheet, name, mask in zip(stack.sheets, stack.export_names(), masks):
         path = output / "sheets" / f"{name}.png"
         Image.fromarray(sheet_image(mask, sheet.color)).resize(
-            (SHEET_PREVIEW_PIXELS, SHEET_PREVIEW_PIXELS), Image.NEAREST
+            _fit(mask.shape, SHEET_PREVIEW_PIXELS), Image.NEAREST
         ).save(path)
         files.append(path.relative_to(output).as_posix())
     assembled = assembled_front(stack, masks)

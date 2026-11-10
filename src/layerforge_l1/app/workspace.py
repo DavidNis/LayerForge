@@ -6,6 +6,9 @@ One project directory per artwork::
     source/<image>          the uploaded image, unchanged
     proposal/               L1 ``propose`` output (candidates, previews, proposal.json)
     review/                 L2 review project (``start_review``; saved after every edit)
+    reviews/<candidate>/    reviews of other candidates of the same planning run, parked when the
+                            user switched candidates (review/, draft/, printability/, artwork/,
+                            issue_reviews.json, parked.json); archived with the proposal by a re-plan
     draft/                  cached views of the current review draft: state.json
                             (validation, inspection, last change), previews/
     printability/           L3 ``assess_printability`` estimate of the draft + maps
@@ -42,7 +45,7 @@ from PIL import Image
 from .. import PROJECT_ROOT
 from ..core import review
 from ..core.editing import EDIT_OPS, write_change_image
-from ..core.model import MANIFEST_NAME, StackError, file_sha256
+from ..core.model import MANIFEST_NAME, StackError, file_sha256, replace_path
 from ..core.validation import validate_stack
 
 APP_SCHEMA = "layerforge.app_project"
@@ -288,7 +291,8 @@ def passing_validation(stack: Any) -> dict[str, Any]:
         "status": "PASS", "failures": [], "details_recomputed": False,
         "reconstruction": {"evaluated": stack.target_rgb is not None,
                            "mismatched_pixels": current["reconstruction_vs_reviewed_target_px"]},
-        "mm_per_pixel": stack.grid.mm_per_pixel, "outer_sheet_mm": [stack.grid.outer_sheet_mm] * 2,
+        "mm_per_pixel": stack.grid.mm_per_pixel, "outer_sheet_mm": list(stack.grid.outer_mm),
+        **({} if stack.grid.square else {"raster_mm": list(stack.grid.raster_mm)}),
         "repeated_colors": sorted({c for c in colors if colors.count(c) > 1}),
         "sheets": [{"id": s.id, "pass": True} for s in stack.sheets],
     }
@@ -479,7 +483,8 @@ class Workspace:
                 from ..core.model import StackGrid
 
                 rgb, opaque, _ = load_image(path / record["source"]["file"])
-                grid = StackGrid.for_planner(self.sheet_outer_mm(record), self.processing_scale(record))
+                grid = StackGrid.for_planner(self.sheet_outer_mm(record), self.processing_scale(record),
+                                             self.sheet_height_mm(record))
                 ids = {d["id"] for d in prepare_target(rgb, opaque, grid, self.intake_config(record))["details"]}
                 dropped = sorted(set(record["detail_decisions"]) - ids)
                 record["detail_decisions"] = {k: v for k, v in record["detail_decisions"].items() if k in ids}
@@ -491,7 +496,7 @@ class Workspace:
         shutil.rmtree(path / "upscale", ignore_errors=True)  # previews of the replaced proposal
         s = record["proposal_settings"]
         planning = PlanningConfig(outer_sheet_mm=self.sheet_outer_mm(record), scale=self.processing_scale(record),
-                                  thickness_mm=s["thickness_mm"])
+                                  thickness_mm=s["thickness_mm"], outer_sheet_height_mm=self.sheet_height_mm(record))
         shutil.rmtree(path / "artwork", ignore_errors=True)  # an empty log on the replaced artwork
         result = propose(path / record["source"]["file"], path / "proposal", self.intake_config(record),
                          ProposalConfig(planning=planning, plan=plan), progress, record.get("detail_decisions") or None)
@@ -509,6 +514,20 @@ class Workspace:
         """Sheet size in use: the import setting, or the one approved in a physical resize."""
 
         return float(record.get("sheet_outer_mm") or record["proposal_settings"]["outer_mm"])
+
+    @staticmethod
+    def sheet_height_mm(record: dict[str, Any]) -> float | None:
+        """Height of a rectangular sheet (approved in a physical resize); None: square (the width)."""
+
+        value = record.get("sheet_outer_height_mm")
+        return None if value is None else float(value)
+
+    def sheet_size_mm(self, record: dict[str, Any]) -> list[float]:
+        """[width, height] of the sheet in use."""
+
+        width = self.sheet_outer_mm(record)
+        height = self.sheet_height_mm(record)
+        return [width, width if height is None else height]
 
     def failed_proposal(self, name: str) -> tuple[Path, dict[str, Any], dict[str, Any]]:
         from ..core.propose import NEEDS_DECISION
@@ -570,7 +589,7 @@ class Workspace:
             raise AppError(f"the {factor}x preview did not pass ({saved['status']}); nothing was retried")
         if saved.get("changes") and approve_changes is not True:
             raise AppError(f"approve the {len(saved['changes'])} visible artwork changes shown in the preview first")
-        fresh = resource_check(saved["outer_sheet_mm"], saved["to_scale"])
+        fresh = resource_check(saved["outer_sheet_mm"], saved["to_scale"], height_mm=self.sheet_height_mm(record))
         if not fresh["fits"]:
             raise AppError(f"not enough memory for a {factor}x retry now: {fresh['reason']}")
         return saved
@@ -594,7 +613,7 @@ class Workspace:
         staging = path / "proposal.next"
         shutil.rmtree(staging, ignore_errors=True)
         planning = PlanningConfig(outer_sheet_mm=self.sheet_outer_mm(record), scale=saved["to_scale"],
-                                  thickness_mm=s["thickness_mm"])
+                                  thickness_mm=s["thickness_mm"], outer_sheet_height_mm=self.sheet_height_mm(record))
         progress("UPSCALE_RETRY_STARTING", scale=saved["to_scale"], factor=saved["factor"])
         try:
             result = propose(path / record["source"]["file"], staging, self.intake_config(record),
@@ -647,6 +666,8 @@ class Workspace:
         else:
             raise AppError("the proposal has no selected candidate to assess")
         basis.update(sheet_mm=self.sheet_outer_mm(record), scale=self.processing_scale(record))
+        if self.sheet_height_mm(record) is not None:
+            basis["sheet_size_mm"] = self.sheet_size_mm(record)
         edited = self.edited_artwork(name, load=False)
         if edited is not None:
             basis["artwork"] = {"sha256": edited["sha256"], "region_recolors": edited["region_recolors"],
@@ -655,7 +676,8 @@ class Workspace:
 
     def resize_analysis(self, name: str, process_values: dict[str, Any] | None, bambu_printer: str | None,
                         progress: Callable[..., None]) -> dict[str, Any]:
-        """Measure the printability issues now and tabulate them against larger sheet sizes."""
+        """Measure the printability issues now and tabulate them against larger sheet sizes of the current
+        proportions (any other width x height can also be previewed, ``check_size``)."""
 
         import numpy as np
 
@@ -665,7 +687,9 @@ class Workspace:
 
         path, record, proposal, basis = self.resize_subject(name)
         process = process_from(process_values)
-        limit = resize.usable_sheet_mm(process, bambu_printer or None)
+        width, height = basis.get("sheet_size_mm") or (basis["sheet_mm"], basis["sheet_mm"])
+        aspect = 1.0 if width == height else height / width
+        limit = resize.usable_sheet_mm(process, bambu_printer or None, aspect)
         mm_per_pixel = proposal["intake"]["artwork_mm_per_pixel"]
         if basis["stage"] == "failed_proposal":
             target = np.asarray(Image.open(path / "proposal" / "intake" / "target.png").convert("RGB"))
@@ -689,10 +713,10 @@ class Workspace:
         if basis.get("artwork", {}).get("pending"):
             measured["source"] += ("; measured on the sheets planned from the previous artwork (the artwork has "
                                    f"{basis['artwork']['region_recolors']} unplanned artwork edit(s), planned by the retry)")
-        options = resize.size_options(issues, basis["sheet_mm"], limit["max_sheet_mm"])
+        options = resize.size_options(issues, basis["sheet_mm"], limit["max_sheet_mm"], aspect)
         analysis = {"schema": resize.ANALYSIS_SCHEMA, "basis": basis, "process": asdict(process),
-                    "bambu_printer": bambu_printer or None, "limit": limit, "measured": measured,
-                    "issues": issues, "options": options, "checked_utc": _now()}
+                    "bambu_printer": bambu_printer or None, "limit": {**limit, "min_sheet_mm": resize.MIN_SHEET_MM},
+                    "measured": measured, "issues": issues, "options": options, "checked_utc": _now()}
         if basis["stage"] == "failed_proposal" and options["recommended"] is None and limit["max_sheet_mm"] > basis["sheet_mm"]:
             reasons = sorted({str(c.get("reason", ""))[:80] for c in proposal["candidates"] if c["status"] == "PLANNING_FAILED"})
             analysis["trial_search"] = {
@@ -721,8 +745,11 @@ class Workspace:
         decisions = record.get("detail_decisions") or None
         edited = self.edited_artwork(name)
 
-        def plan(size: float) -> dict[str, Any]:
-            return resize.trial_plan(source, previous, size, intake, decisions, edited)
+        width, height = analysis["basis"].get("sheet_size_mm") or (None, None)
+
+        def plan(size: float) -> dict[str, Any]:  # the current proportions
+            return resize.trial_plan(source, previous, size, intake, decisions, edited,
+                                     None if width is None else round(size * height / width, 1))
 
         found = resize.search_plannable_size(plan, analysis["basis"]["sheet_mm"], analysis["limit"]["max_sheet_mm"],
                                              progress=progress)
@@ -740,42 +767,60 @@ class Workspace:
         path, record, _, basis = self.resize_subject(name)
         analysis = _read_json(path / "resize" / "analysis.json")
         if analysis is None:
-            raise AppError("check printability at larger sizes first")
+            raise AppError("check printability at other sizes first")
         if analysis["basis"] != basis:
             raise AppError("the size analysis is out of date (the plan or settings changed); check again")
         return path, record, analysis
 
     def resize_preview(self, name: str, size_mm: Any, progress: Callable[..., None]) -> dict[str, Any]:
-        """Intake at a proposed sheet size (same pixels) with checks and the predicted findings."""
+        """Intake at a proposed sheet size ``(width, height)`` (``check_size``) with checks and the predicted
+        findings: the same pixels at the current proportions, the source fitted again at others."""
 
         from ..core.resize import preview_resize
 
         path, record, analysis = self.current_analysis(name)
-        size = self.check_size(size_mm, analysis)
+        width, height = (self.check_size(size_mm[0], analysis, size_mm[1]) if isinstance(size_mm, (list, tuple))
+                         else self.check_size(size_mm, analysis))
         out = path / "resize" / "preview"
         shutil.rmtree(out, ignore_errors=True)
-        result = preview_resize(path / record["source"]["file"], path / "proposal", out, size, analysis,
-                                self.intake_config(record),
-                                record.get("detail_decisions"), progress, self.edited_artwork(name))
-        result["preview_id"] = self._resize_preview_id(record, analysis, size)
+        try:
+            result = preview_resize(path / record["source"]["file"], path / "proposal", out, width, analysis,
+                                    self.intake_config(record), record.get("detail_decisions"), progress,
+                                    self.edited_artwork(name), new_height_mm=height)
+        except StackError as error:
+            raise AppError(str(error)) from None
+        result["preview_id"] = self._resize_preview_id(record, analysis, width, height)
         _write_json(out / "preview.json", result)
         return {"status": result["status"], "changes": len(result["changes"])}
 
     @staticmethod
-    def check_size(size_mm: Any, analysis: dict[str, Any]) -> float:
-        try:
-            size = float(size_mm)
-        except (TypeError, ValueError):
-            raise AppError("size must be a number of millimetres") from None
-        current, limit = analysis["basis"]["sheet_mm"], analysis["limit"]["max_sheet_mm"]
-        if not (current < size <= limit):
-            raise AppError(f"the new sheet size must be larger than {current:g} mm and at most {limit:g} mm "
-                           f"(the printer's usable area)")
-        return round(size, 1)
+    def check_size(width_mm: Any, analysis: dict[str, Any], height_mm: Any = None) -> tuple[float, float]:
+        """(width, height) of a requested sheet: each at least ``MIN_SHEET_MM``, the full outer sheet fitting the
+        printer as placed or turned 90 degrees, and not the current size.  No height: a square sheet."""
 
-    def _resize_preview_id(self, record: dict[str, Any], analysis: dict[str, Any], size: float) -> str:
+        from ..core.resize import MIN_SHEET_MM, sheet_fits
+
+        try:
+            width = round(float(width_mm), 1)
+            height = width if height_mm is None else round(float(height_mm), 1)
+        except (TypeError, ValueError):
+            raise AppError("width and height must be numbers of millimetres") from None
+        current = tuple(analysis["basis"].get("sheet_size_mm") or (analysis["basis"]["sheet_mm"],) * 2)
+        if width < MIN_SHEET_MM or height < MIN_SHEET_MM:
+            raise AppError(f"width and height must each be at least {MIN_SHEET_MM:g} mm "
+                           f"(got {width:g} x {height:g} mm)")
+        if (width, height) == current:
+            raise AppError(f"{width:g} x {height:g} mm is the current size; enter a different width or height")
+        if not sheet_fits(width, height, analysis["limit"])["fits"]:
+            raise AppError(f"a {width:g} x {height:g} mm sheet does not fit the printer's usable area in either "
+                           f"orientation ({'; '.join(analysis['limit']['basis'])})")
+        return width, height
+
+    def _resize_preview_id(self, record: dict[str, Any], analysis: dict[str, Any], width: float,
+                           height: float | None = None) -> str:
         from ..core.resize import analysis_id
 
+        size: Any = width if height is None or height == width else [width, height]  # square: as before
         return analysis_id([analysis["analysis_id"], size, record.get("detail_decisions") or {},
                             record["proposal_settings"]["max_colors"]])
 
@@ -786,12 +831,17 @@ class Workspace:
         saved = _read_json(path / "resize" / "preview" / "preview.json")
         if saved is None:
             raise AppError("preview the new size first")
-        if preview != saved.get("preview_id") or saved["preview_id"] != self._resize_preview_id(record, analysis, saved["to_mm"]):
+        if preview != saved.get("preview_id") or saved["preview_id"] != self._resize_preview_id(
+                record, analysis, saved["to_mm"], saved.get("to_height_mm")):
             raise AppError("the size preview is out of date; preview again")
         if saved["status"] != READY:
             raise AppError(f"the size preview did not pass ({saved['status']}); nothing was changed")
         if approve_size is not True:
-            raise AppError(f"approve changing the sheet from {saved['from_mm']:g} mm to {saved['to_mm']:g} mm first")
+            sizes = [" x ".join(f"{v:g}" for v in saved[k]) if k in saved else f"{saved[m]:g}"
+                     for k, m in (("from_size_mm", "from_mm"), ("to_size_mm", "to_mm"))]
+            raise AppError(f"approve changing the sheet from {sizes[0]} mm to {sizes[1]} mm first")
+        if saved.get("refit") and approve_changes is not True:
+            raise AppError("approve the artwork fitted into the new proportions (shown in the preview) first")
         if saved["changes"] and approve_changes is not True:
             raise AppError(f"approve the {len(saved['changes'])} visible artwork changes shown in the preview first")
         return {**saved, "_analysis": analysis}
@@ -827,17 +877,23 @@ class Workspace:
         s = record["proposal_settings"]
         staging = path / "proposal.next"
         shutil.rmtree(staging, ignore_errors=True)
+        to_height = saved.get("to_height_mm")
         planning = PlanningConfig(outer_sheet_mm=saved["to_mm"], scale=self.processing_scale(record),
-                                  thickness_mm=s["thickness_mm"])
-        progress("RESIZE_RETRY_STARTING", from_mm=saved["from_mm"], to_mm=saved["to_mm"])
+                                  thickness_mm=s["thickness_mm"], outer_sheet_height_mm=to_height)
+        progress("RESIZE_RETRY_STARTING", from_mm=saved["from_mm"], to_mm=saved["to_mm"],
+                 **({"to_size_mm": saved["to_size_mm"]} if "to_size_mm" in saved else {}))
+        artwork = None
+        if edited is not None:
+            artwork = {"target_rgb": edited["target_rgb"], "frame_color": edited["frame_color"],
+                       "composition_ops": edited["composition_ops"],
+                       "provenance": {**edited["provenance"], "carried_by": "physical_resize", "sheet_mm": saved["to_mm"],
+                                      **({"sheet_size_mm": saved["to_size_mm"]} if "to_size_mm" in saved else {})}}
+            if saved.get("refit"):  # moved onto the new aperture in the preview (only the padding changed)
+                artwork.update(target_rgb=np.asarray(Image.open(path / "resize" / "preview" / "target.png").convert("RGB")),
+                               frame_color=saved["frame_color"], composition_ops=None)
         try:
             result = propose(path / record["source"]["file"], staging, self.intake_config(record),
-                             ProposalConfig(planning=planning), progress, saved["decisions"] or None,
-                             artwork=None if edited is None else {
-                                 "target_rgb": edited["target_rgb"], "frame_color": edited["frame_color"],
-                                 "composition_ops": edited["composition_ops"],
-                                 "provenance": {**edited["provenance"], "carried_by": "physical_resize",
-                                                "sheet_mm": saved["to_mm"]}})
+                             ProposalConfig(planning=planning), progress, saved["decisions"] or None, artwork=artwork)
         except StackError as error:
             shutil.rmtree(staging, ignore_errors=True)
             raise AppError(f"could not plan the edited artwork at {saved['to_mm']:g} mm: {error}") from None
@@ -853,17 +909,21 @@ class Workspace:
                            "Preview the size again.")
         previous = _read_json(path / "proposal" / "proposal.json")
         attempts = record.setdefault("attempts", [])
-        folder = f"attempt_{len(attempts) + 1:02d}_{saved['from_mm']:g}mm".replace(".", "_")
+        sides = saved.get("from_size_mm") or [saved["from_mm"]]
+        label = "x".join(f"{v:g}" for v in (sides if sides[0] != sides[-1] else sides[:1]))  # square: "200", else "200x150"
+        folder = f"attempt_{len(attempts) + 1:02d}_{label}mm".replace(".", "_")
         archive = path / "attempts" / folder
         archive.mkdir(parents=True, exist_ok=False)
-        for part in ("proposal", "review", "draft", "printability", "resize"):
+        for part in ("proposal", "review", "draft", "printability", "resize", "reviews"):
             if (path / part).exists():
                 (path / part).replace(archive / part)
         staging.replace(path / "proposal")
         shutil.rmtree(path / "upscale", ignore_errors=True)
         self._carry_artwork_log(path, archive, edited)
 
-        check: dict[str, Any] = {"from_mm": saved["from_mm"], "to_mm": saved["to_mm"], "process": analysis["process"],
+        check: dict[str, Any] = {"from_mm": saved["from_mm"], "to_mm": saved["to_mm"],
+                                 **{k: saved[k] for k in ("from_size_mm", "to_size_mm") if k in saved},
+                                 "process": analysis["process"],
                                  "before": {**analysis["measured"], "stage": analysis["basis"]["stage"]},
                                  "predicted": remaining_at(analysis["issues"], saved["ratio"]),
                                  "predicted_basis": "estimate: measured widths times the size ratio; not a result",
@@ -888,18 +948,25 @@ class Workspace:
         _write_json(path / "proposal" / "resize_check.json", check)
         attempts.append({
             "id": folder, "archived_utc": _now(), "scale": self.processing_scale(record), "sheet_mm": saved["from_mm"],
+            **({"sheet_size_mm": saved["from_size_mm"]} if "from_size_mm" in saved else {}),
             "status": previous["status"], "stage": analysis["basis"]["stage"],
             "blockers": [f["code"] for f in previous["flags"] if f["severity"] == "BLOCKER"],
             "detail_decisions": record.get("detail_decisions") or {},
-            "replaced_by": {"kind": "physical_resize", "sheet_mm": saved["to_mm"], "status": result["status"],
+            "replaced_by": {"kind": "physical_resize", "sheet_mm": saved["to_mm"],
+                            **({"sheet_size_mm": saved["to_size_mm"]} if "to_size_mm" in saved else {}),
+                            "status": result["status"], "refit": bool(saved.get("refit")),
                             "approved_visible_changes": len(saved["changes"]), "preview_id": saved["preview_id"]},
         })
         record["sheet_outer_mm"] = saved["to_mm"]
+        if to_height is None:
+            record.pop("sheet_outer_height_mm", None)
+        else:
+            record["sheet_outer_height_mm"] = to_height
         record["detail_decisions"] = saved["decisions"]
         record["candidate"] = None
         self._save_record(name, record)
         return {"status": result["status"], "selected": result["selected"], "sheet_mm": saved["to_mm"],
-                "after": check.get("after", {}).get("counts")}
+                "sheet_size_mm": self.sheet_size_mm(record), "after": check.get("after", {}).get("counts")}
 
     # -- 2. review / edit (L2) -----------------------------------------------------------
     @staticmethod
@@ -981,7 +1048,106 @@ class Workspace:
         if rows[candidate]["status"] == "PLANNING_FAILED":
             raise AppError(f"{candidate} failed planning and has no stack to review")
         if (path / "review").exists():
-            raise AppError("a review already exists for this project")
+            return self.switch_review(name, candidate, progress, widen_openings)
+        return self._start_review(name, candidate, progress, widen_openings)
+
+    # Everything that belongs to one candidate's review.  Switching candidates parks these under
+    # reviews/<candidate>/ and restores the other candidate's (nothing is recomputed or discarded).
+    REVIEW_PARTS = ("review", "draft", "printability", "artwork")
+    REVIEW_FILES = ("issue_reviews.json",)
+
+    def parked_reviews(self, path: Path, proposal_sha: str | None) -> dict[str, dict[str, Any]]:
+        """Saved reviews of the other candidates of this planning run (by candidate)."""
+
+        out = {}
+        for folder in sorted((path / "reviews").glob("*")) if (path / "reviews").is_dir() else []:
+            info = _read_json(folder / "parked.json")
+            if isinstance(info, dict) and info.get("proposal_sha256") == proposal_sha:
+                out[info["candidate"]] = info
+        return out
+
+    def switch_review(self, name: str, candidate: str, progress: Callable[..., None],
+                      widen_openings: bool | None = None) -> dict[str, Any]:
+        """Review another candidate of the same planning run: park the current review (sheets, edits,
+        draft caches, printability estimate, artwork log, issue decisions) and restore the other
+        candidate's saved review, or start one.  No re-planning; nothing is discarded."""
+
+        path, record = self.path(name), self.record(name)
+        current = record.get("candidate")
+        if not current or not (path / "review" / MANIFEST_NAME).is_file():
+            raise AppError("the review folder has no recorded candidate; it cannot be switched safely")
+        if candidate == current:
+            raise AppError(f"{candidate} is already the candidate in review")
+        self.refuse_if_unsaved(name, "switching to another candidate")
+        proposal_sha = file_sha256(path / "proposal" / "proposal.json")
+        parked = path / "reviews" / current
+        if parked.exists():
+            raise AppError(f"a saved review of {current} already exists in {parked}; nothing was changed")
+        target = path / "reviews" / candidate
+        info = _read_json(target / "parked.json") if target.is_dir() else None
+        if target.is_dir() and not (isinstance(info, dict) and info.get("proposal_sha256") == proposal_sha):
+            raise AppError(f"the saved review of {candidate} belongs to another planning run; nothing was changed")
+        progress("REVIEW_SWITCHING", candidate=candidate, previous=current)
+        parked.mkdir(parents=True)
+        moved = self._move_review(path, parked)
+        _write_json(parked / "parked.json", {
+            "candidate": current, "proposal_sha256": proposal_sha, "parked_utc": _now(),
+            "manifest_sha256": file_sha256(parked / "review" / MANIFEST_NAME), "parts": moved,
+            "edits": len(review.load_project(parked / "review").review["edits"])})
+        self._forget_caches(name)
+        try:
+            if info is not None:
+                self._move_review(target, path)
+                record["candidate"] = candidate
+                self._save_record(name, record)
+                (target / "parked.json").unlink()  # last: until here a failure can put it back
+                target.rmdir()
+                draft = _read_json(path / "draft" / "state.json") or {}
+                result = {"status": (draft.get("validation") or {}).get("status"), "restored": True}
+            else:
+                result = self._start_review(name, candidate, progress, widen_openings)
+        except BaseException:
+            # Put both reviews back exactly as they were: a saved review goes back to its folder (never
+            # deleted); only a review started just now from the plan is removed.
+            for part in self.REVIEW_PARTS + self.REVIEW_FILES:
+                if not (path / part).exists():
+                    continue
+                if info is not None:
+                    if (target / "parked.json").is_file() and not (target / part).exists():
+                        (path / part).replace(target / part)
+                elif (parked / part).exists() or part in ("review", "draft"):
+                    shutil.rmtree(path / part) if (path / part).is_dir() else (path / part).unlink()
+            self._move_review(parked, path)
+            (parked / "parked.json").unlink()
+            parked.rmdir()
+            record["candidate"] = current
+            self._save_record(name, record)
+            self._forget_caches(name)
+            raise
+        return {**result, "candidate": candidate, "previous_candidate": current, "previous_review_saved": True}
+
+    def _move_review(self, source: Path, destination: Path) -> list[str]:
+        # Moving a folder fails on Windows while a file in it is open: the review is moved under the lock
+        # its loads take, and the move is retried briefly for other readers (``replace_path``).
+        moved = []
+        with review.project_lock(source / "review"), review.project_lock(destination / "review"):
+            for part in self.REVIEW_PARTS + self.REVIEW_FILES:
+                if (source / part).exists():
+                    if (destination / part).exists():
+                        raise AppError(f"{destination / part} already exists; nothing was overwritten")
+                    replace_path(source / part, destination / part)
+                    moved.append(part)
+        return moved
+
+    def _forget_caches(self, name: str) -> None:
+        for cache in (self._issue_cache, self._tips_cache, self._planned_images, self._artwork_planned):
+            cache.pop(name, None)
+        prefix = str(self.root / name)
+        self._basis_sha = {k: v for k, v in self._basis_sha.items() if not k[0].startswith(prefix)}
+
+    def _start_review(self, name: str, candidate: str, progress: Callable[..., None],
+                      widen_openings: bool | None = None) -> dict[str, Any]:
+        path, record = self.path(name), self.record(name)
         progress("REVIEW_STARTING", candidate=candidate)
         if self.widening_enabled({"proposal_settings": {**record["proposal_settings"],
                                                         **({} if widen_openings is None else {"widen_openings": widen_openings})}}):
@@ -1138,7 +1304,8 @@ class Workspace:
             shutil.rmtree(path / "kits" / kit_id, ignore_errors=True)
             raise
         record = self.record(name)  # re-read: a kit may have been deleted while this one was built
-        record["kits"].append({"id": kit_id, "created_utc": _now(), "status": kit["status"]})
+        record["kits"].append({"id": kit_id, "created_utc": _now(), "status": kit["status"],
+                               "candidate": record.get("candidate")})
         self._save_record(name, record)
         return {"kit": kit_id, "status": kit["status"]}
 
@@ -1861,7 +2028,7 @@ class Workspace:
         staging = path / "proposal.next"
         shutil.rmtree(staging, ignore_errors=True)
         planning = PlanningConfig(outer_sheet_mm=self.sheet_outer_mm(record), scale=self.processing_scale(record),
-                                  thickness_mm=s["thickness_mm"])
+                                  thickness_mm=s["thickness_mm"], outer_sheet_height_mm=self.sheet_height_mm(record))
         provenance = {"region_recolors": len(edits), "base_sha256": log["base"]["sha256"] if log else origin["sha256"],
                       "base_origin": log["base"]["origin"] if log else origin, "artwork_sha256": edited_sha,
                       "log": "artwork_edits/edits.json" if edits else None}
@@ -1891,7 +2058,7 @@ class Workspace:
                 folder = f"attempt_{len(attempts) + 1:02d}_artwork"
                 archive = path / "attempts" / folder
                 archive.mkdir(parents=True, exist_ok=False)
-                for part in ("proposal", "review", "draft", "printability", "resize"):
+                for part in ("proposal", "review", "draft", "printability", "resize", "reviews"):
                     if (path / part).exists():
                         (path / part).replace(archive / part)
             staging.replace(path / "proposal")
@@ -1915,7 +2082,8 @@ class Workspace:
         if folder:
             attempts.append({
                 "id": folder, "archived_utc": _now(), "scale": self.processing_scale(record),
-                "sheet_mm": self.sheet_outer_mm(record), "status": proposal["status"], "stage": origin["stage"],
+                "sheet_mm": self.sheet_outer_mm(record), "sheet_size_mm": self.sheet_size_mm(record),
+                "status": proposal["status"], "stage": origin["stage"],
                 "blockers": [f["code"] for f in proposal["flags"] if f["severity"] == "BLOCKER"],
                 "detail_decisions": record.get("detail_decisions") or {},
                 "replaced_by": {"kind": "artwork_edit", "region_recolors": len(edits), "status": result["status"],
@@ -2088,11 +2256,11 @@ class Workspace:
         from ..core.propose import NOT_PLANNED
 
         cfg = proposal["planning_config"]
-        grid = StackGrid.for_planner(cfg["outer_sheet_mm"], cfg["scale"])
-        size = grid.outer_sheet_mm
-        outer = [0.0, 0.0, size, size]
+        grid = StackGrid.for_planner(cfg["outer_sheet_mm"], cfg["scale"], cfg.get("outer_sheet_height_mm"))
+        size, height = grid.raster_mm  # (the outer size of a square sheet; the issue map is in the raster frame)
+        outer = [0.0, 0.0, size, height]
         inner = [round(grid.perimeter_pixels * grid.mm_per_pixel, 6), round(grid.perimeter_pixels * grid.mm_per_pixel, 6),
-                 round(size - grid.perimeter_pixels * grid.mm_per_pixel, 6), round(size - grid.perimeter_pixels * grid.mm_per_pixel, 6)]
+                 round(size - grid.perimeter_pixels * grid.mm_per_pixel, 6), round(height - grid.perimeter_pixels * grid.mm_per_pixel, 6)]
         issues: list[dict[str, Any]] = []
         unlocalized: list[dict[str, Any]] = []
         sources: list[dict[str, Any]] = []
@@ -2232,7 +2400,9 @@ class Workspace:
             issue["fingerprint"] = rv.fingerprint(issue, grid, stack, processed, settings)
         groups = rv.group_by_location(issues, grid)
         return {"grid": {"outer_sheet_mm": size, "mm_per_pixel": grid.mm_per_pixel,
-                         "perimeter_pixels": grid.perimeter_pixels, "artwork_pixels": grid.artwork_pixels},
+                         "perimeter_pixels": grid.perimeter_pixels, "artwork_pixels": grid.artwork_pixels,
+                         **({} if grid.square else {"raster_mm": [size, height], "artwork_rows": grid.artwork_rows,
+                                                    "outer_mm": list(grid.outer_mm)})},
                 "issues": issues, "groups": groups, "unlocalized": unlocalized, "sources": sources,
                 "images": images, "sheets": sheets, "notice": notice, "computed_utc": _now(),
                 "has_review": review_manifest.is_file(), "checks": checks,
@@ -2266,7 +2436,8 @@ class Workspace:
                 feature.pop("outline_mm", None)  # outlines are served by the issue inspector only
             estimate["map_urls"] = [self.url(name, f"printability/{m}") for m in estimate["maps"]]
             state["printability"] = estimate
-        state["kits"] = [{**self._kit_view(name, path, row["id"], current_sha), "created_utc": row.get("created_utc")}
+        state["kits"] = [{**self._kit_view(name, path, row["id"], current_sha), "created_utc": row.get("created_utc"),
+                          "candidate": row.get("candidate")}
                          for row in reversed(record["kits"])
                          if KIT_ID.fullmatch(row["id"]) and not _is_link(path / "kits" / row["id"])
                          and (path / "kits" / row["id"] / "print_kit.json").is_file()]
@@ -2281,6 +2452,9 @@ class Workspace:
         view = {k: proposal.get(k) for k in ("status", "selected", "palette", "frame_color", "flags", "candidates",
                                              "cad", "seconds", "color_topology", "planning_config", "source",
                                              "artwork_edits")}
+        # Reviews of other candidates of this same planning run, saved when the user switched candidates.
+        view["saved_reviews"] = {c: {k: info.get(k) for k in ("parked_utc", "edits")} for c, info in
+                                 self.parked_reviews(path, file_sha256(path / "proposal" / "proposal.json")).items()}
         check = _read_json(path / "proposal" / "artwork_check.json")
         if check is not None:
             view["artwork_check"] = check
@@ -2324,7 +2498,7 @@ class Workspace:
         view: dict[str, Any] = {"scale": scale, "import_scale": record["proposal_settings"]["scale"], "attempts": []}
         for row in record.get("attempts", []):
             base = f"attempts/{row['id']}"
-            if not re.fullmatch(r"attempt_\d{2}_(scale\d+|[\d_]+mm|artwork)", row["id"]) or _is_link(path / base):
+            if not re.fullmatch(r"attempt_\d{2}_(scale\d+|[\d_]+(x[\d_]+)?mm|artwork)", row["id"]) or _is_link(path / base):
                 continue
             old = _read_json(path / base / "proposal" / "proposal.json") or {}
             view["attempts"].append({**row, "images": {
@@ -2341,7 +2515,8 @@ class Workspace:
             self.refuse_if_artwork_edited(name, "Upscale & Retry")
         except AppError as error:  # shown instead of the options; the server refuses the request too
             view["blocked_by_artwork"] = str(error)
-        view["options"] = [{"factor": f, **resource_check(self.sheet_outer_mm(record), scale * f)} for f in UPSCALE_FACTORS]
+        view["options"] = [{"factor": f, **resource_check(self.sheet_outer_mm(record), scale * f,
+                                                          height_mm=self.sheet_height_mm(record))} for f in UPSCALE_FACTORS]
         view["previews"] = {}
         for factor in UPSCALE_FACTORS:
             base = f"upscale/x{factor}"
@@ -2362,7 +2537,7 @@ class Workspace:
     def _resize_view(self, name: str, path: Path, record: dict[str, Any], proposal: dict[str, Any]) -> dict[str, Any]:
         """Physical size: current dimensions, the analysis and preview if current, the last re-check."""
 
-        view: dict[str, Any] = {"sheet_mm": self.sheet_outer_mm(record),
+        view: dict[str, Any] = {"sheet_mm": self.sheet_outer_mm(record), "sheet_size_mm": self.sheet_size_mm(record),
                                 "import_sheet_mm": float(record["proposal_settings"]["outer_mm"])}
         try:
             *_, basis = self.resize_subject(name)
@@ -2385,7 +2560,7 @@ class Workspace:
             if saved is not None:
                 stamp = int((path / "resize" / "preview" / "preview.json").stat().st_mtime)
                 saved["current"] = analysis["current"] and saved.get("preview_id") == self._resize_preview_id(
-                    record, analysis, saved["to_mm"])
+                    record, analysis, saved["to_mm"], saved.get("to_height_mm"))
                 saved["images"] = {stem: self.url(name, f"resize/preview/{stem}.png", stamp)
                                    for stem in ("comparison", "target") if (path / "resize" / "preview" / f"{stem}.png").is_file()}
                 for row in saved.get("changes", []) + saved.get("details", []):
@@ -2424,6 +2599,8 @@ class Workspace:
                            "details_recomputed": validation.get("details_recomputed", True),
                            "reconstruction": validation["reconstruction"], "mm_per_pixel": validation["mm_per_pixel"],
                            "outer_sheet_mm": validation["outer_sheet_mm"][0],
+                           **({"raster_mm": validation["raster_mm"], "outer_mm": validation["outer_sheet_mm"]}
+                              if "raster_mm" in validation else {}),
                            "repeated_colors": validation["repeated_colors"]},
             "previews": {"images": images, "notice": previews.get("notice"),
                          "changes_vs_base": previews.get("changes_vs_base"),

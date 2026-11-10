@@ -72,9 +72,50 @@ def test_smallest_useful_size_within_the_printer() -> None:
     assert pred["improved"][0]["predicted_width_mm"] == pytest.approx(0.3 * 1.6) and pred["improved"][0]["predicted"] == "RISK"
 
 
+def test_a_smaller_sheet_predicts_what_gets_worse() -> None:
+    issues = issue_requirements([_feature("narrow_slot_or_gap", "RISK", 0.7),
+                                 _feature("narrow_slot_or_gap", "UNSUPPORTED", 0.35)], PROCESS, 0.1)
+    pred = predict(issues, 0.5)  # every width halves: the risk drops below the nozzle
+    assert [r["id"] for r in pred["worsened"]] == [issues[0]["id"]] and pred["worsened"][0]["predicted"] == "UNSUPPORTED"
+    assert [r["id"] for r in pred["remaining"]] == [issues[1]["id"]] and not pred["improved"] and not pred["cleared"]
+    assert pred["worsened"][0]["predicted_width_mm"] == pytest.approx(0.35)
+
+
+def test_sheet_size_bounds() -> None:
+    """Width and height each at least 100 mm; the full outer sheet must fit the bed as placed or turned."""
+
+    from layerforge_l1.app.workspace import AppError, Workspace
+
+    limit = usable_sheet_mm(PrintProcess(bed_x_mm=260.0, bed_y_mm=160.0))
+    analysis = {"basis": {"sheet_mm": 120.0}, "limit": limit}
+    assert Workspace.check_size(100, analysis) == (100.0, 100.0) and Workspace.check_size(150.04, analysis) == (150.0, 150.0)
+    assert Workspace.check_size(250, analysis, 150) == (250.0, 150.0)
+    assert Workspace.check_size(150, analysis, 250) == (150.0, 250.0)  # fits only turned 90 degrees: allowed
+    for bad, height in ((120, None), (99.9, None), (200, 99), (99, 200), (170, None), (270, 150), (150, 270), ("x", None)):
+        with pytest.raises(AppError):
+            Workspace.check_size(bad, analysis, height)
+    rect = {"basis": {"sheet_mm": 200.0, "sheet_size_mm": [200.0, 150.0]}, "limit": limit}
+    with pytest.raises(AppError, match="current size"):
+        Workspace.check_size(200, rect, 150)
+    assert Workspace.check_size(200, rect, 160) == (200.0, 160.0)
+
+
+def test_minimum_sheet_is_100_mm_and_keeps_the_band_above_the_material_minimum() -> None:
+    from layerforge_l1.core.model import StackGrid
+    from layerforge_l1.core.resize import MIN_SHEET_MM
+    from layerforge_l1.core.validation import minimum_width_mm
+
+    assert MIN_SHEET_MM == 100.0
+    for width, height in ((100.0, None), (100.0, 300.0), (300.0, 100.0)):
+        assert StackGrid.for_planner(width, 1, height).perimeter_band_mm >= minimum_width_mm()
+
+
 def test_usable_area_includes_bambu_keep_out_zones() -> None:
     plain = usable_sheet_mm(PrintProcess(bed_x_mm=220.0, bed_y_mm=250.0))
     assert plain["max_sheet_mm"] == 220.0
+    # A rectangular sheet at its proportions, either orientation: 200 x 150 on a 160 x 260 bed turns.
+    rect = usable_sheet_mm(PrintProcess(bed_x_mm=160.0, bed_y_mm=260.0), aspect=0.75)
+    assert rect["max_sheet_mm"] == 213.0 and rect["max_sheet_height_mm"] == pytest.approx(159.8)
     a1mini = usable_sheet_mm(PROCESS, "Bambu Lab A1 mini 0.4 nozzle")
     assert a1mini["max_sheet_mm"] < 180.0 and len(a1mini["basis"]) == 2
     with pytest.raises(Exception, match="unsupported Bambu printer"):
@@ -114,7 +155,7 @@ def small_sailboat(tmp_path_factory):
 def test_preview_scales_every_length_and_keeps_the_pixels(small_sailboat) -> None:
     root, analysis, report = small_sailboat
     assert report["counts"]["UNSUPPORTED"] + report["counts"]["RISK"] > 0
-    size = (analysis["options"]["recommended"] or {"sheet_mm": 90.0})["sheet_mm"]
+    size = max(100.0, (analysis["options"]["recommended"] or {"sheet_mm": 120.0})["sheet_mm"])
     view = preview_resize(SAILBOAT, root / "p", root / "v", size, analysis, IntakeConfig())
     assert view["status"] == READY and view["boundaries"]["pass"], view["boundaries"]
     ratio = size / 60.0
@@ -128,6 +169,9 @@ def test_preview_scales_every_length_and_keeps_the_pixels(small_sailboat) -> Non
     too_big = preview_resize(SAILBOAT, root / "p", root / "w", 300.0, analysis, IntakeConfig())
     failed = {c["check"] for c in too_big["boundaries"]["checks"] if not c["pass"]}
     assert too_big["status"] == BOUNDARY_FAILED and failed == {"sheet fits the printer's usable area"}
+    too_small = preview_resize(SAILBOAT, root / "p", root / "t", 90.0, analysis, IntakeConfig())
+    failed = {c["check"] for c in too_small["boundaries"]["checks"] if not c["pass"]}
+    assert too_small["status"] == BOUNDARY_FAILED and failed == {"a different size, at least 100 mm wide and high"}
 
 
 def test_trial_search_bisects_to_the_smallest_planning_size() -> None:

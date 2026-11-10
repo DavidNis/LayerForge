@@ -79,8 +79,8 @@ def target_color_codes(stack: SheetStack, target_rgb: np.ndarray) -> np.ndarray:
 
     grid = stack.grid
     p = grid.perimeter_pixels
-    art = cv2.resize(target_rgb, (grid.artwork_pixels,) * 2, interpolation=cv2.INTER_NEAREST).astype(np.int64)
-    codes = np.full((grid.outer_pixels,) * 2, NO_MATERIAL, dtype=np.int64)
+    art = cv2.resize(target_rgb, (grid.artwork_pixels, grid.artwork_rows), interpolation=cv2.INTER_NEAREST).astype(np.int64)
+    codes = np.full(grid.shape, NO_MATERIAL, dtype=np.int64)
     codes[p:-p, p:-p] = (art[..., 0] << 16) | (art[..., 1] << 8) | art[..., 2]
     return codes
 
@@ -121,7 +121,7 @@ def islands(stack: SheetStack, index: int) -> list[dict[str, Any]]:
         return found
     count, labels, stats, centroids = cv2.connectedComponentsWithStats(sheet.retained.astype(np.uint8), connectivity=4)
     anchored = set(np.unique(labels[stack.grid.perimeter_mask() & sheet.retained]).tolist())
-    mm, n = stack.grid.mm_per_pixel, stack.grid.outer_pixels
+    mm, n = stack.grid.mm_per_pixel, stack.grid.rows
     found = []
     for label in range(1, count):
         if label in anchored:
@@ -146,10 +146,12 @@ def islands(stack: SheetStack, index: int) -> list[dict[str, Any]]:
 # -- operands -----------------------------------------------------------------------
 def point_to_pixel(stack: SheetStack, point_mm: Any) -> tuple[int, int]:
     x, y = (float(v) for v in point_mm)
-    mm, n = stack.grid.mm_per_pixel, stack.grid.outer_pixels
+    mm, (n, cols) = stack.grid.mm_per_pixel, stack.grid.shape
     row, col = n - 1 - int(np.floor(y / mm)), int(np.floor(x / mm))
-    if not (0 <= row < n and 0 <= col < n):
-        raise EditError(f"point {point_mm} mm lies outside the {stack.grid.outer_sheet_mm:g} mm sheet")
+    if not (0 <= row < n and 0 <= col < cols):
+        size = (f"{stack.grid.outer_sheet_mm:g} mm" if stack.grid.square
+                else "{:g} x {:g} mm".format(*stack.grid.outer_mm))
+        raise EditError(f"point {point_mm} mm lies outside the {size} sheet")
     return row, col
 
 
@@ -225,12 +227,12 @@ def region_mask(stack: SheetStack, region: dict[str, Any], root: Path | None = N
             path = Path(root) / path
         mask = _read_mask(path)
         grid = stack.grid
-        if mask.shape == (grid.artwork_pixels,) * 2:
-            full = np.zeros((grid.outer_pixels,) * 2, dtype=bool)
+        if mask.shape == (grid.artwork_rows, grid.artwork_pixels):
+            full = np.zeros(grid.shape, dtype=bool)
             p = grid.perimeter_pixels
             full[p:-p, p:-p] = mask
             mask = full
-        elif mask.shape != (grid.outer_pixels,) * 2:
+        elif mask.shape != grid.shape:
             raise EditError(f"mask {path} is {mask.shape}; expected the outer or artwork grid of the stack")
     else:
         raise EditError("a region needs 'shape' or 'mask'")
@@ -246,7 +248,7 @@ def sheet_vector(stack: SheetStack, sheet: Sheet):
 
     if sheet.geometry is not None:
         return sheet.geometry
-    return mask_to_geometry(sheet.retained, stack.grid.mm_per_pixel, DEFAULT_SIMPLIFY_MM)
+    return mask_to_geometry(sheet.retained, stack.grid.mm_per_pixel, DEFAULT_SIMPLIFY_MM, whole_sheet=True)
 
 
 def mask_geometry(stack: SheetStack, mask: np.ndarray):
@@ -256,7 +258,7 @@ def mask_geometry(stack: SheetStack, mask: np.ndarray):
 
     from .cad import mask_to_geometry
 
-    return mask_to_geometry(mask, stack.grid.mm_per_pixel, 0.0) if mask.any() else Polygon()
+    return mask_to_geometry(mask, stack.grid.mm_per_pixel, 0.0, whole_sheet=True) if mask.any() else Polygon()
 
 
 def _set_geometry(stack: SheetStack, sheet: Sheet, geometry: Any) -> None:

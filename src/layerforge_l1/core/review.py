@@ -22,6 +22,7 @@ from __future__ import annotations
 import hashlib
 import json
 import shutil
+import threading
 from pathlib import Path
 from typing import Any, Callable
 
@@ -52,11 +53,42 @@ def _summary(stack: SheetStack, validation: dict[str, Any], base: SheetStack) ->
     }
 
 
+_project_locks: dict[str, threading.RLock] = {}
+_project_locks_guard = threading.Lock()
+
+
+def project_lock(project: Path) -> threading.RLock:
+    """The lock that saving, loading and moving one review project share in this process, so a load never
+    mixes files of two saves.  Readers outside it (images served or decoded directly) still see whole
+    files: saving replaces every file instead of rewriting it (``save_stack(replacing=True)``)."""
+
+    key = str(Path(project).resolve()).lower()
+    with _project_locks_guard:
+        return _project_locks.setdefault(key, threading.RLock())
+
+
 def _save(stack: SheetStack, project: Path) -> None:
-    # Remove masks of sheets that no longer exist (merge) before writing the current set.
-    shutil.rmtree(project / "layers", ignore_errors=True)
-    (project / "target.png").unlink(missing_ok=True)
-    save_stack(stack, project)
+    # Every file is replaced in place, the manifest last; nothing is deleted first, so a failed save
+    # (e.g. a file Windows keeps in use too long) leaves the previous save readable and complete.
+    # Files the new manifest no longer lists (masks of merged sheets) are removed afterwards.
+    project = Path(project)
+    with project_lock(project):
+        save_stack(stack, project, replacing=True)
+        listed = {project / f"layers/{sheet.id}" for sheet in stack.sheets}
+        for folder in (project / "layers").iterdir():
+            if folder not in listed:
+                shutil.rmtree(folder, ignore_errors=True)
+        manifest = json.loads((project / MANIFEST_NAME).read_text(encoding="utf-8"))
+        files = {project / row[key] for row in manifest["sheets"] for key in ("retained_mask", "visible_mask")}
+        files |= {project / row["geometry"]["file"] for row in manifest["sheets"] if row.get("geometry")}
+        stale = [file for file in (project / "layers").glob("*/*") if file not in files]
+        if stack.target_rgb is None:
+            stale.append(project / "target.png")
+        for file in stale:  # no longer referenced: a file still in use is left behind, as before
+            try:
+                file.unlink(missing_ok=True)
+            except OSError:
+                pass
 
 
 def start_review(source: Path, project: Path) -> tuple[SheetStack, dict[str, Any]]:
@@ -89,7 +121,8 @@ def start_review(source: Path, project: Path) -> tuple[SheetStack, dict[str, Any
 
 
 def load_project(project: Path) -> SheetStack:
-    stack = load_stack(project)
+    with project_lock(project):
+        stack = load_stack(project)
     if stack.review is None or stack.review.get("schema") != REVIEW_SCHEMA:
         raise EditError(f"{project} is not a review project (start one with `stack-edit init`)")
     return stack

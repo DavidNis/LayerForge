@@ -1247,3 +1247,25 @@ follow the light-blue body). Not user approved; no CAD exported.
   Follow-up: one issue check shared by concurrent requests (Chupa cold open: 2 checks -> 1, suggestion ready
   ~2.3 s sooner); stale planning shown in the card (Chupa: an edit far away -> stale, 371 px, no tip marked;
   an edit next to the #37 tip -> that tip marked); test_simplify_tips 10 PASS.
+
+- 2026-11-10 - Candidate switching (D-V3-045), Windows-safe review saving (D-V3-046), cutout widening thin-issue
+  guard (D-V3-042 amendment) and Physical size with smaller and rectangular sheets (D-V3-047). State:
+  READY_FOR_USER_TEST; committed in one commit (this entry's commit); exe/zip rebuilt after it.
+  Rectangular sheets, in three approved steps: grid/planner/validators; CAD and print kit at the exact requested
+  outer size (edge correction in the solid band, sub-pixel, proven by tests); intake, Physical size (width x
+  height, 100 mm per side minimum, either orientation, re-fit with approval at other proportions), review,
+  editing, issues, widening, persistence. Rotation is never automatic: a sheet that fits the Bambu plate only
+  turned gets NEEDS_MANUAL_ROTATION and no project file; STL/STEP unchanged.
+  Square output identical to the previous code: 4 square plans (targets, masks, saved files, validation,
+  manifests without timings) and 2 square print kits (every STL, STEP, preview, map; only the source-stack hash,
+  which includes planning time, differs).
+  Tests (focused, risk-based): test_rect_grid 8, test_rect_cad 10 (incl. 150 x 250 at scale 2: validation PASS,
+  reconstruction 0 px, STL/STEP exactly 150 x 250, read-back 0 px), physical_resize 10, artwork_recolor 18
+  (incl. padding-only edit carry-over), test_l4_app rectangular sequence 200^2 -> 200x150 -> 150x250 -> 200x150 ->
+  200^2 -> 100x200, restart, and a real-browser rectangular review (Issue inspector by list and by click,
+  highlight on the slot, position text, Fill tool click at the exact pixel, save, reload), widening 24 (browser
+  tests now keep failure evidence): all PASS.  Earlier batches: 58/60 and 199/201 with the 3 failures being tests
+  that used sizes under the new 100 mm minimum (updated) and one widening browser failure that did not recur in
+  17 attempts (cause unknown; evidence capture added).  Five-project pipeline not run (not requested).
+  Untested: Upscale & Retry / trial planning on a failed rectangular proposal; scale 4 rectangular.
+  Physical print test: PENDING.

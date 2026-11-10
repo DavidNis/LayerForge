@@ -33,7 +33,7 @@ const ui = {
   upscaleFactor: 2,    // Upscale & Retry: processing-resolution factor shown
   upscaleApproved: {}, // preview id -> the user approved its visible changes
   resizePrinter: null, // Bambu printer whose usable area limits the sheet size ("" = the process bed; null = as last checked)
-  resizeSize: null,    // sheet size (mm) entered for the resize preview
+  resizeSize: null,    // [width, height] (mm) entered for the resize preview
   resizeApproved: {},  // resize preview id -> {size, changes} approvals
   confirmProject: null, // project name whose inline delete confirmation is shown
   projectNotice: null,  // result of the last project deletion (shown on the project list)
@@ -213,12 +213,12 @@ function jobLabel(job) {
   return {
     propose: "L1 proposal (planning, validation, CAD check)",
     upscale_preview: "Upscale preview (intake at the finer resolution, comparison)",
-    resize_analysis: "Checking printability at larger sheet sizes (FDM estimate)",
+    resize_analysis: "Checking printability at other sheet sizes (FDM estimate)",
     resize_preview: "Previewing the artwork at the new sheet size",
     resize_search: "Trial planning at larger sheet sizes (no CAD)",
     resize_retry: "Resize & retry (L1 proposal at the new size, then the FDM estimate)",
     upscale_retry: "Upscale & Retry (L1 proposal at the finer resolution)",
-    start_review: "Starting the review (and widening narrow cutouts, if on)",
+    start_review: "Opening the review of this candidate (a saved review is restored; a new one is widened if on)",
     widen: "Widening narrow cutouts into hidden material",
     artwork_replan: "Planning sheets from the edited artwork (L1 proposal, validation, CAD check; previous attempt kept)",
     edit: "Applying the edit",
@@ -302,7 +302,7 @@ function render() {
   root.innerHTML = `
     <div class="project-head">
       <div><h1>${esc(ui.state.name)}</h1>
-        <p class="muted small">${esc(ui.state.record.source.original_name)} · ${esc(ui.state.resize?.sheet_mm ?? ui.state.record.proposal_settings.outer_mm)} mm sheet · scale ${esc(ui.state.upscale?.scale ?? ui.state.record.proposal_settings.scale)} ${infoTip(`Source image sha256 ${ui.state.record.source.sha256}. The imported image is never changed.`)}</p>
+        <p class="muted small">${esc(ui.state.record.source.original_name)} · ${esc(ui.state.resize?.sheet_size_mm ? sizeLabel(ui.state.resize.sheet_size_mm) : `${ui.state.record.proposal_settings.outer_mm} mm`)} sheet · scale ${esc(ui.state.upscale?.scale ?? ui.state.record.proposal_settings.scale)} ${infoTip(`Source image sha256 ${ui.state.record.source.sha256}. The imported image is never changed.`)}</p>
       </div>
       ${ui.confirmProject === ui.state.name ? "" : `<button class="small ghost danger" data-action="delete-project-ask" data-project="${esc(ui.state.name)}" data-testid="project-delete" ${busy() ? 'disabled title="Wait for the running job to finish"' : ""}>Delete project…</button>`}
     </div>
@@ -461,7 +461,7 @@ function statusStrip() {
   } else if (draft.status.printable) {
     const cad = kit && !kit.stale
       ? (kit.status.cad === "CAD_VALID" ? `CAD verified by reopening every STEP/STL (${kit.id}).` : `CAD INVALID in ${kit.id}.`)
-      : kit ? "Latest kit is out of date: the draft changed after it was built." : "CAD not exported yet (build a print kit).";
+      : kit ? (kit.candidate && kit.candidate !== ui.state.record.candidate ? `Latest kit was built from candidate ${kit.candidate}, not the one in review.` : "Latest kit is out of date: the draft changed after it was built.") : "CAD not exported yet (build a print kit).";
     geo = [kit && !kit.stale && kit.status.cad !== "CAD_VALID" ? "bad" : "ok", "Valid geometry", `Validators PASS. ${cad}`];
   } else {
     geo = ["bad", "Invalid draft", `${draft.validation.failures.length} validation failure(s); not exportable until fixed.`];
@@ -596,10 +596,11 @@ function proposalView() {
   const ready = p.status === "PROPOSAL_READY_FOR_REVIEW";
   const notPlanned = p.status === "ARTWORK_READY_NOT_PLANNED";
   const reviewing = record.candidate;
+  const saved = p.saved_reviews || {};
   const flags = (p.flags || []).map((f) => `<li>${badge(f.severity === "BLOCKER" ? "bad" : f.severity === "WARN" ? "warn" : "neutral", f.severity)} <strong>${esc(f.code)}</strong> — ${esc(f.message)}</li>`).join("");
   const rows = p.candidates.map((c) => `
     <tr class="${c.name === p.selected ? "selected" : ""}">
-      <td><strong>${esc(c.name)}</strong>${c.name === p.selected ? " " + badge("ok", "selected") : ""}${c.name === reviewing ? " " + badge("neutral", "in review") : ""}</td>
+      <td><strong>${esc(c.name)}</strong>${c.name === p.selected ? " " + badge("ok", "selected") : ""}${c.name === reviewing ? " " + badge("neutral", "in review") : ""}${saved[c.name] ? " " + badge("outline", "saved review", `Saved ${saved[c.name].parked_utc} with ${saved[c.name].edits} edit(s)`) : ""}</td>
       <td>${badge(c.status === "VALID" ? "ok" : "bad", c.status)}</td>
       <td>${fmt(c.sheet_count)}</td>
       <td>${(c.front_to_back_colors || []).map((h) => swatch(h)).join(" ")}</td>
@@ -607,7 +608,7 @@ function proposalView() {
       <td>${fmt(c.reconstruction_mismatched_pixels)}</td>
       <td>${fmt(c.planning_seconds, 1)}</td>
       <td>${c.status === "PLANNING_FAILED" ? `<span class="small muted">${esc(c.reason || "")}</span>` :
-        reviewing ? "" : `<button class="small" data-action="start-review" data-candidate="${esc(c.name)}" ${busy() ? "disabled" : ""}>Review this candidate</button>`}</td>
+        c.name === reviewing ? "" : `<button class="small" data-action="start-review" data-candidate="${esc(c.name)}" data-testid="candidate-review" ${busy() ? "disabled" : ""}${reviewing ? ` title="${esc(`Your review of ${reviewing} is saved and can be reopened from this table`)}"` : ""}>${saved[c.name] ? "Resume saved review" : "Review this candidate"}</button>`}</td>
     </tr>`).join("");
   const img = p.images || {};
   const obstruction = p.candidates.filter((c) => c.obstruction_url);
@@ -617,7 +618,7 @@ function proposalView() {
   const warnings = notes.filter((f) => f.severity === "WARN").length;
   const cadLine = p.cad ? `<p class="small muted" style="margin:0">CAD check of the selected candidate: reopened STL ${p.cad.revalidation_pass ? "PASS" : "FAIL"}, stack mismatch ${fmt(p.cad.stack_mismatch_px)} px, ${p.cad.step_verification === "PENDING_PRINT_KIT" ? "STEP verified with the print kit" : `STEP single solids ${p.cad.all_step_valid_single_solid ? "yes" : "no"}`}, watertight STL ${p.cad.all_stl_watertight_single_component ? "yes" : "no"}.</p>` : "";
   const reviewAction = !sel ? "" : reviewing
-    ? `<a class="button" href="#/${encodeURIComponent(ui.name)}/review" data-action="tab" data-tab="review">Open the editor →</a><span class="small muted">Reviewing <strong>${esc(reviewing)}</strong></span>`
+    ? `<a class="button" href="#/${encodeURIComponent(ui.name)}/review" data-action="tab" data-tab="review">Open the editor →</a><span class="small muted">Reviewing <strong>${esc(reviewing)}</strong> · <a href="#" data-action="tab" data-tab="proposal" data-focus="candidates" data-testid="to-candidates">compare or switch candidates</a></span>`
     : `<button class="primary large" data-action="start-review" data-candidate="${esc(sel.name)}" ${busy() ? "disabled" : ""}>Review this candidate</button>${widenChoiceBox()}`;
   const summary = sel ? `<div class="plan-summary">
       ${img.assembled_front ? `<img class="img plan-thumb" src="${esc(img.assembled_front)}" alt="assembled front view of the selected plan">` : ""}
@@ -640,7 +641,7 @@ function proposalView() {
       ${blockers.length ? `<ul class="banner error small blockers" data-testid="proposal-blockers">${blockers.map((f) => `<li><strong>${esc(f.code)}</strong> — ${esc(f.message)}</li>`).join("")}</ul>` : ""}
       ${ui.state.upscale && ui.state.upscale.scale !== ui.state.upscale.import_scale ? `<p class="small muted" data-testid="processing-scale">Processing resolution: scale ${ui.state.upscale.scale} (imported at scale ${ui.state.upscale.import_scale}; raised by Upscale &amp; Retry). Physical size unchanged.</p>` : ""}
       ${summary}
-      ${rows ? `<details class="section subtle" data-section="candidates" ${openAttr("candidates", !ready && !notPlanned)}>
+      ${rows ? `<details class="section subtle" data-section="candidates" data-testid="candidates-section" ${openAttr("candidates", !ready && !notPlanned)}>
         <summary><h4 style="margin:0">Compare candidates</h4><span class="small muted">${p.candidates.length} candidate${p.candidates.length === 1 ? "" : "s"} · ${p.candidates.filter((c) => c.status === "VALID").length} valid</span></summary>
         <div class="section-body"><div class="table-wrap"><table>
         <thead><tr><th>Candidate</th><th>Status</th><th>Sheets</th><th>Colors front → back</th><th>Split regions (seams)</th><th>Mismatch px</th><th>Time s</th><th></th></tr></thead>
@@ -691,17 +692,22 @@ function resizePanel() {
       ${env.printers.map((x) => `<option value="${esc(x.preset)}" ${x.preset === chosen ? "selected" : ""}>${esc(x.model)} (keep-out zones excluded)</option>`).join("")}</select></label>` : "";
   const failed = ui.state.proposal?.status === "NEEDS_USER_DECISION";
   return `<details class="panel section" data-section="resize" data-testid="resize-panel" ${openAttr("resize", Boolean(a || last || failed))}>
-    <summary><h3>Physical size ${r.sheet_mm !== r.import_sheet_mm ? badge("neutral", `resized from ${fmt(r.import_sheet_mm, 1)} mm`) : ""}</h3><span class="small muted">${fmt(r.sheet_mm, 1)} mm sheet · check whether a larger sheet prints better</span></summary>
+    <summary><h3>Physical size ${r.sheet_mm !== r.import_sheet_mm ? badge("neutral", `resized from ${fmt(r.import_sheet_mm, 1)} mm`) : ""}</h3><span class="small muted">${sizeLabel(r.sheet_size_mm || [r.sheet_mm, r.sheet_mm])} sheet · make the sheets larger or smaller</span></summary>
     <div class="section-body stack">
-    <p class="small muted" style="margin:0">A larger sheet widens every opening and strip by the same ratio. Nothing is resized without your approval. ${infoTip("Every printability threshold is in millimetres (planner structural width, nozzle, minimum opening and material width), so some findings clear by size alone; others (topology, unmeasured necks) cannot. The image is never edited.")}</p>
+    <p class="small muted" style="margin:0">A larger sheet widens every opening and strip by the same ratio; a smaller one narrows them. Nothing is resized without your approval. ${infoTip("Every printability threshold is in millimetres (planner structural width, nozzle, minimum opening and material width), so some findings clear by size alone; others (topology, unmeasured necks) cannot. The image is never edited.")}</p>
     ${last ? resizeCheck(last) : ""}
     ${r.available ? `<details class="section" data-section="resize-process" ${openAttr("resize-process")}><summary>Printer and process for the check: <strong>${esc(ui.process.name)}</strong></summary>${processForm("rs")}</details>
-    <div class="row">${printers}<button class="${a ? "" : "primary"}" data-action="resize-analyze" data-testid="resize-analyze" ${busy() ? "disabled" : ""}>Check printability at larger sizes</button></div>`
+    <div class="row">${printers}<button class="${a ? "" : "primary"}" data-action="resize-analyze" data-testid="resize-analyze" ${busy() ? "disabled" : ""}>Check printability at other sizes</button></div>`
       : `<p class="small muted">${esc(r.reason || "")}</p>`}
     ${a ? resizeAnalysis(a) : ""}
     ${a && r.preview ? resizePreview(r.preview, a) : ""}
     </div>
   </details>`;
+}
+
+// "60 mm" for a square sheet, "200 × 150 mm" (width × height) for a rectangular one.
+function sizeLabel([w, h], digits = 1) {
+  return w === h || h == null ? `${fmt(w, digits)} mm` : `${fmt(w, digits)} × ${fmt(h, digits)} mm`;
 }
 
 // A finding's location, with a Locate button once a review of the same sheets exists.
@@ -723,11 +729,11 @@ function resizeCheck(c) {
         <li>${sameCandidate ? `Review of <code>${esc(reviewing)}</code> is open: use <strong>Locate</strong> above (or in Printability).` : reviewing ? `A review of another candidate exists; Locate works for sheets it shares.` : `Start the review of <code>${esc(after.candidate)}</code>: <button class="small primary" data-action="start-review" data-candidate="${esc(after.candidate)}" ${busy() ? "disabled" : ""}>Review this candidate</button> — then <strong>Locate</strong> appears here and in Printability.`}</li>
         <li>On that sheet, widen the opening with <strong>Cut slot</strong> or <strong>Cut rectangle</strong>, or close it with <strong>Fill cutout</strong>. Every edit is re-validated; a change that alters the front view must be accepted with <strong>Accept front view as artwork</strong> (your approval).</li>
         <li>Run the printability estimate again on the edited draft.</li></ol></div>`;
-  return `<div class="subpanel stack" data-testid="resize-check"><h4 style="margin:0">Last resize: ${fmt(c.from_mm, 1)} → ${fmt(c.to_mm, 1)} mm ${badge(c.proposal_status === "PROPOSAL_READY_FOR_REVIEW" ? "ok" : "warn", c.proposal_status)}</h4>
+  return `<div class="subpanel stack" data-testid="resize-check"><h4 style="margin:0">Last resize: ${sizeLabel(c.from_size_mm || [c.from_mm, c.from_mm])} → ${sizeLabel(c.to_size_mm || [c.to_mm, c.to_mm])} ${badge(c.proposal_status === "PROPOSAL_READY_FOR_REVIEW" ? "ok" : "warn", c.proposal_status)}</h4>
     <div class="table-wrap"><table><thead><tr><th></th><th>Kind</th><th>Findings (${esc(c.process.name)})</th><th>Sheets</th></tr></thead><tbody>
-      ${row(`Before, at ${fmt(c.from_mm, 1)} mm`, badge("neutral", "measured"), c.before.counts, c.before.sheet_count)}
+      ${row(`Before, at ${sizeLabel(c.from_size_mm || [c.from_mm, c.from_mm])}`, badge("neutral", "measured"), c.before.counts, c.before.sheet_count)}
       ${row("Predicted for the new size", badge("outline", "estimate, not a result"), c.predicted)}
-      ${row(`After re-planning at ${fmt(c.to_mm, 1)} mm${after ? ` (${esc(after.candidate)})` : ""}`, badge(after ? "ok" : "neutral", "measured result"), after?.counts, after?.sheet_count)}</tbody></table></div>
+      ${row(`After re-planning at ${sizeLabel(c.to_size_mm || [c.to_mm, c.to_mm])}${after ? ` (${esc(after.candidate)})` : ""}`, badge(after ? "ok" : "neutral", "measured result"), after?.counts, after?.sheet_count)}</tbody></table></div>
     ${c.more_unsupported_than_predicted ? `<div class="banner warn" data-testid="resize-prediction-missed">The measured result has <strong>${c.more_unsupported_than_predicted}</strong> more unsupported finding(s) than predicted. Re-planning at the new size changes the sheets (and intake can keep details the smaller size merged), so the prediction is only a guide; the measured row is what counts.</div>` : ""}
     ${left.length ? `<h4 style="margin:0">Still unsupported after re-planning ${badge("bad", String(left.length))}</h4>
       <div class="table-wrap"><table><thead><tr><th>#</th><th>Finding</th><th>Width</th><th>Sheet</th><th>Location (x, y)</th></tr></thead><tbody>${rows}</tbody></table></div>
@@ -740,18 +746,20 @@ function resizeAnalysis(a) {
   const o = a.options;
   const rec = o.recommended;
   const marked = (row) => (rec && row.sheet_mm === rec.sheet_mm ? badge("ok", "smallest useful") : o.clears_most_risks && row.sheet_mm === o.clears_most_risks.sheet_mm ? badge("neutral", "fewest risks") : row.sheet_mm === o.current_mm ? badge("neutral", "current") : "");
-  const rows = o.table.map((row) => `<tr class="${rec && row.sheet_mm === rec.sheet_mm ? "selected" : ""}" data-testid="resize-row"><td>${fmt(row.sheet_mm, 0)} mm ${marked(row)}</td><td>×${fmt(row.factor, 3)}</td><td>${row.UNSUPPORTED}</td><td>${row.RISK}</td><td>${row.CLEARED}</td></tr>`).join("");
-  const size = ui.resizeSize ?? rec?.sheet_mm ?? Math.min(o.max_mm, o.current_mm + 1);
+  const rowSize = (row) => sizeLabel([row.sheet_mm, row.height_mm ?? row.sheet_mm], 0);
+  const rows = o.table.map((row) => `<tr class="${rec && row.sheet_mm === rec.sheet_mm ? "selected" : ""}" data-testid="resize-row"><td>${rowSize(row)} ${marked(row)}</td><td>×${fmt(row.factor, 3)}</td><td>${row.UNSUPPORTED}</td><td>${row.RISK}</td><td>${row.CLEARED}</td></tr>`).join("");
+  const size = ui.resizeSize ?? a.basis.sheet_size_mm ?? [o.current_mm, o.current_mm];  // the current size, to edit
   return `<div class="stack" data-testid="resize-analysis">
     ${a.current ? "" : '<div class="banner warn">The plan or settings changed since this check; check again.</div>'}
-    <p class="small">Now: ${a.measured.counts.UNSUPPORTED} unsupported · ${a.measured.counts.RISK} risk (${esc(a.measured.source)}). Largest sheet that fits: <strong>${fmt(o.max_mm, 0)} mm</strong> (${esc(a.limit.basis.join("; "))}).</p>
+    <p class="small">Now: ${a.measured.counts.UNSUPPORTED} unsupported · ${a.measured.counts.RISK} risk (${esc(a.measured.source)}). Largest sheet that fits${a.limit.max_sheet_height_mm ? " at these proportions" : ""}: <strong>${sizeLabel([o.max_mm, a.limit.max_sheet_height_mm ?? o.max_mm], 0)}</strong> (${esc(a.limit.basis.join("; "))}).</p>
     <div class="table-wrap"><table><thead><tr><th>Sheet size</th><th>Ratio</th><th>Unsupported (predicted)</th><th>Risk (predicted)</th><th>Cleared (predicted)</th></tr></thead><tbody>${rows}</tbody></table></div>
-    <p class="small">${badge("outline", "prediction")} ${rec ? `Smallest useful larger size: <strong>${fmt(rec.sheet_mm, 0)} mm</strong> (predicted ${rec.UNSUPPORTED} unsupported and ${rec.RISK} risk — an estimate, not a guarantee).` : "No larger sheet that fits this printer is predicted to improve the findings."}
+    <p class="small">${badge("outline", "prediction")} ${rec ? `Smallest useful larger size: <strong>${rowSize(rec)}</strong> (predicted ${rec.UNSUPPORTED} unsupported and ${rec.RISK} risk — an estimate, not a guarantee).` : "No larger sheet that fits this printer is predicted to improve the findings."}
       ${o.unsupported_not_fixable_within_printer.length ? ` ${o.unsupported_not_fixable_within_printer.length} unsupported finding(s) would need a sheet larger than the printer allows.` : ""}
       ${o.not_size_related.length ? ` ${o.not_size_related.length} finding(s) are not size-related and stay.` : ""}
       Predictions multiply each measured width by the ratio; the retry re-plans and re-measures, and only that measured result counts.</p>
     ${a.trial_search?.available ? trialSearch(a.trial_search, a.current) : ""}
-    ${a.current && o.max_mm > o.current_mm ? `<div class="row"><label class="field"><span>New sheet size (mm)</span><input type="number" id="resize-size" min="${o.current_mm + 1}" max="${o.max_mm}" step="1" value="${esc(size)}"></label>
+    ${a.current ? `<div class="row"><label class="field"><span>Width (mm)</span><input type="number" id="resize-width" data-testid="resize-width" min="${a.limit.min_sheet_mm}" step="1" value="${esc(size[0])}"></label>
+      <label class="field"><span>Height (mm)</span><input type="number" id="resize-height" data-testid="resize-height" min="${a.limit.min_sheet_mm}" step="1" value="${esc(size[1])}"></label>
       <button data-action="resize-preview" data-testid="resize-preview" ${busy() ? "disabled" : ""}>Preview this size</button></div>` : ""}
   </div>`;
 }
@@ -772,7 +780,8 @@ function resizePreview(v, a) {
   const ok = v.status === "READY_TO_RESIZE" && v.current;
   const ap = ui.resizeApproved[v.preview_id] || {};
   const changes = v.changes || [];
-  const canRetry = ok && ap.size && (ap.changes || !changes.length) && !busy();
+  const canRetry = ok && ap.size && (ap.changes || (!changes.length && !v.refit)) && !busy();
+  const from = sizeLabel(v.from_size_mm || [v.from_mm, v.from_mm]), to = sizeLabel(v.to_size_mm || [v.to_mm, v.to_mm]);
   const checks = v.boundaries.checks.map((c) => `<tr><td>${yesno(c.pass)}</td><td>${esc(c.check)}</td></tr>`).join("");
   const list = (rows, max = 12) => rows.slice(0, max).map((i) => `<li>${badge(SEV[i.severity] || "neutral", i.severity)} → predicted ${badge(SEV[i.predicted] || "neutral", i.predicted)} ${esc(i.kind.replace(/_/g, " "))}${i.width_mm != null ? ` ${fmt(i.width_mm, 2)} → ~${fmt(i.predicted_width_mm, 2)} mm` : ""} at ${locateCell(i.sheet, i.at_mm)}${i.note ? ` <span class="muted">(${esc(i.note)})</span>` : ""}</li>`).join("") + (rows.length > max ? `<li class="muted">… ${rows.length - max} more</li>` : "");
   const pr = v.prediction;
@@ -780,23 +789,27 @@ function resizePreview(v, a) {
       <td class="small">${swatch(c.previous_hex)} ${esc(c.previous_hex)} → ${swatch(c.new_hex)} ${esc(c.new_hex)} · ${fmt(c.area_mm2, 2)} mm²</td></tr>`).join("");
   const review = a.basis.stage === "review";
   return `<div class="stack" data-testid="resize-preview-result">
-    <h4 style="margin:0">Preview: ${fmt(v.from_mm, 1)} → ${fmt(v.to_mm, 1)} mm (×${fmt(v.ratio, 3)}) ${badge(ok ? "ok" : "bad", v.current ? v.status : "out of date")}</h4>
+    <h4 style="margin:0">Preview: ${from} → ${to} (×${fmt(v.ratio, 3)}) ${badge(ok ? "ok" : "bad", v.current ? v.status : "out of date")}</h4>
     <div class="table-wrap"><table><tbody><tr><td>Current</td><td class="small">${dims(v.dimensions_now)}</td></tr><tr><td>Proposed</td><td class="small">${dims(v.dimensions_new)}</td></tr></tbody></table></div>
     <details class="section" data-section="resize-boundaries" ${openAttr("resize-boundaries", !v.boundaries.pass)}><summary><strong>Dimensions and boundaries</strong> ${badge(v.boundaries.pass ? "ok" : "bad", v.boundaries.pass ? "all checks pass" : "failed")}</summary>
       <div class="table-wrap"><table><tbody>${checks}</tbody></table></div></details>
     <div><h4>Printability — prediction ${badge("outline", "estimate, not a result")}</h4>
-      <p class="small">Predicted: ${pr.cleared.length} cleared · ${pr.improved.length} improved (unsupported → risk) · ${pr.remaining.length} remain. ${esc(v.prediction_basis)}. The actual findings are measured after the retry.</p>
+      <p class="small">Predicted: ${pr.cleared.length} cleared · ${pr.improved.length} improved · ${(pr.worsened || []).length} worse · ${pr.remaining.length} remain. ${esc(v.prediction_basis)}. The actual findings are measured after the retry.</p>
       ${pr.improved.length || pr.cleared.length ? `<details data-section="resize-improve" ${openAttr("resize-improve")}><summary>Improve (${pr.cleared.length + pr.improved.length})</summary><ul class="small">${list([...pr.improved, ...pr.cleared])}</ul></details>` : ""}
+      ${(pr.worsened || []).length ? `<details data-section="resize-worse" data-testid="resize-worse" ${openAttr("resize-worse", true)}><summary>Get worse (${pr.worsened.length})</summary><ul class="small">${list(pr.worsened)}</ul></details>` : ""}
       ${pr.remaining.length ? `<details data-section="resize-remain" ${openAttr("resize-remain", true)}><summary>Remain (${pr.remaining.length})</summary><ul class="small">${list(pr.remaining)}</ul></details>` : ""}</div>
-    <div><h4>Artwork fidelity ${badge(changes.length ? "warn" : "ok", `${changes.length} visible change${changes.length === 1 ? "" : "s"}`)}</h4>
+    <div><h4>Artwork fidelity ${v.refit ? badge("warn", "fitted again") : badge(changes.length ? "warn" : "ok", `${changes.length} visible change${changes.length === 1 ? "" : "s"}`)}</h4>
       ${v.artwork_edits ? `<div class="banner info small" data-testid="resize-keeps-artwork">Your ${v.artwork_edits.region_recolors} artwork edit${v.artwork_edits.region_recolors === 1 ? "" : "s"}${v.artwork_edits.pending ? " (not planned yet)" : ""} ${v.artwork_edits.region_recolors === 1 ? "is" : "are"} kept: the edited artwork is planned at the new size pixel for pixel, and its edit history moves with the new proposal. ${esc(v.artwork_edits.note)}</div>`
-        : `<p class="small muted">Same pixels and colors; the intake filters work in millimetres, so a larger sheet can keep details a smaller one merged. ${(v.details || []).length} intake detail(s) at this size (removed pieces such as eye highlights are kept by default).</p>`}
+        : v.refit ? `<p class="small muted">The source image is fitted into the new aperture and flattened again by the intake; ${(v.details || []).length} intake detail(s) at this size (earlier detail choices are not carried: their positions change).</p>`
+        : `<p class="small muted">Same pixels and colors; the intake filters work in millimetres, so a larger sheet can keep details a smaller one merged (and a smaller sheet can merge or drop details). ${(v.details || []).length} intake detail(s) at this size (removed pieces such as eye highlights are kept by default).</p>`}
+      ${v.refit ? `<div class="banner warn small" data-testid="resize-refit">Other proportions: the artwork is fitted into the new aperture again (aspect kept, padded, never stretched or cropped), so it is resampled. Compare the two images below and approve the new artwork.</div>` : ""}
       ${v.images?.comparison ? `<figure><img class="img" style="max-width:720px" src="${esc(v.images.comparison)}" alt="current target | new target"><figcaption>Current target | target at the new size (changes outlined)</figcaption></figure>` : ""}
       ${changeRows ? `<div class="table-wrap"><table><tbody>${changeRows}</tbody></table></div>` : ""}</div>
     ${ok ? `${review ? '<div class="banner warn">A review exists: it is archived with this attempt and a new proposal is planned at the new size; review edits are not carried over.</div>' : ""}
-      <label class="check"><input type="checkbox" data-resize-approve="size" data-preview="${esc(v.preview_id)}" data-testid="resize-approve-size" ${ap.size ? "checked" : ""}> I approve changing the sheet from ${fmt(v.from_mm, 1)} mm to ${fmt(v.to_mm, 1)} mm</label>
+      <label class="check"><input type="checkbox" data-resize-approve="size" data-preview="${esc(v.preview_id)}" data-testid="resize-approve-size" ${ap.size ? "checked" : ""}> I approve changing the sheet from ${from} to ${to}</label>
+      ${v.refit ? `<label class="check"><input type="checkbox" data-resize-approve="changes" data-preview="${esc(v.preview_id)}" data-testid="resize-approve-changes" ${ap.changes ? "checked" : ""}> I approve the artwork fitted into the new proportions (shown above)</label>` : ""}
       ${changes.length ? `<label class="check"><input type="checkbox" data-resize-approve="changes" data-preview="${esc(v.preview_id)}" data-testid="resize-approve-changes" ${ap.changes ? "checked" : ""}> I approve the ${changes.length} visible artwork change(s) above</label>` : ""}
-      <div class="row"><button class="primary" data-action="resize-retry" data-preview="${esc(v.preview_id)}" data-testid="resize-retry" ${canRetry ? "" : "disabled"}>Resize to ${fmt(v.to_mm, 1)} mm &amp; retry</button>
+      <div class="row"><button class="primary" data-action="resize-retry" data-preview="${esc(v.preview_id)}" data-testid="resize-retry" ${canRetry ? "" : "disabled"}>Resize to ${to} &amp; retry</button>
         <span class="small muted">The current attempt (proposal, review, estimate) is archived in this project; the image is unchanged.</span></div>` : ""}
   </div>`;
 }
@@ -871,7 +884,7 @@ function attemptsPanel() {
       <td><strong>${esc(a.id)}</strong><br><span class="small muted">${esc(a.archived_utc)}</span></td>
       <td>scale ${a.scale}<br>${badge(a.status === "PROPOSAL_READY_FOR_REVIEW" ? "neutral" : "bad", a.status)} ${(a.blockers || []).map((b) => badge("neutral", b)).join(" ")}</td>
       <td class="small">${a.candidates.map((c) => `${esc(c.name)}: ${esc(c.status)}${c.reason ? ` — ${esc(c.reason)}` : ""}`).join("<br>")}</td>
-      <td class="small">${a.sheet_mm ? `${fmt(a.sheet_mm, 1)} mm sheet · ` : ""}replaced by ${a.replaced_by.kind === "physical_resize" ? `resize to ${fmt(a.replaced_by.sheet_mm, 1)} mm` : a.replaced_by.kind === "artwork_edit" ? `planning from the edited artwork (${a.replaced_by.region_recolors} artwork edit${a.replaced_by.region_recolors === 1 ? "" : "s"})` : `${a.replaced_by.upscale_factor}× processing (scale ${a.replaced_by.scale})`}: ${esc(a.replaced_by.status)}; ${a.replaced_by.approved_visible_changes} visible changes approved</td>
+      <td class="small">${a.sheet_mm ? `${sizeLabel(a.sheet_size_mm || [a.sheet_mm, a.sheet_mm])} sheet · ` : ""}replaced by ${a.replaced_by.kind === "physical_resize" ? `resize to ${sizeLabel(a.replaced_by.sheet_size_mm || [a.replaced_by.sheet_mm, a.replaced_by.sheet_mm])}` : a.replaced_by.kind === "artwork_edit" ? `planning from the edited artwork (${a.replaced_by.region_recolors} artwork edit${a.replaced_by.region_recolors === 1 ? "" : "s"})` : `${a.replaced_by.upscale_factor}× processing (scale ${a.replaced_by.scale})`}: ${esc(a.replaced_by.status)}; ${a.replaced_by.approved_visible_changes} visible changes approved</td>
       <td class="small"><a href="${esc(a.images.target)}" target="_blank" rel="noopener">target</a>${a.images.obstruction.map((u) => ` · <a href="${esc(u)}" target="_blank" rel="noopener">obstruction map</a>`).join("")} · ${a.images.comparison ? `<a href="${esc(a.images.comparison)}" target="_blank" rel="noopener">preview comparison</a>` : ""}</td></tr>`).join("");
   return `<details class="panel section" data-section="attempts" data-testid="attempts" ${openAttr("attempts")}>
     <summary><h3>Previous attempts ${badge("neutral", String(attempts.length))}</h3><span class="small muted">archived proposals with their diagnostics and settings</span></summary>
@@ -2632,8 +2645,8 @@ function issuesPanel() {
       <details class="small"><summary>Technical details</summary>
         <dl class="kv"><dt>Code</dt><dd><code>${esc(issue.kind)}</code></dd><dt>Source</dt><dd>${esc(issue.source)}</dd>
           <dt>Box (mm)</dt><dd class="mono">${esc((issue.bbox_mm || []).join(", "))}</dd>
-          ${issue.bbox_mm ? (() => { const g = d.grid; const band = g.perimeter_pixels * g.mm_per_pixel; const top = g.outer_sheet_mm - band;
-            return `<dt>In the artwork</dt><dd class="mono" data-testid="insp-aperture-pos">${fmt(issue.bbox_mm[0] - band, 2)} mm from the left, ${fmt(top - issue.bbox_mm[3], 2)} mm from the top of the ${fmt(g.artwork_pixels * g.mm_per_pixel, 1)} mm aperture</dd>`; })() : ""}
+          ${issue.bbox_mm ? (() => { const g = d.grid; const band = g.perimeter_pixels * g.mm_per_pixel; const top = (g.raster_mm?.[1] ?? g.outer_sheet_mm) - band;
+            return `<dt>In the artwork</dt><dd class="mono" data-testid="insp-aperture-pos">${fmt(issue.bbox_mm[0] - band, 2)} mm from the left, ${fmt(top - issue.bbox_mm[3], 2)} mm from the top of the ${sizeLabel([g.artwork_pixels * g.mm_per_pixel, (g.artwork_rows ?? g.artwork_pixels) * g.mm_per_pixel])} aperture</dd>`; })() : ""}
           ${issue.key ? `<dt>Key</dt><dd class="mono">${esc(issue.key)}</dd>` : ""}</dl>
         <pre class="mono small">${esc(JSON.stringify({ measured: issue.measured, threshold: issue.threshold, details: { ...issue.details, held_material_outline_mm: undefined } }, null, 2))}</pre></details>
     </div>`;
@@ -2718,7 +2731,8 @@ function inspScreen(side = "layer") {
   const img = $(imgSel);
   const canvas = $(canvasSel);
   const shown = ui.insp.shown;
-  const entry = side === "art" ? { extent_mm: [0, 0, ui.issues.grid.outer_sheet_mm, ui.issues.grid.outer_sheet_mm] } : shown;
+  const g = ui.issues.grid;
+  const entry = side === "art" ? { extent_mm: [0, 0, ...(g.raster_mm || [g.outer_sheet_mm, g.outer_sheet_mm])] } : shown;
   if (!img || !canvas || !img.naturalWidth || !entry || !img.getAttribute("src")) return null;
   const c = canvas.getBoundingClientRect();
   const r = img.getBoundingClientRect();
@@ -2939,12 +2953,12 @@ function inspEditLayer(issue) {
   setTab("review");
   render();
   $("#edit-viewport")?.scrollIntoView({ block: "center" });
-  const outer = ui.state.draft.validation.outer_sheet_mm;
+  const [outerW, outerH] = draftExtent();
   afterImage("#edit-image", () => {
     const img = $("#edit-image");
     const b = issue.bbox_mm;
-    const px = (x) => (x / outer) * img.naturalWidth;
-    const py = (y) => (1 - y / outer) * img.naturalHeight;
+    const px = (x) => (x / outerW) * img.naturalWidth;
+    const py = (y) => (1 - y / outerH) * img.naturalHeight;
     focusView("edit", [px(b[0]), py(b[3]), px(b[2]), py(b[1])]);
   });
 }
@@ -3003,6 +3017,7 @@ function reviewBar() {
     <div class="review-bar-status">
       ${badge(ok ? "ok" : "bad", ok ? "Valid" : "Invalid")}
       <span class="small muted">${d.sheets.length} layers · ${fmt(d.total_height_mm)} mm stack · ${d.edits.length} edit${d.edits.length === 1 ? "" : "s"}</span>
+      ${ui.state.record.candidate ? `<span class="small muted" data-testid="review-candidate">Candidate <strong>${esc(ui.state.record.candidate)}</strong> · <a href="#" data-action="tab" data-tab="proposal" data-focus="candidates" data-testid="review-to-candidates">Compare candidates</a></span>` : ""}
     </div>
     <div class="review-bar-actions">
       ${visibleChange ? `<button class="tool-btn attention tip" data-action="propose-op" data-op='${esc(JSON.stringify({ op: "accept_artwork" }))}' ${dis}
@@ -3373,21 +3388,27 @@ function overlayGeometry() {
   if (!img || !canvas) return null;
   const rect = img.getBoundingClientRect();
   const crect = canvas.getBoundingClientRect();
-  const size = ui.state.draft.validation.outer_sheet_mm;
-  return { img, canvas, rect, crect, size, dpr: window.devicePixelRatio || 1 };
+  const [size, sizeY] = draftExtent();
+  return { img, canvas, rect, crect, size, sizeY, dpr: window.devicePixelRatio || 1 };
+}
+
+// Width and height (mm) covered by the review images: the sheet's pixel grid (the outer size if square).
+function draftExtent() {
+  const v = ui.state.draft.validation;
+  return v.raster_mm || [v.outer_sheet_mm, v.outer_sheet_mm];
 }
 
 function toMm(event) {
   const g = overlayGeometry();
   const x = ((event.clientX - g.rect.left) / g.rect.width) * g.size;
-  const y = (1 - (event.clientY - g.rect.top) / g.rect.height) * g.size;
-  return [r3(Math.min(Math.max(x, 0), g.size)), r3(Math.min(Math.max(y, 0), g.size))];
+  const y = (1 - (event.clientY - g.rect.top) / g.rect.height) * g.sizeY;
+  return [r3(Math.min(Math.max(x, 0), g.size)), r3(Math.min(Math.max(y, 0), g.sizeY))];
 }
 
 // mm on the sheet -> overlay canvas pixels, through the image's on-screen rectangle (any zoom/pan).
 function toPx(point, g) {
   return [(g.rect.left - g.crect.left + (point[0] / g.size) * g.rect.width) * g.dpr,
-          (g.rect.top - g.crect.top + (1 - point[1] / g.size) * g.rect.height) * g.dpr];
+          (g.rect.top - g.crect.top + (1 - point[1] / g.sizeY) * g.rect.height) * g.dpr];
 }
 
 function drawOverlay() {
@@ -3510,7 +3531,7 @@ function printabilityView() {
     <div class="spread"><h3 style="margin:0">Result ${badge(est.status === "NO_RISKS_FOUND" ? "ok" : est.status === "RISKS_REPORTED" ? "warn" : "bad", fdmLabel(est.status))} ${est.stale ? badge("warn", "out of date: the draft changed") : ""}</h3>
       <span class="small muted">${esc(est.process.name)} · ${esc(est.checked_utc)}</span></div>
     <p class="small">${est.counts.UNSUPPORTED} unsupported · ${est.counts.RISK} risk · ${est.counts.INFO} info. ${esc(est.basis)}.</p>
-    ${findings.length ? `<p class="small"><a href="#" data-action="tab" data-tab="proposal" data-testid="to-resize">Check whether a larger sheet clears these (Physical size) →</a></p>` : ""}
+    ${findings.length ? `<p class="small"><a href="#" data-action="tab" data-tab="proposal" data-testid="to-resize">Check another sheet size (Physical size) →</a></p>` : ""}
     <p class="small" style="margin:0">Each finding is shown where it is in <strong>Issues</strong> below.</p>
     <details class="small" data-testid="findings-table"><summary>Findings table (${findings.length})</summary>${findingsTable(findings)}</details>
     ${info.length ? `<details><summary>${info.length} informational item(s)</summary>${infoList(info)}</details>` : ""}
@@ -3623,7 +3644,7 @@ function kitCard(kit, latest) {
   const [tone, icon, title, lead] = kitHeadline(kit);
   const ready = tone === "ok";
   const created = kit.created_utc ? new Date(kit.created_utc).toLocaleString() : "";
-  const facts = [esc(kit.id), created && esc(created), `${kit.assembly.length} sheets`, `${fmt(kit.total_stack_height_mm)} mm stack`, `process ${esc(kit.process_name)}`].filter(Boolean).join(" · ");
+  const facts = [esc(kit.id), kit.candidate && `candidate ${esc(kit.candidate)}`, created && esc(created), `${kit.assembly.length} sheets`, `${fmt(kit.total_stack_height_mm)} mm stack`, `process ${esc(kit.process_name)}`].filter(Boolean).join(" · ");
   const warnings = kitWarnings(kit);
   const b = kit.bambu;
   const confirming = ui.confirmDelete === kit.id;
@@ -3840,8 +3861,10 @@ async function onClick(event) {
       event.preventDefault();
       setTab(el.dataset.tab);
       if (el.dataset.focus === "artwork") ui.sections.artwork = true;
+      if (el.dataset.focus === "candidates") ui.sections.candidates = true;
       render();
       if (el.dataset.focus === "artwork") $('[data-testid="artwork-panel"]')?.scrollIntoView({ behavior: "smooth", block: "start" });
+      if (el.dataset.focus === "candidates") $('[data-testid="candidates-section"]')?.scrollIntoView({ behavior: "smooth", block: "start" });
       break;
     case "dismiss-error": ui.error = null; render(); break;
     case "create": createProject(); break;
@@ -3863,7 +3886,7 @@ async function onClick(event) {
     }
     case "upscale-preview": submit(`${project}/upscale/preview`, { factor: ui.upscaleFactor }); break;
     case "resize-analyze": submit(`${project}/resize/analyze`, { process: processPayload(), bambu_printer: (ui.resizePrinter ?? ui.state.resize?.analysis?.bambu_printer) || null }); break;
-    case "resize-preview": submit(`${project}/resize/preview`, { size_mm: Number($("#resize-size").value) }); break;
+    case "resize-preview": submit(`${project}/resize/preview`, { width_mm: Number($("#resize-width").value), height_mm: Number($("#resize-height").value) }); break;
     case "resize-search": submit(`${project}/resize/search`, {}); break;
     case "resize-retry": {
       const ap = ui.resizeApproved[el.dataset.preview] || {};
@@ -4047,8 +4070,8 @@ function onChange(event) {
     ui.rimAll = el.checked;
   } else if (el.id === "resize-printer") {
     ui.resizePrinter = el.value;
-  } else if (el.id === "resize-size") {
-    ui.resizeSize = Number(el.value);
+  } else if (el.id === "resize-width" || el.id === "resize-height") {
+    ui.resizeSize = [Number($("#resize-width").value), Number($("#resize-height").value)];
   } else if (el.dataset.resizeApprove) {
     const ap = ui.resizeApproved[el.dataset.preview] || (ui.resizeApproved[el.dataset.preview] = {});
     ap[el.dataset.resizeApprove] = el.checked;

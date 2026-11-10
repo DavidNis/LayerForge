@@ -51,12 +51,16 @@ from ..connectivity_repair import _core_connectivity, _width_parameters
 from ..layer_optimization import DEFAULT_OPTIMIZATION_CONFIG
 from ..subtractive_poc import _outer_and_perimeter
 from .model import SheetStack
+from .printkit import PrintProcess
 from .validation import OPENING_DIAGNOSTIC_MM, minimum_width_mm, validate_stack
 
 APPLIED = "APPLIED"
 NO_CHANGE = "NO_CHANGE"
 SKIPPED_INVALID = "SKIPPED_INVALID_PLAN"
 RESTORED = "RESTORED_ORIGINAL"
+# Run the thin-material issue check of a spot only where the raster guard found thin material near it
+# (see ``_ThinGuard.allows``); the final gate checks every removal without this shortcut.
+THIN_ISSUE_PREFILTER = True
 
 
 @dataclass(frozen=True)
@@ -70,6 +74,10 @@ class WideningConfig:
     # Do not remove added pixels that would form a new narrow sliver of the opening, away from
     # its existing narrow part (the sharp tips the plain growth leaves against visible material).
     avoid_new_slivers: bool = True
+    # A removal may not create a thin-material issue the printability geometry check reports: material
+    # narrower than this (the generic process the issue check uses by default), ignoring residues under
+    # its w**2 / 2 corner allowance.  Same value and rules as the check; not a widening threshold.
+    min_material_mm: float = PrintProcess().min_positive_feature_mm
 
 
 def _disk(diameter_px: int) -> np.ndarray:
@@ -221,6 +229,11 @@ class _ThinGuard:
         return bool(np.bincount(labels[fresh], minlength=count)[1:].max(initial=0) >= self.limit)
 
     def allows(self, retained: np.ndarray, box: tuple[int, int, int, int], spot: np.ndarray) -> bool:
+        # ``thin_nearby``: thin material in the window checked below (two kernel radii + 3 px around the
+        # spot, more than the reach of the 0.84 mm issue check) after the removal; True when not computed.
+        # The issue check's thin parts are narrower than 0.84 mm, so thinner than this 1.2 mm width too:
+        # without such pixels it has nothing to report near the spot.
+        self.thin_nearby = True
         lost = self._lost_core(retained, box, spot)
         if ((self.core_count > 0) & (self.core_count - lost <= 0))[1:].any():
             return False
@@ -231,6 +244,7 @@ class _ThinGuard:
         new_ext = retained[e0:e1, f0:f1].copy()
         new_ext[y0 - e0:y1 - e0, x0 - f0:x1 - f0] &= ~spot
         thin = self.thin(new_ext, self.band[e0:e1, f0:f1])[inner]
+        self.thin_nearby = bool(thin.any())
         fresh = thin & ~self.thin_before[r0:r1, c0:c1]
         if not fresh.any():
             return True
@@ -246,6 +260,126 @@ class _ThinGuard:
         """Record a removal (call before ``retained`` changes)."""
 
         self.core_count = self.core_count - self._lost_core(retained, box, spot)
+
+
+class _ReportableThin:
+    """No new thin-material issue as the printability geometry check reports it (``assess_printability``):
+    the same traced outline (``mask_to_geometry``), minus the perimeter band, the same thin parts
+    (``_narrow_parts`` at the process's minimum material width, ignoring residues under w**2 / 2) and the
+    same visibility rule (a part wholly behind the sheets in front is INFO, not reported).
+
+    The raster ``_ThinGuard`` limits how much 1.2 mm-thin material may *grow*; a few new pixels can still
+    turn a thin part that was too small to report into a reported one (Chupa: the brown iris tip, 5 new
+    pixels, 0.44 mm2 reported after widening).  Here a removal is refused when, after it, a reported part
+    near the spot overlaps no reported part of the sheet before - a new issue by geometry, not by id.
+    Reported parts that were there before (changed or not) are not counted as new.
+
+    Removing a spot changes the opening only within one width of it, so the check runs on a crop around
+    the spot.  The crop's own edge cuts material and makes thin parts of its own; they are the same before
+    and after, and a part that reaches within one width of the crop's edge is undecided: the crop doubles,
+    up to the whole sheet."""
+
+    def __init__(self, stack: SheetStack, index: int, width_mm: float) -> None:
+        from .cad import DEFAULT_SIMPLIFY_MM, perimeter_band
+
+        self.mpp, (self.n, self.m) = stack.grid.mm_per_pixel, stack.grid.shape  # rows, columns
+        self.width, self.simplify = width_mm, DEFAULT_SIMPLIFY_MM
+        self.band = perimeter_band(stack)
+        p = stack.grid.perimeter_pixels
+        self.inner = ((p, self.n - p), (p, self.m - p))  # rows, columns inside the band
+        front = np.zeros((self.n, self.m), bool)
+        for sheet in stack.sheets[index + 1:]:  # widening removes only material a sheet in front covers
+            front |= sheet.retained             # (sheet k's removals lie under sheets > k): unchanged
+        self.front = front
+        self.reach = int(np.ceil(width_mm / self.mpp)) + 2
+
+    def _translate(self, geometry: Any, r1: int, c0: int) -> Any:
+        from shapely.affinity import translate
+
+        return translate(geometry, c0 * self.mpp, (self.n - r1) * self.mpp)
+
+    def parts(self, mask: np.ndarray, window: tuple[int, int, int, int]) -> list[Any]:
+        """Reported thin parts (sheet mm) of ``mask`` cropped to ``window`` (rows r0:r1, cols c0:c1)."""
+
+        from shapely.geometry import box
+
+        from .cad import mask_to_geometry
+        from .printkit import _narrow_parts
+
+        r0, r1, c0, c1 = window
+        geometry = self._translate(mask_to_geometry(mask[r0:r1, c0:c1], self.mpp, self.simplify), r1, c0)
+        (top, bottom), (left, right) = self.inner
+        inside = top <= r0 and r1 <= bottom and left <= c0 and c1 <= right
+        region = geometry if inside else geometry.difference(self.band)  # same result: no band in the crop
+        if region.is_empty:
+            return []
+        residue, _ = _narrow_parts(region, self.width)
+        if not residue:
+            return []
+        front = self.front[r0:r1, c0:c1]
+        hidden = self._translate(mask_to_geometry(front, self.mpp, self.simplify), r1, c0) if front.any() else None
+        crop = box(c0 * self.mpp, (self.n - r1) * self.mpp, c1 * self.mpp, (self.n - r0) * self.mpp)
+        return [p for p in residue if (p.difference(hidden).area if hidden is not None else p.area) > 1e-6
+                and p.intersects(crop)]
+
+    @staticmethod
+    def _overlaps(p: Any, bounds: tuple[float, float, float, float]) -> bool:
+        x0, y0, x1, y1 = p.bounds
+        return x0 <= bounds[2] and x1 >= bounds[0] and y0 <= bounds[3] and y1 >= bounds[1]
+
+    def allows(self, retained: np.ndarray, box: tuple[int, int, int, int], spot: np.ndarray) -> bool:
+        """Removing ``spot`` (bool mask over ``box`` = rows y0:y1, cols x0:x1) from ``retained`` creates no
+        new reported thin part.  ``retained`` is changed for the check and restored."""
+
+        y0, y1, x0, x1 = box
+        near = (np.array([x0 - self.reach, self.n - y1 - self.reach, x1 + self.reach, self.n - y0 + self.reach])
+                * self.mpp)
+        pad = 3 * self.reach
+        while True:
+            window = (max(0, y0 - pad), min(self.n, y1 + pad), max(0, x0 - pad), min(self.m, x1 + pad))
+            saved = retained[y0:y1, x0:x1].copy()
+            retained[y0:y1, x0:x1] &= ~spot
+            try:
+                after = [p for p in self.parts(retained, window) if self._overlaps(p, near)]
+            finally:
+                retained[y0:y1, x0:x1] = saved
+            if not after:  # nothing reported near the spot after the removal (the common case: one trace)
+                return True
+            fresh = [p for p in after if not any(p.intersects(q) for q in self.parts(retained, window))]
+            if not fresh:
+                return True
+            r0, r1, c0, c1 = window
+            if window == (0, self.n, 0, self.m):
+                return False
+            margin = self.reach * self.mpp
+            inside = (c0 * self.mpp + margin, (self.n - r1) * self.mpp + margin,
+                      c1 * self.mpp - margin, (self.n - r0) * self.mpp - margin)
+            def edge(p: Any) -> bool:  # within one reach of a crop edge that is not the sheet's edge
+                x0_, y0_, x1_, y1_ = p.bounds
+                return ((x0_ < inside[0] and c0 > 0) or (x1_ > inside[2] and c1 < self.m)
+                        or (y0_ < inside[1] and r1 < self.n) or (y1_ > inside[3] and r0 > 0))
+
+            if not any(edge(p) for p in fresh):
+                return False
+            pad *= 2  # the part may be the crop's own edge or continue past it: decide on a larger crop
+
+    def new_issues(self, original: np.ndarray, widened: np.ndarray) -> int:
+        """Final check of a widened sheet: new reported thin parts around everything removed.  Removals
+        within one reach of each other are checked together (a part they make jointly lies near both);
+        the windows are those of ``allows``, so the cost scales with the removed areas, not the sheet."""
+
+        removed = original & ~widened
+        groups, labels, stats, _ = cv2.connectedComponentsWithStats(
+            _dilate(removed, np.ones((2 * self.reach + 1, 2 * self.reach + 1), np.uint8)).astype(np.uint8), connectivity=8)
+        work = original.copy()
+        found = 0
+        for g in range(1, groups):
+            x0, y0 = int(stats[g, cv2.CC_STAT_LEFT]), int(stats[g, cv2.CC_STAT_TOP])
+            x1, y1 = x0 + int(stats[g, cv2.CC_STAT_WIDTH]), y0 + int(stats[g, cv2.CC_STAT_HEIGHT])
+            spot = removed[y0:y1, x0:x1] & (labels[y0:y1, x0:x1] == g)
+            if not self.allows(work, (y0, y1, x0, x1), spot):
+                found += 1
+        return found
 
 
 def new_thin_material(structure: _Structure, original: Any, widened: Any, band: np.ndarray,
@@ -333,11 +467,11 @@ def widen_openings(stack: SheetStack, config: WideningConfig = WideningConfig(),
     shown = stack.composite_sheet_index()
     outside = grid.perimeter_mask() | stack.frame_mask()  # frame material stays solid on every sheet
     sheets = list(stack.sheets)
-    local_checks = fallbacks = 0
+    local_checks = fallbacks = reported_checks = 0
     t_search = t_check = 0.0
     for index, sheet in enumerate(stack.sheets):
         row = {"sheet": sheet.id, "layer_from_front": count - index, "removed_px": 0, "spots": 0,
-               "rejected": 0}
+               "rejected": 0, "rejected_new_thin_issue": 0}
         report["sheets"].append(row)
         if sheet.geometry is not None:
             row["skipped"] = "exact vector geometry (edited); not widened"
@@ -352,12 +486,14 @@ def widen_openings(stack: SheetStack, config: WideningConfig = WideningConfig(),
         order = sorted(range(1, n), key=lambda c: (-stats[c, cv2.CC_STAT_AREA], c))
         retained = sheet.retained.copy()
         guard = _ThinGuard(structure, sheet, grid.perimeter_mask(), mpp)
+        reported = _ReportableThin(stack, index, config.min_material_mm)
         row["spots"] = len(order)
         # Passes until one accepts nothing: a spot refused early can pass once later spots are removed
         # (thinning hidden material until its structural core vanishes removes an orphan core).  The
         # result is then a fixed point, so a repeated run on the same sheets finds nothing new.
         pending = order
         thin_refused: set[int] = set()
+        issue_refused: set[int] = set()
         while pending:
             refused = []
             for c in pending:
@@ -372,9 +508,15 @@ def widen_openings(stack: SheetStack, config: WideningConfig = WideningConfig(),
                     trial[y0:y1, x0:x1] &= ~spot
                     ok = structure.sheet_ok(trial)
                 thin_refused.discard(c)
+                issue_refused.discard(c)
                 if ok and not guard.allows(retained, (y0, y1, x0, x1), spot):
                     ok = False
                     thin_refused.add(c)
+                if ok and (guard.thin_nearby or not THIN_ISSUE_PREFILTER):
+                    reported_checks += 1
+                    if not reported.allows(retained, (y0, y1, x0, x1), spot):
+                        ok = False
+                        issue_refused.add(c)
                 if ok:
                     guard.accept(retained, (y0, y1, x0, x1), spot)
                     retained[y0:y1, x0:x1] &= ~spot
@@ -390,9 +532,12 @@ def widen_openings(stack: SheetStack, config: WideningConfig = WideningConfig(),
             row["rejected"] += 1
             report["rejected_spots"].append({
                 "sheet": sheet.id, "layer_from_front": count - index, "pixels": int(stats[c, cv2.CC_STAT_AREA]),
-                "at_mm": [round((x0 + xs.mean() + 0.5) * mpp, 2), round((grid.outer_pixels - y0 - ys.mean() - 0.5) * mpp, 2)],
+                "at_mm": [round((x0 + xs.mean() + 0.5) * mpp, 2), round((grid.rows - y0 - ys.mean() - 0.5) * mpp, 2)],
                 "reason": ("would leave new material narrower than the structural width" if c in thin_refused
+                           else f"would create a new thin-material issue (material narrower than {config.min_material_mm} mm)"
+                           if c in issue_refused
                            else "would disconnect material or leave it on a neck narrower than the structural width")})
+            row["rejected_new_thin_issue"] += c in issue_refused
         t_check += time.perf_counter() - t
         if row["removed_px"]:
             sheets[index] = replace(sheet, retained=retained, geometry=None)
@@ -401,13 +546,15 @@ def widen_openings(stack: SheetStack, config: WideningConfig = WideningConfig(),
     report.update(removed_px=removed, removed_mm2=round(removed * mpp * mpp, 3),
                   spots=sum(r["spots"] for r in report["sheets"]),
                   rejected=len(report["rejected_spots"]), local_checks=local_checks,
-                  full_sheet_fallbacks=fallbacks, search_seconds=round(t_search, 3), check_seconds=round(t_check, 3))
+                  full_sheet_fallbacks=fallbacks, thin_issue_checks=reported_checks,
+                  rejected_new_thin_issue=sum(r["rejected_new_thin_issue"] for r in report["sheets"]),
+                  search_seconds=round(t_search, 3), check_seconds=round(t_check, 3))
     if not removed:
         return done(NO_CHANGE, stack)
     widened = SheetStack(stack.name, grid, sheets, target_rgb=stack.target_rgb, frame_color=stack.frame_color,
                          provenance=stack.provenance, review=stack.review)
     t = time.perf_counter()
-    gate = gate_checks(stack, widened)
+    gate = gate_checks(stack, widened, config.min_material_mm)
     report["gate_seconds"] = round(time.perf_counter() - t, 3)
     report["gate"] = gate
     if not gate["pass"]:
@@ -415,7 +562,8 @@ def widen_openings(stack: SheetStack, config: WideningConfig = WideningConfig(),
     return done(APPLIED, widened)
 
 
-def gate_checks(original: SheetStack, widened: SheetStack) -> dict[str, Any]:
+def gate_checks(original: SheetStack, widened: SheetStack,
+                min_material_mm: float = WideningConfig.min_material_mm) -> dict[str, Any]:
     """Final gate: the full stack validation plus the invariants the widening must keep."""
 
     validation = validate_stack(widened)
@@ -439,7 +587,13 @@ def gate_checks(original: SheetStack, widened: SheetStack) -> dict[str, Any]:
         if not np.array_equal(a.retained, b.retained):
             for key, value in new_thin_material(structure, a, b, perimeter, original.grid.mm_per_pixel).items():
                 thin[key] += value
-    no_new_thin = same_layout and not thin["new_thin_regions"] and not thin["visible_parts_losing_core"]
+    # The printability check's own thin-material parts around every removal of the sheets that changed.
+    thin["new_thin_issues"] = 0
+    for index, (a, b) in enumerate(zip(original.sheets, widened.sheets) if same_layout else ()):
+        if not np.array_equal(a.retained, b.retained):
+            thin["new_thin_issues"] += _ReportableThin(original, index, min_material_mm).new_issues(a.retained, b.retained)
+    no_new_thin = (same_layout and not thin["new_thin_regions"] and not thin["visible_parts_losing_core"]
+                   and not thin["new_thin_issues"])
     recon = validation["reconstruction"]
     result = {
         "validation_status": validation["status"],

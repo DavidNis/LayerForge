@@ -36,6 +36,32 @@ class PocConfig:
     beam_width: int = 256
     random_seed: int = 74031
 
+    # Square grid: ``outer_pixels`` and ``analysis_pixels`` are both the width and the height.
+    @property
+    def outer_shape(self) -> tuple[int, int]:
+        return (self.outer_pixels, self.outer_pixels)
+
+    @property
+    def analysis_shape(self) -> tuple[int, int]:
+        return (self.analysis_pixels, self.analysis_pixels)
+
+
+@dataclass(frozen=True)
+class RectPocConfig(PocConfig):
+    """A rectangular grid: ``outer_pixels``/``analysis_pixels`` and ``sheet_size_mm`` are the width (x); the
+    rows are separate.  Pixels stay square (one mm per pixel for both axes)."""
+
+    outer_rows: int = 0
+    analysis_rows: int = 0
+
+    @property
+    def outer_shape(self) -> tuple[int, int]:
+        return (self.outer_rows, self.outer_pixels)
+
+    @property
+    def analysis_shape(self) -> tuple[int, int]:
+        return (self.analysis_rows, self.analysis_pixels)
+
 
 DEFAULT_CONFIG = PocConfig()
 
@@ -410,7 +436,7 @@ def discover_order(analysis: dict[str, Any], config: PocConfig = DEFAULT_CONFIG)
 
 
 def _outer_and_perimeter(config: PocConfig) -> tuple[np.ndarray, np.ndarray]:
-    outer = np.ones((config.outer_pixels, config.outer_pixels), dtype=bool)
+    outer = np.ones(config.outer_shape, dtype=bool)
     perimeter = outer.copy()
     p = config.perimeter_pixels
     perimeter[p:-p, p:-p] = False

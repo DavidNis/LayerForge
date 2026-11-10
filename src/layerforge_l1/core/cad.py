@@ -40,6 +40,8 @@ DEFAULT_SIMPLIFY_MM = 0.03
 # Mean distance between a vector sheet's geometry and its reopened STL footprint
 # (symmetric-difference area / boundary length); STL stores float32 coordinates.
 MAX_MEAN_BOUNDARY_DEVIATION_MM = 1e-3
+# A rectangular sheet's reopened STL outline must be the requested outer size within this (float32 STL).
+OUTLINE_TOLERANCE_MM = 1e-3
 STL_TOLERANCE_MM = 0.02
 STL_ANGULAR_TOLERANCE = 0.2
 # Validity check of each reopened STEP file: OCCT's BRepCheck_Analyzer with geometric controls, run
@@ -73,18 +75,24 @@ def clear_cache() -> None:
         _trace_cache.clear()
 
 
-def mask_to_geometry(mask: np.ndarray, mm_per_pixel: float, simplify_mm: float):
-    """Polygons whose edges follow pixel edges (not pixel centres)."""
+def mask_to_geometry(mask: np.ndarray, mm_per_pixel: float, simplify_mm: float, whole_sheet: bool = False):
+    """Polygons whose edges follow pixel edges (not pixel centres).
 
+    A square mask, or a whole (rectangular) sheet mask (``whole_sheet``), gets the pixel-exact
+    correction (``_match_mask``); other masks (crops of a sheet) are traced as they always were.
+    """
+
+    exact = whole_sheet or (mask.ndim == 2 and mask.shape[0] == mask.shape[1])
     if not TRACE_CACHE:
-        return _trace(mask, mm_per_pixel, simplify_mm)
+        return _trace(mask, mm_per_pixel, simplify_mm, exact)
     raw = np.ascontiguousarray(mask)
-    key = (raw.shape, raw.dtype.str, hashlib.sha256(raw.tobytes()).hexdigest(), float(mm_per_pixel), float(simplify_mm))
+    key = (raw.shape, raw.dtype.str, hashlib.sha256(raw.tobytes()).hexdigest(), float(mm_per_pixel), float(simplify_mm),
+           exact)
     with _trace_lock:
         if key in _trace_cache:
             _trace_cache.move_to_end(key)
             return _trace_cache[key]
-    geometry = _trace(mask, mm_per_pixel, simplify_mm)
+    geometry = _trace(mask, mm_per_pixel, simplify_mm, exact)
     with _trace_lock:
         _trace_cache[key] = geometry
         while len(_trace_cache) > _TRACE_CACHE_SIZE:
@@ -92,7 +100,7 @@ def mask_to_geometry(mask: np.ndarray, mm_per_pixel: float, simplify_mm: float):
     return geometry
 
 
-def _trace(mask: np.ndarray, mm_per_pixel: float, simplify_mm: float):
+def _trace(mask: np.ndarray, mm_per_pixel: float, simplify_mm: float, exact: bool = True):
     contours, hierarchy = cv2.findContours(
         mask.astype(np.uint8), cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE
     )
@@ -111,7 +119,8 @@ def _trace(mask: np.ndarray, mm_per_pixel: float, simplify_mm: float):
         shells.append(Polygon(to_mm(contour), holes))
     half = 0.5 * mm_per_pixel
     geometry = unary_union([s.buffer(0) for s in shells]).buffer(half, join_style=2, mitre_limit=2.0)
-    return _match_mask(geometry.simplify(simplify_mm, preserve_topology=True).buffer(0), mask, mm_per_pixel)
+    geometry = geometry.simplify(simplify_mm, preserve_topology=True).buffer(0)
+    return _match_mask(geometry, mask, mm_per_pixel) if exact else geometry
 
 
 def _match_mask(geometry: BaseGeometry, mask: np.ndarray, mm_per_pixel: float) -> BaseGeometry:
@@ -123,13 +132,13 @@ def _match_mask(geometry: BaseGeometry, mask: np.ndarray, mm_per_pixel: float) -
     Geometry that already matches is returned unchanged.
     """
 
-    if mask.ndim != 2 or mask.shape[0] != mask.shape[1]:
+    if mask.ndim != 2:
         return geometry
     from types import SimpleNamespace
 
     from shapely.geometry import box
 
-    grid = SimpleNamespace(outer_pixels=mask.shape[0], mm_per_pixel=mm_per_pixel)
+    grid = SimpleNamespace(outer_pixels=mask.shape[1], shape=mask.shape, rows=mask.shape[0], mm_per_pixel=mm_per_pixel)
     height = mask.shape[0]
     square = lambda y, x: box(x * mm_per_pixel, (height - y - 1) * mm_per_pixel,
                               (x + 1) * mm_per_pixel, (height - y) * mm_per_pixel)
@@ -153,10 +162,16 @@ def polygons(geometry: BaseGeometry) -> list:
     return _polygons(geometry)
 
 
+def _shape(grid: Any) -> tuple[int, int]:
+    """(rows, columns) of a grid; a grid with only ``outer_pixels`` is square."""
+
+    return getattr(grid, "shape", None) or (grid.outer_pixels, grid.outer_pixels)
+
+
 def _to_subpixels(coords: Any, grid: StackGrid) -> np.ndarray:
     # 1/16-subpixel fixed point (shift=4); -8 puts pixel centres at +0.5.
     xy = np.asarray(coords, dtype=np.float64)[..., :2]
-    n, mm = grid.outer_pixels, grid.mm_per_pixel
+    n, mm = _shape(grid)[0], grid.mm_per_pixel
     u = xy[..., 0] / mm * SUPERSAMPLE
     v = (n - xy[..., 1] / mm) * SUPERSAMPLE
     return np.round(np.stack([u, v], axis=-1) * 16 - 8).astype(np.int32)
@@ -165,8 +180,8 @@ def _to_subpixels(coords: Any, grid: StackGrid) -> np.ndarray:
 def _downsample_reference(image: np.ndarray, grid: StackGrid) -> np.ndarray:
     """The original majority rule (kept to test ``_downsample`` against)."""
 
-    n, s = grid.outer_pixels, SUPERSAMPLE
-    return image.reshape(n, s, n, s).sum((1, 3)) >= (s * s) / 2
+    (r, c), s = _shape(grid), SUPERSAMPLE
+    return image.reshape(r, s, c, s).sum((1, 3)) >= (s * s) / 2
 
 
 def _downsample(image: np.ndarray, grid: StackGrid) -> np.ndarray:
@@ -176,12 +191,12 @@ def _downsample(image: np.ndarray, grid: StackGrid) -> np.ndarray:
     so nothing overflows; this avoids numpy's strided multi-axis reduction (performance Step 5).
     """
 
-    n, s = grid.outer_pixels, SUPERSAMPLE
-    rows = image.reshape(n * s, n, s)
+    (r, c), s = _shape(grid), SUPERSAMPLE
+    rows = image.reshape(r * s, c, s)
     across = rows[:, :, 0].copy()
     for k in range(1, s):
         across += rows[:, :, k]
-    blocks = across.reshape(n, s, n)
+    blocks = across.reshape(r, s, c)
     total = blocks[:, 0].copy()
     for k in range(1, s):
         total += blocks[:, k]
@@ -191,8 +206,8 @@ def _downsample(image: np.ndarray, grid: StackGrid) -> np.ndarray:
 def rasterize_geometry(geometry: BaseGeometry, grid: StackGrid) -> np.ndarray:
     """Supersampled raster of planar geometry (majority of 4x4 subpixels)."""
 
-    n = grid.outer_pixels * SUPERSAMPLE
-    image = np.zeros((n, n), np.uint8)
+    rows, cols = _shape(grid)
+    image = np.zeros((rows * SUPERSAMPLE, cols * SUPERSAMPLE), np.uint8)
     for poly in polygons(geometry):
         cv2.fillPoly(image, [_to_subpixels(poly.exterior.coords, grid)], 1, shift=4)
         for ring in poly.interiors:
@@ -216,7 +231,7 @@ def stl_footprint(path: Path) -> BaseGeometry:
 def rasterize_stl(path: Path, grid: StackGrid) -> np.ndarray:
     """Supersampled raster of the top-face footprint of a reopened STL."""
 
-    return rasterize_geometry(stl_footprint(path), grid)
+    return rasterize_geometry(raster_outline(grid, stl_footprint(path)), grid)
 
 
 def sheet_geometry(stack: SheetStack, index: int, simplify_mm: float = DEFAULT_SIMPLIFY_MM) -> BaseGeometry:
@@ -225,26 +240,58 @@ def sheet_geometry(stack: SheetStack, index: int, simplify_mm: float = DEFAULT_S
     sheet = stack.sheets[index]
     if sheet.geometry is not None:
         return sheet.geometry
-    return mask_to_geometry(sheet.retained, stack.grid.mm_per_pixel, simplify_mm)
+    return mask_to_geometry(sheet.retained, stack.grid.mm_per_pixel, simplify_mm, whole_sheet=True)
 
 
 def perimeter_band(stack: SheetStack) -> BaseGeometry:
     """The shared solid perimeter band in sheet mm (same pixels as ``grid.perimeter_mask``)."""
 
-    size = stack.grid.outer_sheet_mm
+    w, h = stack.grid.raster_mm
     band = stack.grid.perimeter_pixels * stack.grid.mm_per_pixel
-    return box(0.0, 0.0, size, size).difference(box(band, band, size - band, size - band))
+    return box(0.0, 0.0, w, h).difference(box(band, band, w - band, h - band))
+
+
+# Physical outline (rectangular sheets).  Sheet geometry is in the raster frame: x right and y up from the
+# lower-left pixel corner, covering ``grid.raster_mm``.  A rectangular sheet's requested outer size can differ
+# from the raster by less than half a native pixel on its shorter side; ``physical_outline`` moves that side's
+# two outer edges by ``grid.edge_mm`` each (adding or trimming solid perimeter band only: the band is solid on
+# every sheet, so nothing visible, no artwork pixel and no cutout changes) and shifts the result so the CAD
+# spans exactly 0..width x 0..height.  ``raster_outline`` is its inverse, for reading exported CAD back.
+# Square sheets have no correction: both return the geometry unchanged.
+def physical_outline(grid: StackGrid, geometry: BaseGeometry) -> BaseGeometry:
+    from shapely.affinity import translate
+
+    dx, dy = grid.edge_mm
+    if dx == 0.0 and dy == 0.0:
+        return geometry
+    w, h = grid.raster_mm
+    raster, outer = box(0.0, 0.0, w, h), box(-dx, -dy, w + dx, h + dy)
+    corrected = unary_union([geometry.intersection(outer), outer.difference(raster)]).buffer(0)
+    return translate(corrected, dx, dy)
+
+
+def raster_outline(grid: StackGrid, geometry: BaseGeometry) -> BaseGeometry:
+    from shapely.affinity import translate
+
+    dx, dy = grid.edge_mm
+    if dx == 0.0 and dy == 0.0:
+        return geometry
+    w, h = grid.raster_mm
+    raster, outer = box(0.0, 0.0, w, h), box(-dx, -dy, w + dx, h + dy)
+    moved = translate(geometry, -dx, -dy)
+    return unary_union([moved.intersection(raster), raster.difference(outer)]).buffer(0)
 
 
 def rim_geometry(stack: SheetStack, index: int, geometry: BaseGeometry) -> BaseGeometry | None:
-    """Raised-rim footprint: the outer band of the given width, on the sheet's material."""
+    """Raised-rim footprint: the outer band of the given width, on the sheet's material (``geometry`` is the
+    physical outline, ``physical_outline``)."""
 
     rim = stack.sheets[index].rim
     if rim is None:
         return None
-    size = stack.grid.outer_sheet_mm
+    w, h = stack.grid.outer_mm
     width = float(rim["width_mm"])
-    band = box(0.0, 0.0, size, size).difference(box(width, width, size - width, size - width))
+    band = box(0.0, 0.0, w, h).difference(box(width, width, w - width, h - width))
     return geometry.intersection(band).buffer(0)
 
 
@@ -258,6 +305,7 @@ def build_sheet_solid(stack: SheetStack, index: int, simplify_mm: float = DEFAUL
 
     sheet = stack.sheets[index]
     geometry = sheet_geometry(stack, index, simplify_mm)
+    geometry = physical_outline(stack.grid, geometry)
     solid = extrude_geometry(geometry, sheet.thickness_mm)
     rim_area = rim_geometry(stack, index, geometry)
     if rim_area is not None:
@@ -305,6 +353,8 @@ def export_stack(
         mesh = trimesh.load_mesh(stl_path, file_type="stl", process=True)
         mm_px = stack.grid.mm_per_pixel
         mask_area = float(sheet.retained.sum()) * mm_px**2
+        if not stack.grid.square:  # plus (or minus) the solid edge correction
+            mask_area += stack.grid.outer_mm[0] * stack.grid.outer_mm[1] - stack.grid.raster_mm[0] * stack.grid.raster_mm[1]
         parts = polygons(geometry)
         thickness = sheet.thickness_mm
         rim_area = rim_geometry(stack, index, geometry)
@@ -346,6 +396,9 @@ def export_stack(
     manifest = {
         "stack_name": stack.name,
         "outer_sheet_mm": stack.grid.outer_sheet_mm,
+        **({} if stack.grid.square else {"outer_sheet_height_mm": stack.grid.outer_sheet_height_mm,
+                                         "raster_mm": list(stack.grid.raster_mm),
+                                         "edge_correction_mm_per_side": list(stack.grid.edge_mm)}),
         "simplify_mm": simplify_mm,
         "stl_tolerance_mm": STL_TOLERANCE_MM,
         "stl_angular_tolerance_rad": STL_ANGULAR_TOLERANCE,
@@ -396,9 +449,15 @@ def revalidate_cad(
         if not stl_path.is_file():
             raise FileNotFoundError(f"missing exported STL for {sheet.id}: {stl_path}")
         footprint = stl_footprint(stl_path)
+        outline = footprint.bounds
+        footprint = raster_outline(stack.grid, footprint)
         from_stl = rasterize_geometry(footprint, stack.grid)
         stl_masks.append(from_stl)
         row: dict[str, Any] = {"layer": name, "stl_px_diff_from_mask": int((from_stl != sheet.retained).sum())}
+        if not stack.grid.square:  # the exported outline is the requested outer size
+            row["stl_outline_mm"] = [round(outline[2] - outline[0], 4), round(outline[3] - outline[1], 4)]
+            row["stl_outline_max_error_mm"] = round(max(abs(a - b) for a, b in zip(
+                outline, (0.0, 0.0, *stack.grid.outer_mm))), 6)
         if sheet.geometry is not None:
             # Vector sheet: check the exported footprint itself, at full precision.
             deviation = footprint.symmetric_difference(sheet.geometry).area
@@ -435,6 +494,7 @@ def revalidate_cad(
         "pass": all(
             r["stl_px_diff_from_mask"] == 0 and r.get("geometry_px_diff_from_mask", 0) == 0
             and r["four_neighbor"] == "PASS" and r["width_1_2mm"] == "PASS" and r["perimeter_complete"]
+            and r.get("stl_outline_max_error_mm", 0.0) <= OUTLINE_TOLERANCE_MM
             and ("vector_checks_on_stl" not in r or (
                 r["vector_checks_on_stl"]["pass"]
                 and r["stl_mean_boundary_deviation_mm"] <= MAX_MEAN_BOUNDARY_DEVIATION_MM))

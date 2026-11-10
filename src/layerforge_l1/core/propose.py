@@ -28,7 +28,7 @@ from PIL import Image
 from .intake import IntakeConfig, load_image, prepare_target, use_edited_target
 from .model import StackGrid, save_stack
 from ..reveal_planner import shared_evaluations
-from .planning import PlanningConfig, PlanningError, plan_stack
+from .planning import PlanningConfig, PlanningError, _without_square_height, plan_stack
 from .validation import validate_stack
 
 PROPOSAL_SCHEMA = "layerforge.l1_proposal"
@@ -155,7 +155,8 @@ def propose(
     output = Path(output)
     started = time.perf_counter()
     rgb, opaque, source = load_image(image_path)
-    grid = StackGrid.for_planner(config.planning.outer_sheet_mm, config.planning.scale)
+    grid = StackGrid.for_planner(config.planning.outer_sheet_mm, config.planning.scale,
+                                 config.planning.outer_sheet_height_mm)
     prepared = prepare_target(rgb, opaque, grid, intake, detail_decisions)
     if artwork is not None:
         prepared = use_edited_target(prepared, artwork["target_rgb"], intake, artwork.get("frame_color"),
@@ -298,7 +299,7 @@ def propose(
         "provenance": "auto-proposed",
         "manual_layer_manifest_used": False,
         "manual_corrections": [],
-        "planning_config": asdict(planning),
+        "planning_config": _without_square_height(asdict(planning)),  # square: unchanged keys
         "beam_scores": list(config.beam_scores),
         "intake": m,
         "intake_details": details,

@@ -313,14 +313,17 @@ def plan_project(kit: dict[str, Any], kit_dir: Path, printer: BambuPrinter) -> d
     for row in rows:
         if row["color_hex"].upper() not in colors:
             colors.append(row["color_hex"].upper())
-    plates, problems = [], []
+    plates, problems, turn = [], [], []
     for index, row in enumerate(rows):
         mesh = trimesh.load_mesh(Path(kit_dir) / row["file_stl"], file_type="stl", process=True)
         lo, hi = mesh.bounds
         size = (float(hi[0] - lo[0]), float(hi[1] - lo[1]), float(hi[2] - lo[2]))
         spot = place_on_bed(size[:2], printer)
         name = Path(row["file_stl"]).stem
-        if spot is None:
+        if spot is None and place_on_bed((size[1], size[0]), printer) is not None:
+            # Printable, but only turned 90 degrees: the user turns it in Bambu Studio (never rotated here).
+            turn.append(f"{name}: {size[0]:.2f} x {size[1]:.2f} mm fits {printer.preset} only turned 90 degrees")
+        elif spot is None:
             problems.append(f"{name}: {size[0]:.2f} x {size[1]:.2f} mm does not fit the printable area of "
                             f"{printer.preset} ({printer.bed_mm[0]:g} x {printer.bed_mm[1]:g} mm, keep-out zones "
                             f"and {KEEP_OUT_CLEARANCE_MM:g} mm clearance excluded)")
@@ -343,7 +346,7 @@ def plan_project(kit: dict[str, Any], kit_dir: Path, printer: BambuPrinter) -> d
             "assembly_z0_mm": row["assembly_z0_mm"],
             "_mesh": mesh,
         })
-    return {"colors": colors, "plates": plates, "problems": problems}
+    return {"colors": colors, "plates": plates, "problems": problems, **({"turn": turn} if turn else {})}
 
 
 # -- writing -------------------------------------------------------------------------------
@@ -537,6 +540,11 @@ def write_bambu_project(kit_dir: Path, printer_preset: str = DEFAULT_PRINTER, ou
     report["plates"] = [{k: v for k, v in p.items() if not k.startswith("_")} for p in plan["plates"]]
     if plan["problems"]:
         report.update(status="NOT_WRITTEN", problems=plan["problems"])
+        return report
+    if plan.get("turn"):  # no project that would claim a ready plate: the STL/STEP files are the deliverable
+        report.update(status="NEEDS_MANUAL_ROTATION", problems=plan["turn"] + [
+            "no Bambu Studio project written: import the STL files into Bambu Studio and turn these sheets "
+            "90 degrees on the plate; the STL/STEP files are complete and unchanged"])
         return report
 
     version = bambu_studio_version(exe) or DEVELOPED_WITH

@@ -46,10 +46,10 @@ Window = tuple[slice, slice]
 def bbox_window(bbox_mm: list[float], grid: StackGrid, pad_px: int) -> Window:
     """Outer-grid rows/cols of a sheet-mm box plus ``pad_px`` pixels, clipped to the grid."""
 
-    n, mm = grid.outer_pixels, grid.mm_per_pixel
+    (n, m), mm = grid.shape, grid.mm_per_pixel
     x0, y0, x1, y1 = bbox_mm
     return (slice(max(0, int(np.floor(n - y1 / mm)) - pad_px), min(n, int(np.ceil(n - y0 / mm)) + pad_px)),
-            slice(max(0, int(np.floor(x0 / mm)) - pad_px), min(n, int(np.ceil(x1 / mm)) + pad_px)))
+            slice(max(0, int(np.floor(x0 / mm)) - pad_px), min(m, int(np.ceil(x1 / mm)) + pad_px)))
 
 
 def outline_mask(outline: list | None, grid: StackGrid, window: Window | None = None) -> np.ndarray:
@@ -57,8 +57,8 @@ def outline_mask(outline: list | None, grid: StackGrid, window: Window | None = 
     outer grid or on ``window`` of it.  Even-odd scanlines through the pixel centres (exact; holes
     and several polygons in one pass)."""
 
-    n, mm = grid.outer_pixels, grid.mm_per_pixel
-    rs, cs = window or (slice(0, n), slice(0, n))
+    (n, m), mm = grid.shape, grid.mm_per_pixel
+    rs, cs = window or (slice(0, n), slice(0, m))
     h, w = rs.stop - rs.start, cs.stop - cs.start
     mask = np.zeros((h, w), bool)
     edges = []
@@ -94,8 +94,8 @@ def footprint(issue: dict[str, Any], grid: StackGrid, window: Window | None = No
 
     mask = outline_mask(issue.get("outline_mm"), grid, window)
     if not mask.any() and issue.get("at_mm"):
-        n, mm = grid.outer_pixels, grid.mm_per_pixel
-        rs, cs = window or (slice(0, n), slice(0, n))
+        (n, m), mm = grid.shape, grid.mm_per_pixel
+        rs, cs = window or (slice(0, n), slice(0, m))
         r, c = int(n - issue["at_mm"][1] / mm) - rs.start, int(issue["at_mm"][0] / mm) - cs.start
         if 0 <= r < mask.shape[0] and 0 <= c < mask.shape[1]:
             mask[r, c] = True
@@ -122,7 +122,7 @@ def local_thickness_px(piece: np.ndarray, cap: int) -> np.ndarray:
 
 
 def _embed(mask: np.ndarray, window: Window, grid: StackGrid) -> np.ndarray:
-    full = np.zeros((grid.outer_pixels,) * 2, bool)
+    full = np.zeros(grid.shape, bool)
     full[window] = mask
     return full
 
@@ -269,14 +269,15 @@ def fingerprint(issue: dict[str, Any], grid: StackGrid, stack: SheetStack | None
     settings and grid, and the issue's own measurement."""
 
     out = {"measurement": _sha(issue["kind"], issue["severity"], issue.get("measured"), issue.get("threshold")),
-           "settings": _sha(settings, grid.outer_sheet_mm, grid.outer_pixels, grid.perimeter_pixels)}
+           "settings": _sha(settings, grid.outer_sheet_mm, grid.outer_pixels, grid.perimeter_pixels,
+                            *(() if grid.square else (grid.outer_rows, grid.outer_sheet_height_mm)))}
     if not issue.get("bbox_mm"):
         return out
-    mm, n, p = grid.mm_per_pixel, grid.outer_pixels, grid.perimeter_pixels
+    mm, (n, m), p = grid.mm_per_pixel, grid.shape, grid.perimeter_pixels
     x0, y0, x1, y1 = issue["bbox_mm"]
     pad = 2.0
     rs = slice(max(0, int(n - (y1 + pad) / mm)), min(n, int(np.ceil(n - (y0 - pad) / mm))))
-    cs = slice(max(0, int((x0 - pad) / mm)), min(n, int(np.ceil((x1 + pad) / mm))))
+    cs = slice(max(0, int((x0 - pad) / mm)), min(m, int(np.ceil((x1 + pad) / mm))))
     if artwork is not None:
         out["artwork"] = _sha(np.ascontiguousarray(artwork[max(0, rs.start - p):max(0, rs.stop - p),
                                                            max(0, cs.start - p):max(0, cs.stop - p)]))

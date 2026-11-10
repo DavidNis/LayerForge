@@ -597,12 +597,13 @@ def test_physical_resize_after_printability_findings(app):
     assert analysis["current"] and analysis["measured"]["counts"]["RISK"] + analysis["measured"]["counts"]["UNSUPPORTED"] > 0
     rec = analysis["options"]["recommended"]
     assert rec and 60.0 < rec["sheet_mm"] <= analysis["limit"]["max_sheet_mm"]
-    for bad in (60, 59, 1000, "big"):
+    for bad in (60, 99, 1000, "big"):  # the current size, below 100 mm, beyond the printer, not a number
         assert client.call("POST", f"{project}/preview", {"size_mm": bad})[0] == 400, bad
-    client.run(name, "resize/preview", {"size_mm": rec["sheet_mm"]})
+    size = max(100.0, rec["sheet_mm"])
+    client.run(name, "resize/preview", {"size_mm": size})
     preview = client.state(name)["resize"]["preview"]
     assert preview["current"] and preview["status"] == "READY_TO_RESIZE" and preview["boundaries"]["pass"]
-    assert preview["dimensions_new"]["sheet_mm"] == [rec["sheet_mm"]] * 2 and preview["dimensions_now"]["sheet_mm"] == [60.0, 60.0]
+    assert preview["dimensions_new"]["sheet_mm"] == [size] * 2 and preview["dimensions_now"]["sheet_mm"] == [60.0, 60.0]
     # Never applied without explicit approval of the size (and of visible changes, if any).
     status, error = client.call("POST", f"{project}/retry", {"preview_id": preview["preview_id"]})
     assert status == 400 and "approve changing the sheet" in error["error"]["message"]
@@ -611,11 +612,11 @@ def test_physical_resize_after_printability_findings(app):
     client.run(name, "resize/retry", {"preview_id": preview["preview_id"], "approve_size": True, "approve_changes": True})
 
     state = client.state(name)
-    assert state["proposal"]["planning_config"]["outer_sheet_mm"] == rec["sheet_mm"]
-    assert state["record"]["sheet_outer_mm"] == rec["sheet_mm"] and state["record"]["proposal_settings"]["outer_mm"] == 60.0
+    assert state["proposal"]["planning_config"]["outer_sheet_mm"] == size
+    assert state["record"]["sheet_outer_mm"] == size and state["record"]["proposal_settings"]["outer_mm"] == 60.0
     assert file_sha256(source) == sha
     check = state["resize"]["last_check"]
-    assert check["from_mm"] == 60.0 and check["to_mm"] == rec["sheet_mm"] and "after" in check
+    assert check["from_mm"] == 60.0 and check["to_mm"] == size and "after" in check
     assert check["after"]["counts"]["UNSUPPORTED"] + check["after"]["counts"]["RISK"] < \
         check["before"]["counts"]["UNSUPPORTED"] + check["before"]["counts"]["RISK"]
     attempt = state["upscale"]["attempts"][0]
@@ -628,6 +629,224 @@ def test_physical_resize_after_printability_findings(app):
     assert client.state(name)["draft"]["status"]["status"] == "REVIEWED_VALID"
 
 
+def test_physical_resize_width_and_height_in_the_same_project(app):
+    """Width x height through the one resize workflow, from an edited review of a switched candidate:
+    200 x 200 -> 200 x 150 -> 150 x 250 -> 200 x 150 -> 200 x 200 -> 100 x 200 mm.  Each size is re-planned
+    from the artwork (other proportions: the source fitted again, never stretched); the sheets are exactly
+    the requested outer size; the current size is offered for editing, also after a restart; each side is
+    at least 100 mm and the sheet must fit the printer as placed or turned; reviews are archived, kits kept."""
+
+    import numpy as np
+
+    from layerforge_l1.core.cad import export_stack, revalidate_cad
+    from layerforge_l1.core.model import file_sha256, load_stack
+    from layerforge_l1.core.validation import validate_stack
+
+    client, workspace = app
+    name = client.ok("POST", "/api/projects?filename=sailboat_512.png&scale=1&outer_mm=200", raw=SAILBOAT.read_bytes())["project"]
+    client.wait({"id": client.state(name)["job"]["id"]})
+    project, base = workspace / name, f"/api/projects/{name}/resize"
+    proposal = client.state(name)["proposal"]
+    others = [c["name"] for c in proposal["candidates"] if c["status"] == "VALID" and c["name"] != proposal["selected"]]
+    client.run(name, "review", {"candidate": proposal["selected"], "widen_openings": False})
+    if others:  # switch candidates, then edit the switched-to review
+        client.run(name, "review", {"candidate": others[0], "widen_openings": False})
+    back = client.state(name)["draft"]["sheets"][0]["id"]
+    client.run(name, "edit", {"op": {"op": "rim", "sheet": back, "enabled": True, "width_mm": 6.0, "total_height_mm": 2.4}})
+    kit = client.run(name, "kits", {})["result"]["kit"]
+    review_sha = file_sha256(project / "review" / "sheet_stack.json")
+    source = SAILBOAT.read_bytes()
+    from PIL import Image
+    import io
+
+    src_w, src_h = Image.open(io.BytesIO(source)).size
+    bed = {"process": {"bed_x_mm": 320.0, "bed_y_mm": 260.0}, "bambu_printer": None}
+
+    def resize(width: float, height: float) -> dict:
+        before = client.state(name)["resize"]["sheet_size_mm"]
+        client.run(name, "resize/analyze", bed)
+        analysis = client.state(name)["resize"]["analysis"]
+        current = analysis["basis"].get("sheet_size_mm") or [analysis["basis"]["sheet_mm"]] * 2
+        assert analysis["current"] and current == before  # what the width and height fields show
+        for bad in ([99, height], [width, 99], [330, 200], [200, 330], before):  # minimum, printer, current
+            assert client.call("POST", f"{base}/preview", {"width_mm": bad[0], "height_mm": bad[1]})[0] == 400, bad
+        client.run(name, "resize/preview", {"width_mm": width, "height_mm": height})
+        preview = client.state(name)["resize"]["preview"]
+        assert preview["status"] == "READY_TO_RESIZE" and preview["current"], preview["boundaries"]
+        assert preview["dimensions_new"]["sheet_mm"] == [width, height]
+        refit = (height / width) != (before[1] / before[0])
+        assert preview["refit"] == refit
+        if refit:  # a resampled artwork is never planned without approving it
+            status, error = client.call("POST", f"{base}/retry", {"preview_id": preview["preview_id"], "approve_size": True})
+            assert status == 400 and "fitted into the new proportions" in error["error"]["message"]
+        client.run(name, "resize/retry", {"preview_id": preview["preview_id"], "approve_size": True, "approve_changes": True})
+        state = client.state(name)
+        assert state["resize"]["sheet_size_mm"] == [width, height]
+        cfg = state["proposal"]["planning_config"]
+        assert [cfg["outer_sheet_mm"], cfg.get("outer_sheet_height_mm") or cfg["outer_sheet_mm"]] == [width, height]
+        assert state["resize"]["last_check"]["to_mm"] == width and state["proposal"]["status"] == "PROPOSAL_READY_FOR_REVIEW"
+        # Planned again at this size: masks on the new grid, the artwork not distorted, every check passes.
+        stack = load_stack(project / "proposal" / "candidates" / state["proposal"]["selected"] / "stack")
+        assert stack.grid.outer_mm == (width, height)
+        assert validate_stack(stack)["status"] == "PASS"
+        intake = json.loads((project / "proposal" / "proposal.json").read_text(encoding="utf-8"))["intake"]
+        placed_w, placed_h = intake["placement"]["placed_px"]
+        assert abs(placed_w / placed_h - src_w / src_h) <= (src_w / src_h) * (1 / placed_w + 1 / placed_h)
+        return state
+
+    state = resize(200.0, 150.0)
+    assert [p.parent.name for p in workspace.glob("*/project.json")] == [name]  # the same project, no copy
+    first = state["upscale"]["attempts"][0]
+    assert first["stage"] == "review" and first["sheet_mm"] == 200.0
+    assert file_sha256(project / "attempts" / first["id"] / "review" / "sheet_stack.json") == review_sha
+    assert [k["id"] for k in state["kits"]] == [kit] and (project / "kits" / kit).is_dir()
+    resize(150.0, 250.0)
+    # CAD at 150 x 250: every sheet exported at exactly that outer size and read back against its masks.
+    stack = load_stack(project / "proposal" / "candidates" / client.state(name)["proposal"]["selected"] / "stack")
+    manifest = export_stack(stack, project / "cadcheck", step=False)
+    check, _ = revalidate_cad(stack, project / "cadcheck")
+    assert check["pass"] and all(r["stl_outline_mm"] == [150.0, 250.0] for r in check["layers"])
+    assert all(np.allclose(r["stl_bounds_mm"][1][:2], [150.0, 250.0], atol=1e-3) for r in manifest["layers"])
+    resize(200.0, 150.0)
+    resize(200.0, 200.0)
+    state = resize(100.0, 200.0)
+    sizes = [a.get("sheet_size_mm") or [a["sheet_mm"]] * 2 for a in state["upscale"]["attempts"]]
+    assert sizes == [[200.0, 200.0], [200.0, 150.0], [150.0, 250.0], [200.0, 150.0], [200.0, 200.0]]
+    assert [k["id"] for k in state["kits"]] == [kit]
+    # A sheet that fits only turned 90 degrees is allowed (the user turns it in the slicer).
+    client.run(name, "resize/analyze", bed)
+    client.run(name, "resize/preview", {"width_mm": 150, "height_mm": 300})
+    turned = client.state(name)["resize"]["preview"]
+    fit = next(c for c in turned["boundaries"]["checks"] if c["check"] == "sheet fits the printer's usable area")
+    assert turned["status"] == "READY_TO_RESIZE" and fit["pass"] and fit.get("turn_90_degrees_in_the_slicer")
+
+
+def test_browser_rectangular_review_inspector_fill_and_reload(app, tmp_path):
+    """A 150 x 250 mm (portrait, with an edge correction) review in a real browser (``drive_rect_review.mjs``).
+    Sheet Cut and Fill go through the edit API (Review layers has no sheet-geometry tools); their masks are
+    checked here at the rows and columns of the rectangular grid.  In the browser: the Issue inspector selects
+    the cut's narrow opening from the list and by a real click on it, draws the highlight on it (not 1.4 mm
+    beside it) and states its position in the artwork; the artwork editor's Fill tool recolors the region under
+    a real click; Save; after a reload everything is still there."""
+
+    import subprocess
+
+    import numpy as np
+
+    from layerforge_l1.core import artwork as art
+    from layerforge_l1.core import review
+
+    browser = next((b for b in BROWSERS if b.is_file()), None)
+    if not _node_ok() or browser is None:
+        pytest.skip("needs Node >= 22 and Edge/Chrome to drive the UI in a real browser")
+    client, workspace = app
+    name = client.ok("POST", "/api/projects?filename=sailboat_512.png&scale=1&outer_mm=200", raw=SAILBOAT.read_bytes())["project"]
+    client.wait({"id": client.state(name)["job"]["id"]})
+    client.run(name, "resize/analyze", {"process": None, "bambu_printer": None})
+    client.run(name, "resize/preview", {"width_mm": 150, "height_mm": 250})
+    preview = client.state(name)["resize"]["preview"]
+    client.run(name, "resize/retry", {"preview_id": preview["preview_id"], "approve_size": True, "approve_changes": True})
+    state = client.state(name)
+    client.run(name, "review", {"candidate": state["proposal"]["selected"], "widen_openings": False})
+    project = workspace / name
+    base = review.load_project(project / "review")
+    grid = base.grid
+    assert grid.outer_mm == (150.0, 250.0) and grid.shape == (576, 346) and grid.edge_mm[0] < 0
+    front = base.sheets[-1].id
+    before = base.sheets[-1].retained.copy()
+
+    def pixel(x: float, y: float) -> tuple[int, int]:  # sheet mm (y up) -> (row, column) of the grid
+        return grid.rows - 1 - int(np.floor(y / grid.mm_per_pixel)), int(np.floor(x / grid.mm_per_pixel))
+
+    # Cut a 0.6 mm slot and a 4 mm bar in the solid top padding of the front sheet, then fill the bar again.
+    client.run(name, "edit", {"op": {"op": "subtract", "sheet": front, "shape": {"type": "bar", "from_mm": [40.0, 210.0],
+                                                                                 "to_mm": [100.0, 210.0], "width_mm": 0.6}}})
+    client.run(name, "edit", {"op": {"op": "subtract", "sheet": front, "shape": {"type": "bar", "from_mm": [40.0, 226.0],
+                                                                                 "to_mm": [60.0, 226.0], "width_mm": 4.0}}})
+    cut = next(s for s in review.load_project(project / "review").sheets if s.id == front).retained
+    assert not cut[pixel(50.0, 226.0)] and not cut[pixel(50.0, 225.0)] and cut[pixel(50.0, 229.0)]
+    client.run(name, "edit", {"op": {"op": "fill_hole", "sheet": front, "at_mm": [50.0, 226.0]}})
+    after = next(s for s in review.load_project(project / "review").sheets if s.id == front).retained
+    assert not after[pixel(70.0, 210.0)] and after[pixel(70.0, 211.7)] and after[pixel(70.0, 208.3)]
+    assert after[pixel(50.0, 226.0)] and np.array_equal(after[pixel(0, 230)[0] - 20:pixel(0, 222)[0] + 20],
+                                                         before[pixel(0, 230)[0] - 20:pixel(0, 222)[0] + 20])
+    rows, cols = np.nonzero(after != before)  # only the slot changed: at the slot's rows and columns
+    assert rows.min() >= pixel(0, 210.3 + grid.mm_per_pixel)[0] and rows.max() <= pixel(0, 209.7 - grid.mm_per_pixel)[0]
+    assert cols.min() >= pixel(40.0 - 0.3 - grid.mm_per_pixel, 0)[1] and cols.max() <= pixel(100.0 + 0.3 + grid.mm_per_pixel, 0)[1]
+
+    # The sun on the rectangular artwork canvas: the Fill click target.
+    target = art.load_rgb(project / "review" / "target.png")
+    sun = (target == np.array([0xF9, 0xC8, 0x32], np.uint8)).all(-1)
+    r, c = (int(round(v)) for v in np.argwhere(sun).mean(0))
+    assert sun[r, c] and target.shape[:2] == (grid.artwork_rows, grid.artwork_pixels)
+    hull = (target == np.array([0x77, 0x46, 0x27], np.uint8)).all(-1)
+    hr, hc = (int(round(v)) for v in np.argwhere(hull).mean(0))
+    assert hull[hr, hc]
+    points = {"sheet": front, "slot_in": [70.0, 210.0], "slot_out": [70.0, 211.7], "fill_px": [r, c], "pick_px": [hr, hc],
+              "color": "#774627"}
+    shots = tmp_path / "shots"
+    run = subprocess.run(["node", str(ROOT / "tests" / "e2e" / "drive_rect_review.mjs"), client.base + "/", str(browser), "-",
+                          str(shots), name, json.dumps(points)], capture_output=True, text=True, encoding="utf-8", timeout=900)
+    lines = [line for line in run.stdout.splitlines() if line.startswith("{")]
+    assert lines, run.stderr[-3000:]
+    result = json.loads(lines[-1])
+    (shots / "drive_result.json").write_text(json.dumps(result, indent=1), encoding="utf-8")
+    assert result["ok"], result.get("error", "") + "\n" + run.stderr[-3000:]
+    assert result["console_errors"] == []
+    # The images span the pixel grid (150.17 x 250 mm); the issue is the slot.
+    assert result["extent"] == pytest.approx([0.0, 0.0, *grid.raster_mm], abs=1e-6)
+    x0, y0, x1, y1 = result["issue"]["bbox_mm"]
+    assert x0 <= 70.0 <= x1 and y0 <= 210.0 <= y1 and 0.3 < y1 - y0 < 1.2 and 55.0 < x1 - x0 < 65.0
+    band = grid.perimeter_pixels * grid.mm_per_pixel
+    where = (f"{x0 - band:.2f} mm from the left, {grid.raster_mm[1] - band - y1:.2f} mm from the top of the "
+             f"{grid.artwork_mm:.1f} × {grid.artwork_height_mm:.1f} mm aperture")
+    for key in ("from_list", "from_click", "after_reload"):
+        assert result[key]["title"] == "Opening may close", key
+        assert result[key]["aperture"] == where, (key, result[key]["aperture"], where)
+        assert result["opaque"][{"from_list": "list", "from_click": "click", "after_reload": "reload"}[key]] == [True, False], key
+    # The Fill click landed on the clicked pixel of the rectangular canvas and recolored the whole sun.
+    assert result["art_image"] == [grid.artwork_pixels, grid.artwork_rows]
+    assert len(result["saved_ops"]) == 1 and result["saved_ops"][0]["at_px"] == [r, c]
+    assert result["after_reload"]["ops"] == result["saved_ops"]
+    edited = art.load_rgb(project / "artwork" / "current.png")
+    brown = (edited == np.array([0x77, 0x46, 0x27], np.uint8)).all(-1)
+    assert brown[sun].all() and not (edited == np.array([0xF9, 0xC8, 0x32], np.uint8)).all(-1).any()
+    assert np.array_equal(edited[~sun], target[~sun])
+    # Saved: the three sheet edits and the masks are unchanged by the reload.
+    assert result["after_reload"]["history"] == len(client.state(name)["draft"]["edits"]) == 3
+    assert np.array_equal(next(s for s in review.load_project(project / "review").sheets if s.id == front).retained, after)
+
+
+def test_rectangular_size_survives_a_restart(tmp_path):
+    """The current width and height are read from the project after the app restarts."""
+
+    server, client = start(tmp_path / "workspace")
+    try:
+        name = client.ok("POST", "/api/projects?filename=sailboat_512.png&scale=1&outer_mm=200",
+                         raw=SAILBOAT.read_bytes())["project"]
+        client.wait({"id": client.state(name)["job"]["id"]})
+        client.run(name, "resize/analyze", {"process": None, "bambu_printer": None})
+        client.run(name, "resize/preview", {"width_mm": 200, "height_mm": 150})
+        preview = client.state(name)["resize"]["preview"]
+        client.run(name, "resize/retry", {"preview_id": preview["preview_id"], "approve_size": True, "approve_changes": True})
+    finally:
+        server.shutdown()
+        server.server_close()
+    server, client = start(tmp_path / "workspace")
+    try:
+        state = client.state(name)
+        assert state["resize"]["sheet_size_mm"] == [200.0, 150.0]
+        assert state["record"]["sheet_outer_mm"] == 200.0 and state["record"]["sheet_outer_height_mm"] == 150.0
+        client.run(name, "resize/analyze", {"process": None, "bambu_printer": None})
+        assert client.state(name)["resize"]["analysis"]["basis"]["sheet_size_mm"] == [200.0, 150.0]
+        client.run(name, "review", {"candidate": state["proposal"]["selected"], "widen_openings": True})
+        draft = client.state(name)["draft"]
+        assert draft["status"]["status"] == "REVIEWED_VALID" and draft["validation"]["outer_mm"] == [200.0, 150.0]
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
 def test_trial_planning_finds_a_size_for_a_failed_proposal(app, monkeypatch):
     """A search-limit failure (simulated below 80 mm) has no width prediction: trial planning finds the size."""
 
@@ -638,7 +857,7 @@ def test_trial_planning_finds_a_size_for_a_failed_proposal(app, monkeypatch):
     real = core_planning.plan_stack
 
     def small_fails(target, config, name="stack"):
-        if config.outer_sheet_mm < 80:
+        if config.outer_sheet_mm < 130:
             raise PlanningError("beam search ended INCOMPLETE within 24 sheets (simulated)", {"closure_feasible": True})
         return real(target, config, name)
 
@@ -649,17 +868,17 @@ def test_trial_planning_finds_a_size_for_a_failed_proposal(app, monkeypatch):
     client.wait({"id": client.state(name)["job"]["id"]})
     assert client.state(name)["proposal"]["status"] == "NEEDS_USER_DECISION"
     process = {"name": "small_bed", "source": "test", "nozzle_diameter_mm": 0.4, "line_width_mm": 0.42, "layer_height_mm": 0.2,
-               "first_layer_height_mm": 0.2, "min_opening_mm": 0.8, "min_positive_feature_mm": 0.84, "bed_x_mm": 120,
-               "bed_y_mm": 120, "max_z_mm": 100, "filament_density_g_cm3": 1.24}
+               "first_layer_height_mm": 0.2, "min_opening_mm": 0.8, "min_positive_feature_mm": 0.84, "bed_x_mm": 200,
+               "bed_y_mm": 200, "max_z_mm": 100, "filament_density_g_cm3": 1.24}
     client.run(name, "resize/analyze", {"process": process})
     analysis = client.state(name)["resize"]["analysis"]
-    assert analysis["limit"]["max_sheet_mm"] == 120.0 and analysis["trial_search"]["available"]
+    assert analysis["limit"]["max_sheet_mm"] == 200.0 and analysis["trial_search"]["available"]
     assert analysis["options"]["recommended"] is None  # nothing predicted from widths
     client.run(name, "resize/search", {})
     search = client.state(name)["resize"]["analysis"]["trial_search"]
-    assert search["trials"][-1]["sheet_mm"] == 120.0 and search["trials"][-1]["plans"]
-    assert 80.0 <= search["smallest_plannable_mm"] < 90.0
-    assert all(not t["plans"] for t in search["trials"] if t["sheet_mm"] < 80)
+    assert search["trials"][-1]["sheet_mm"] == 200.0 and search["trials"][-1]["plans"]
+    assert 130.0 <= search["smallest_plannable_mm"] < 140.0
+    assert all(not t["plans"] for t in search["trials"] if t["sheet_mm"] < 130)
     size = search["smallest_plannable_mm"]
     client.run(name, "resize/preview", {"size_mm": size})
     preview = client.state(name)["resize"]["preview"]
@@ -672,7 +891,7 @@ def test_trial_planning_finds_a_size_for_a_failed_proposal(app, monkeypatch):
 def test_resize_from_review_keeps_the_original_and_locates_remaining_issues(app):
     """Resize from an open review: printer limit, approved artwork only, archive, remaining findings located.
 
-    The process is a deliberately coarse test process (1.0 mm nozzle, 64 mm bed) so that UNSUPPORTED
+    The process is a deliberately coarse test process (2.0 mm nozzle, 104 mm bed) so that UNSUPPORTED
     findings remain after the largest fitting resize; it is not a real printer profile.
     """
 
@@ -689,16 +908,16 @@ def test_resize_from_review_keeps_the_original_and_locates_remaining_issues(app)
     client.run(name, "review", {"candidate": candidate})
     review_sha = file_sha256(workspace / name / "review" / "sheet_stack.json")
     source_sha = file_sha256(workspace / name / state["record"]["source"]["file"])
-    process = {"name": "test_coarse_1.0mm", "source": "test only", "nozzle_diameter_mm": 1.0, "line_width_mm": 1.05,
-               "layer_height_mm": 0.2, "first_layer_height_mm": 0.2, "min_opening_mm": 2.0, "min_positive_feature_mm": 2.1,
-               "bed_x_mm": 64, "bed_y_mm": 90, "max_z_mm": 100, "filament_density_g_cm3": 1.24}
+    process = {"name": "test_coarse_2.0mm", "source": "test only", "nozzle_diameter_mm": 2.0, "line_width_mm": 2.1,
+               "layer_height_mm": 0.2, "first_layer_height_mm": 0.2, "min_opening_mm": 4.0, "min_positive_feature_mm": 4.2,
+               "bed_x_mm": 104, "bed_y_mm": 130, "max_z_mm": 100, "filament_density_g_cm3": 1.24}
     client.run(name, "resize/analyze", {"process": process})
     analysis = client.state(name)["resize"]["analysis"]
-    assert analysis["basis"]["stage"] == "review" and analysis["limit"]["max_sheet_mm"] == 64.0
+    assert analysis["basis"]["stage"] == "review" and analysis["limit"]["max_sheet_mm"] == 104.0
     assert analysis["measured"]["counts"]["UNSUPPORTED"] > 0
     project = f"/api/projects/{name}/resize"
-    assert client.call("POST", f"{project}/preview", {"size_mm": 65})[0] == 400  # beyond the printer
-    client.run(name, "resize/preview", {"size_mm": 64})
+    assert client.call("POST", f"{project}/preview", {"size_mm": 105})[0] == 400  # beyond the printer
+    client.run(name, "resize/preview", {"size_mm": 104})
     preview = client.state(name)["resize"]["preview"]
     checks = {c["check"]: c["pass"] for c in preview["boundaries"]["checks"]}
     assert all(checks.values()) and checks["sheet fits the printer's usable area"] and len(checks) == 9
@@ -720,7 +939,7 @@ def test_resize_from_review_keeps_the_original_and_locates_remaining_issues(app)
     client.run(name, "resize/retry", body)
     state = client.state(name)
     record = state["record"]
-    assert record["sheet_outer_mm"] == 64.0 and record["proposal_settings"]["outer_mm"] == 60.0 and record["candidate"] is None
+    assert record["sheet_outer_mm"] == 104.0 and record["proposal_settings"]["outer_mm"] == 60.0 and record["candidate"] is None
     assert "draft" not in state and file_sha256(workspace / name / state["record"]["source"]["file"]) == source_sha
     attempt = state["upscale"]["attempts"][0]
     archived = workspace / name / "attempts" / attempt["id"]
@@ -730,7 +949,7 @@ def test_resize_from_review_keeps_the_original_and_locates_remaining_issues(app)
     assert check["artwork_matches_approved_preview"] and "estimate" in check["predicted_basis"]
     assert check["more_unsupported_than_predicted"] == max(0, check["after"]["counts"]["UNSUPPORTED"] - check["predicted"]["UNSUPPORTED"])
     left = check["after"]["unsupported"]
-    assert left and all(u["sheet"] and len(u["at_mm"]) == 2 and 0 <= u["at_mm"][0] <= 64 for u in left)
+    assert left and all(u["sheet"] and len(u["at_mm"]) == 2 and 0 <= u["at_mm"][0] <= 104 for u in left)
     assert check["after"]["map_urls"] and client.ok("GET", check["after"]["map_urls"][0])[:4] == b"\x89PNG"
     # The path to manual correction: reviewing the re-planned candidate gives the same sheets to Locate.
     client.run(name, "review", {"candidate": check["after"]["candidate"]})

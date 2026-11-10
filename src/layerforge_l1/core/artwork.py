@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import io
 import json
 from datetime import datetime, timezone
 from pathlib import Path
@@ -33,7 +34,7 @@ import numpy as np
 from PIL import Image
 from scipy import ndimage
 
-from .model import StackError, hex_color
+from .model import StackError, hex_color, read_bytes
 
 ARTWORK_SCHEMA = "layerforge.artwork_edits"
 ARTWORK_VERSION = "1.0.0"
@@ -69,7 +70,8 @@ class ArtworkError(StackError):
 
 # -- images and colors ---------------------------------------------------------------------------
 def load_rgb(path: Path) -> np.ndarray:
-    return np.array(Image.open(path).convert("RGB"), dtype=np.uint8)  # writable copy
+    # Read whole first (``read_bytes``): the review's target.png can be replaced while it is read.
+    return np.array(Image.open(io.BytesIO(read_bytes(path))).convert("RGB"), dtype=np.uint8)  # writable copy
 
 
 def save_rgb(image: np.ndarray, path: Path, compress_level: int | None = None) -> None:

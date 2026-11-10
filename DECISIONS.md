@@ -1319,3 +1319,63 @@ FDM thresholds remain generic assumptions until a print calibrates them).
   edits (with the pixels changed since) and asks to plan again; tips near pixels edited since planning are
   marked. Every proposed pixel is still checked against the working artwork, and applying stays the user's
   explicit choice. The card never states a printability improvement; that is known only after planning.
+
+## D-V3-042 amendment | 2026-11-10 | Cutout widening: no new reported thin-material issue
+
+- OBSERVED (Chupa, scratch copy): the raster 1.2 mm guard limits how much thin material may grow, but a few new
+  pixels could still turn an unreported thin part into a reported one (the brown iris tip: 5 px, 0.44 mm2).
+- DESIGN_CHOICE (`core/widening.py`, `_ReportableThin`): a removal is refused when, after it, a thin part as the
+  printability geometry check reports it (same traced outline minus the perimeter band, same `_narrow_parts` at the
+  process's minimum material width, same visibility rule) appears near the spot and overlaps no reported part of
+  the sheet before.  Checked on a crop around the spot that doubles up to the whole sheet when a part reaches the
+  crop's edge; the final gate re-checks every removal.  Same thresholds; not a widening threshold.
+
+## D-V3-045 | 2026-11-10 | Switching candidates after a review has started
+
+- USER_REQUIRED: compare and switch candidates of the same planning run without re-planning and without losing
+  review work.  DESIGN_CHOICE: "Review this candidate" on another candidate parks the current review (review,
+  draft, printability, artwork, issue reviews) under `reviews/<candidate>/` with `parked.json` tied to the
+  proposal's SHA-256, then restores that candidate's parked review or starts a new one.  Refused with unsaved
+  artwork changes or a parked review of another planning run; a failed switch puts both back.  Re-plans archive
+  `reviews/` with the attempt.  UI: buttons in the existing Compare candidates table ("Review this candidate" /
+  "Resume saved review", a "saved review" badge), "Compare candidates" in the review bar; kits record their
+  candidate.  Planner and candidate scoring unchanged.
+
+## D-V3-046 | 2026-11-10 | Windows-safe review saving
+
+- OBSERVED (reproduced on the previous code): while another handle reads `review/target.png` (a page request),
+  Windows refuses unlink (WinError 32) and replace (WinError 5); the save failed half way and the review no longer
+  loaded.  DESIGN_CHOICE (`core/model.py`, `core/review.py`): files are written as staged partial files and swapped
+  in only after all are written (manifest last); unchanged files are not rewritten; a failed swap restores the old
+  bytes; replace and read retry transient sharing errors for at most 2 s; one lock per project serialises saving,
+  loading and review moves.  Edit cost +1-5 %.  Deterministic tests hold the files open.
+
+## D-V3-047 | 2026-11-10 | Physical size: smaller and rectangular sheets (width x height)
+
+- USER_REQUIRED: the existing Physical size workflow changes the sheet to any width x height, each side at least
+  100 mm (the previous 22 mm floor is removed), larger or smaller, square or rectangular, after a review too.
+- DESIGN_CHOICE, grid: pixels stay square; the longer side has the square grid's pixel count, the shorter side
+  whole native pixels; the perimeter band is the same number of pixels (same mm) on every side.  Square projects
+  use the unchanged code paths and saved fields (the height is stored only for rectangular sheets); square plans,
+  CAD, previews and print kits are identical to the previous code (compared file by file).
+- DESIGN_CHOICE, exact outer size: the outer sheet is exactly the requested width x height; the shorter side's
+  raster can differ by less than half a native pixel, and that difference is added to or trimmed from the solid
+  perimeter band in CAD only (`cad.physical_outline`, at most a quarter native pixel per edge), then the CAD is
+  shifted to span 0..W x 0..H.  Proven by tests: the corrected outline still rasterizes to the planned mask, the
+  inverse (`raster_outline`) restores it exactly, nothing inside the band changes; the STL/STEP read-back fails
+  if an outline is not the requested size.  The band stays far above 1.2 mm (at least 5.5 mm at 100 mm).
+- DESIGN_CHOICE, artwork: with the same proportions the artwork keeps its pixels.  With other proportions the
+  source is fitted into the new aperture again (aspect kept, padded with the frame color, never stretched or
+  cropped): the preview shows both images and the retry needs the user's approval of the new artwork; detail
+  choices are not carried.  Region recolors move with the artwork only when its placed size is unchanged (only the
+  padding changes); otherwise the preview is refused (never re-applied approximately).
+- DESIGN_CHOICE, printer: the full outer sheet must fit the usable area as placed or turned 90 degrees.  Nothing is
+  rotated: STL/STEP keep the planned orientation; the FDM estimate adds an INFO note; a Bambu Studio project is not
+  written when a sheet fits the plate only turned (status NEEDS_MANUAL_ROTATION, with the reason), so no
+  ready-to-print plate is claimed.
+- Re-planning always runs from the approved artwork at the new size (planner, validators, 1.2 mm / 0.8 mm
+  thresholds unchanged); attempts, saved reviews and kits are kept as before.
+- LIMITATION: the analysis table lists larger sizes at the current proportions only (other sizes are typed);
+  imports stay square (a rectangular sheet comes from Physical size); Upscale & Retry and trial planning on a failed
+  rectangular proposal are untested; the resize panel's manual-correction tip still names sheet tools that Review
+  layers no longer has (pre-existing text).

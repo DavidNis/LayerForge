@@ -104,7 +104,7 @@ def vector_sheet_checks(stack: SheetStack, geometry: Any) -> dict[str, Any]:
 
     from .cad import perimeter_band, polygons
 
-    size = stack.grid.outer_sheet_mm
+    width_mm, height_mm = stack.grid.raster_mm  # the geometry is in the raster frame
     band = perimeter_band(stack)
     width = minimum_width_mm()
     parts = polygons(geometry)
@@ -113,7 +113,7 @@ def vector_sheet_checks(stack: SheetStack, geometry: Any) -> dict[str, Any]:
     orphans = [c for c in cores if not c.intersects(band)]
     thin = geometry.difference(core.buffer(width / 2))
     missing = band.difference(geometry).area
-    outside = geometry.difference(box(0.0, 0.0, size, size)).area
+    outside = geometry.difference(box(0.0, 0.0, width_mm, height_mm)).area
     result = {
         "valid_geometry": bool(geometry.is_valid),
         "connected_parts": len(parts),
@@ -199,6 +199,7 @@ def validation_key(stack: SheetStack) -> str:
 
     grid = stack.grid
     add("validate_stack v1", grid.outer_pixels, grid.perimeter_pixels, grid.outer_sheet_mm, grid.scale,
+        *(() if grid.square else (grid.outer_rows,)),
         grid.poc_config(), DEFAULT_OPTIMIZATION_CONFIG, OPENING_DIAGNOSTIC_MM, VECTOR_AREA_TOLERANCE_MM2,
         *(id(f) for f in (audit_edge_connectivity, audit_connection_width, validate_sheet_mask,
                           vector_sheet_checks, reconstruction, narrow_openings, cutout_hole_count)),
@@ -254,8 +255,10 @@ def _validate_stack(stack: SheetStack) -> dict[str, Any]:
         "sheet_count": len(stack.sheets),
         "colors_back_to_front": [s.color for s in stack.sheets],
         "repeated_colors": sorted({s.color for s in stack.sheets if [t.color for t in stack.sheets].count(s.color) > 1}),
-        "outer_sheet_mm": [grid.outer_sheet_mm, grid.outer_sheet_mm],
-        "artwork_grid_mm": [grid.artwork_mm, grid.artwork_mm],
+        "outer_sheet_mm": [grid.outer_sheet_mm, grid.outer_sheet_height_mm],
+        # Rectangular: the pixel grid's extent (the frame of the masks and previews; the outer size if square).
+        **({} if grid.square else {"raster_mm": list(grid.raster_mm)}),
+        "artwork_grid_mm": [grid.artwork_mm, grid.artwork_height_mm],
         "visible_artwork_bbox_mm": [
             float((xs.max() - xs.min() + 1) * grid.mm_per_pixel),
             float((ys.max() - ys.min() + 1) * grid.mm_per_pixel),

@@ -17,6 +17,8 @@ kernel: that spot must be rejected and kept as material.
 from __future__ import annotations
 
 import json
+from contextlib import contextmanager
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -242,6 +244,123 @@ def test_thin_guard_window_agrees_with_the_whole_sheet() -> None:
         assert guard.allows(sheet.retained, (y, y + h, x, x + w), spot) == expected
         seen.add(expected)
     assert seen == {True, False}
+
+
+TIP = _box(450, 453, 400, 410)  # 3 px (0.52 mm) visible tip of a brown body
+
+
+def _tip_stack(border_top: bool = True) -> SheetStack:
+    """A brown back sheet showing a body (rows 400-499, cols 300-399) with a 3 px tip; around the tip a
+    1 px hidden brown border (5 px = 0.87 mm of material: thinner than the 1.2 mm structural width, not
+    narrower than the checker's 0.84 mm), then a 3 px U-shaped opening of the brown sheet under the
+    black front sheet.  Widening that opening removes the border and leaves the 0.52 mm tip: a new
+    thin-material issue the raster guard misses (its pixels were thin at 1.2 mm already; the Chupa iris).
+    ``border_top=False``: no border above the tip (4 px = 0.69 mm, already reported before widening)."""
+
+    full, perimeter = np.ones((N, N), bool), GRID.perimeter_mask()
+    border = _box(449 if border_top else 450, 454, 400, 411) & ~TIP
+    slot = _box(446, 457, 400, 414) & ~TIP & ~border
+    body = _box(400, 500, 300, 400) | TIP
+    a = GRID.artwork_pixels
+    target = np.zeros((a, a, 3), np.uint8)
+    target[body[P:-P, P:-P]] = [0x6B, 0x3F, 0x2B]
+    s0 = Sheet("s0_brown", "#6B3F2B", full & ~slot, body, 1.6)
+    s1 = Sheet("s1_black", BLACK, full & ~body, ~perimeter & ~body, 1.6)
+    built = SheetStack("tip_fixture", GRID, [s0, s1], target_rgb=target)
+    assert validate_stack(built)["status"] == "PASS"
+    return built
+
+
+def _thin_issues(s: SheetStack) -> list[dict]:
+    from layerforge_l1.core import issues as iss
+    from layerforge_l1.core.printkit import PrintProcess, assess_printability
+
+    located, _ = iss.fdm_issues(assess_printability(s, PrintProcess()), source="geometry_check")
+    return [i for i in located if i["kind"] == "thin_material" and i["severity"] in ("RISK", "UNSUPPORTED")]
+
+
+def test_no_new_reported_thin_material_issue(monkeypatch) -> None:
+    """The removal that would create a thin-material issue the printability check reports is refused;
+    the rest of the widening is kept.  Without the check the same widening creates the issue, and the
+    final gate (the same geometry, around every removal) refuses that result."""
+
+    s = _tip_stack()
+    assert _thin_issues(s) == []
+    result, report = widening.widen_openings(s)
+    assert report["status"] == widening.APPLIED and report["gate"]["pass"] and report["gate"]["new_thin_issues"] == 0
+    refused = [r for r in report["rejected_spots"] if "thin-material issue" in r["reason"]]
+    assert report["rejected_new_thin_issue"] == len(refused) == 1 and refused[0]["sheet"] == "s0_brown"
+    after = result.sheets[0].retained
+    assert after[_box(449, 454, 400, 411) & ~TIP].all()  # the border around the tip stays
+    assert report["removed_px"] > 0 and not after[_box(443, 446, 400, 414)].all()  # the slot's far side widened
+    assert _thin_issues(result) == []
+    assert all(np.array_equal(a.visible, b.visible) for a, b in zip(s.sheets, result.sheets))
+    assert validate_stack(result)["status"] == "PASS"
+    # Without the per-spot check: the issue appears (at the tip), and the final gate catches it.
+    monkeypatch.setattr(widening._ReportableThin, "allows", lambda self, *a: True)
+    unchecked, _ = widening.widen_openings(s)
+    monkeypatch.undo()
+    created = _thin_issues(unchecked)
+    assert len(created) == 1 and created[0]["sheet"] == "s0_brown" and created[0]["measured"]["value"] < 0.84
+    x0, y0, x1, y1 = created[0]["bbox_mm"]
+    mpp = GRID.mm_per_pixel
+    assert x0 <= (405.5 + P) * mpp <= x1 and y0 <= (N - 451.5 - P) * mpp <= y1  # the tip's centre
+    gate = widening.gate_checks(s, unchecked)
+    assert not gate["pass"] and gate["new_thin_issues"] == 1 and not gate["no_new_thin_material"]
+
+
+def test_reported_thin_material_that_was_there_before_is_not_a_new_issue() -> None:
+    """A tip already reported before widening (0.69 mm) may lose its hidden border: the issue is the
+    same one (same place), not new, so the widening is not refused for it."""
+
+    s = _tip_stack(border_top=False)
+    before = _thin_issues(s)
+    assert len(before) == 1
+    result, report = widening.widen_openings(s)
+    assert report["status"] == widening.APPLIED and report["rejected_new_thin_issue"] == 0
+    assert not result.sheets[0].retained[_box(453, 454, 400, 410)].any()  # the border below the tip is gone
+    after = _thin_issues(result)
+    assert len(after) == 1 and after[0]["sheet"] == before[0]["sheet"]
+    b, a = before[0]["bbox_mm"], after[0]["bbox_mm"]
+    assert a[0] <= b[2] and b[0] <= a[2] and a[1] <= b[3] and b[1] <= a[3]
+
+
+def test_thin_issue_window_agrees_with_the_whole_sheet() -> None:
+    """The windowed check gives the whole-sheet answer of the printability geometry (same parts)."""
+
+    s = _tip_stack()
+    sheet = s.sheets[0]
+    check = widening._ReportableThin(s, 0, widening.WideningConfig().min_material_mm)
+    whole = (0, N, 0, N)
+    original = check.parts(sheet.retained, whole)
+    hidden = sheet.retained & ~sheet.visible & ~GRID.perimeter_mask()
+    rng = np.random.default_rng(5)
+    seen = set()
+    for _ in range(24):
+        y, x = 446 + P + int(rng.integers(0, 10)), 398 + P + int(rng.integers(0, 16))
+        h, w = int(rng.integers(1, 6)), int(rng.integers(1, 12))
+        spot = hidden[y:y + h, x:x + w].copy()
+        if not spot.any():
+            continue
+        trial = sheet.retained.copy()
+        trial[y:y + h, x:x + w] &= ~spot
+        expected = not [p for p in check.parts(trial, whole) if not any(p.intersects(q) for q in original)]
+        assert check.allows(sheet.retained, (y, y + h, x, x + w), spot) == expected
+        seen.add(expected)
+    assert seen == {True, False}
+
+
+def test_thin_issue_prefilter_changes_no_result(stack, monkeypatch) -> None:
+    """The per-spot check skipped where the raster guard found no thin material nearby: same result."""
+
+    for s in (stack, _tip_stack()):
+        fast, fast_report = widening.widen_openings(s)
+        monkeypatch.setattr(widening, "THIN_ISSUE_PREFILTER", False)
+        full, full_report = widening.widen_openings(s)
+        monkeypatch.undo()
+        assert all(np.array_equal(a.retained, b.retained) for a, b in zip(fast.sheets, full.sheets))
+        assert fast_report["rejected_spots"] == full_report["rejected_spots"]
+        assert fast_report["thin_issue_checks"] <= full_report["thin_issue_checks"]
 
 
 def test_fallback_to_the_whole_sheet_check_gives_the_same_result(stack, widened, monkeypatch) -> None:
@@ -500,6 +619,36 @@ def test_existing_projects_are_not_widened_without_a_choice(stack, tmp_path) -> 
     assert ws.record("old_project_2")["proposal_settings"]["widen_openings"] is True
 
 
+@contextmanager
+def _evidence_on_failure(test: str, shots, run=None):
+    """On any failure, keep the browser drive's evidence in a new folder of its own (never overwritten):
+    ``artifacts/widening_failures/<UTC time>_<test>_<pid>/`` with the driver's stdout/stderr and exit code,
+    the Python traceback and the screenshots taken so far.  The test outcome is unchanged."""
+
+    import os
+    import shutil
+    import traceback
+    from datetime import datetime, timezone
+
+    from test_l4_app import ROOT
+
+    try:
+        yield
+    except BaseException:
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S_%fZ")
+        folder = ROOT / "artifacts" / "widening_failures" / f"{stamp}_{test}_{os.getpid()}"
+        folder.mkdir(parents=True, exist_ok=False)
+        (folder / "traceback.txt").write_text(traceback.format_exc(), encoding="utf-8")
+        if run is not None:
+            (folder / "driver_stdout.txt").write_text(run.stdout or "", encoding="utf-8")
+            (folder / "driver_stderr.txt").write_text(run.stderr or "", encoding="utf-8")
+            (folder / "driver_exit_code.txt").write_text(str(run.returncode), encoding="utf-8")
+        if Path(shots).is_dir():
+            for png in sorted(Path(shots).glob("*.png")):
+                shutil.copy2(png, folder / png.name)
+        raise
+
+
 def test_browser_widening_summary_is_outcome_first(tmp_path) -> None:
     """In a real browser (``tests/e2e/drive_widening.mjs``) on a project widened when its review started:
     the panel states the outcome from the logged numbers (risky cutouts before -> after, reduction,
@@ -524,15 +673,16 @@ def test_browser_widening_summary_is_outcome_first(tmp_path) -> None:
         shots = ROOT / "artifacts" / "widening_summary_v1"
         run = subprocess.run(["node", str(ROOT / "tests" / "e2e" / "drive_widening.mjs"), client.base + "/", str(browser), "-",
                               str(shots), name], capture_output=True, text=True, encoding="utf-8", timeout=900)
-        lines = [line for line in run.stdout.splitlines() if line.startswith("{")]
-        assert lines, run.stderr[-3000:]
-        r = json.loads(lines[-1])
-        (shots / "drive_result.json").write_text(json.dumps(r, indent=1), encoding="utf-8")
-        assert r["ok"], r.get("error", "") + "\nconsole: " + str(r.get("console_errors")) + "\n" + run.stderr[-3000:]
-        assert r["console_errors"] == []
-        check_widening_summary(r, draft)
-        assert r["after_undo"]["headline"] in ("Not run", "Off") and r["after_undo"]["run"]
-        assert client.state(name)["draft"]["edits"] == []
+        with _evidence_on_failure("summary", shots, run):
+            lines = [line for line in run.stdout.splitlines() if line.startswith("{")]
+            assert lines, run.stderr[-3000:]
+            r = json.loads(lines[-1])
+            (shots / "drive_result.json").write_text(json.dumps(r, indent=1), encoding="utf-8")
+            assert r["ok"], r.get("error", "") + "\nconsole: " + str(r.get("console_errors")) + "\n" + run.stderr[-3000:]
+            assert r["console_errors"] == []
+            check_widening_summary(r, draft)
+            assert r["after_undo"]["headline"] in ("Not run", "Off") and r["after_undo"]["run"]
+            assert client.state(name)["draft"]["edits"] == []
     finally:
         server.shutdown()
         server.server_close()
@@ -559,23 +709,24 @@ def test_browser_revert_before_widening_asks_first(tmp_path) -> None:
         shots = tmp_path / "shots"
         run = subprocess.run(["node", str(ROOT / "tests" / "e2e" / "drive_widening.mjs"), client.base + "/", str(browser), "-",
                               str(shots), name, "revert"], capture_output=True, text=True, encoding="utf-8", timeout=900)
-        lines = [line for line in run.stdout.splitlines() if line.startswith("{")]
-        assert lines, run.stderr[-3000:]
-        r = json.loads(lines[-1])
-        assert r["ok"], r.get("error", "") + "\n" + run.stderr[-3000:]
-        assert r["console_errors"] == []
-        v = r["revert"]
-        assert v["label"] == "Revert to before widening" and v["edits_before"] == 2
-        # Cancel: one confirm dialog naming what is deleted; nothing sent, both edits kept.
-        assert [d["type"] for d in v["cancel"]["dialogs"]] == ["confirm"]
-        message = v["cancel"]["dialogs"][0]["message"]
-        assert "widening (edit #1)" in message and "1 layer edit made after it (edit #2)" in message
-        assert "cannot be restored with Undo" in message
-        assert v["cancel"]["history"] == 2 and v["cancel"]["api_edits"] == 2 and not v["cancel"]["busy"]
-        # OK: reverted to the planned layers.
-        assert v["accept"]["dialogs"] == 2 and v["accept"]["history"] == 0
-        assert v["accept"]["headline"] in ("Not run", "Off")
-        assert client.state(name)["draft"]["edits"] == []
+        with _evidence_on_failure("revert", shots, run):
+            lines = [line for line in run.stdout.splitlines() if line.startswith("{")]
+            assert lines, run.stderr[-3000:]
+            r = json.loads(lines[-1])
+            assert r["ok"], r.get("error", "") + "\n" + run.stderr[-3000:]
+            assert r["console_errors"] == []
+            v = r["revert"]
+            assert v["label"] == "Revert to before widening" and v["edits_before"] == 2
+            # Cancel: one confirm dialog naming what is deleted; nothing sent, both edits kept.
+            assert [d["type"] for d in v["cancel"]["dialogs"]] == ["confirm"]
+            message = v["cancel"]["dialogs"][0]["message"]
+            assert "widening (edit #1)" in message and "1 layer edit made after it (edit #2)" in message
+            assert "cannot be restored with Undo" in message
+            assert v["cancel"]["history"] == 2 and v["cancel"]["api_edits"] == 2 and not v["cancel"]["busy"]
+            # OK: reverted to the planned layers.
+            assert v["accept"]["dialogs"] == 2 and v["accept"]["history"] == 0
+            assert v["accept"]["headline"] in ("Not run", "Off")
+            assert client.state(name)["draft"]["edits"] == []
     finally:
         server.shutdown()
         server.server_close()

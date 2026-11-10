@@ -4,7 +4,7 @@ This automates the preprocessing that was done by hand for the accepted van_gogh
 reference (technical PDF ch. 3), using the same functions unchanged:
 
     fullres_flatten.extract_palette   (k-means in CIELAB on non-edge pixels)
-    resize into the square artwork grid, aspect preserved   (cv2.INTER_AREA)
+    resize into the artwork grid (square or rectangular), aspect preserved   (cv2.INTER_AREA)
     fullres_flatten.snap_to_palette   (bilateral, nearest Lab, majority, fragment merge)
     pad with a frame color that is solid on every sheet and never visible
 
@@ -100,18 +100,23 @@ def choose_frame_color(palette: np.ndarray) -> tuple[int, int, int]:
     return tuple(int(v) for v in best)
 
 
-def fit_into_grid(rgb: np.ndarray, opaque: np.ndarray | None, side: int) -> tuple[np.ndarray, np.ndarray, dict[str, Any]]:
-    """Resize so the longer side equals ``side`` (aspect kept) and centre it."""
+def fit_into_grid(rgb: np.ndarray, opaque: np.ndarray | None,
+                  side: int | tuple[int, int]) -> tuple[np.ndarray, np.ndarray, dict[str, Any]]:
+    """Resize to fit the grid (``side`` x ``side``, or ``(rows, columns)``), aspect kept, and centre it.
 
+    The image is scaled uniformly (never stretched or cropped); the rest of the grid is padding."""
+
+    rows, cols = (side, side) if isinstance(side, int) else side
     height, width = rgb.shape[:2]
-    factor = side / max(height, width)
+    factor = side / max(height, width) if isinstance(side, int) else min(cols / width, rows / height)
     new_w, new_h = max(1, round(width * factor)), max(1, round(height * factor))
+    new_w, new_h = min(new_w, cols), min(new_h, rows)
     interpolation = cv2.INTER_AREA if factor < 1 else cv2.INTER_CUBIC
     resized = cv2.resize(rgb, (new_w, new_h), interpolation=interpolation)
-    x0, y0 = (side - new_w) // 2, (side - new_h) // 2
-    canvas = np.zeros((side, side, 3), np.uint8)
+    x0, y0 = (cols - new_w) // 2, (rows - new_h) // 2
+    canvas = np.zeros((rows, cols, 3), np.uint8)
     canvas[y0 : y0 + new_h, x0 : x0 + new_w] = resized
-    inside = np.zeros((side, side), bool)
+    inside = np.zeros((rows, cols), bool)
     if opaque is None:
         inside[y0 : y0 + new_h, x0 : x0 + new_w] = True
     else:
@@ -534,19 +539,20 @@ def prepare_target(
     rgb: np.ndarray, opaque: np.ndarray | None, grid: StackGrid, config: IntakeConfig = IntakeConfig(),
     decisions: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Build the exact-palette square target and measure what the snapping did.
+    """Build the exact-palette target on the grid's artwork area and measure what the snapping did.
 
     Details that the default snapping would recolor or erase are reported (``details``) and
     resolved by ``decisions`` (``{detail id: {"action": ..., "color": ...}}``) or the default.
     """
 
-    side = grid.poc_config().analysis_pixels
+    shape = grid.poc_config().analysis_shape  # (rows, columns)
+    side = shape[1]
     mm_per_pixel = grid.artwork_mm / side
     if opaque is not None:
         if not opaque.any():
             raise StackError("the image is fully transparent")
         rgb = _fill_transparent(rgb, opaque)
-    canvas, inside, placement = fit_into_grid(rgb, opaque, side)
+    canvas, inside, placement = fit_into_grid(rgb, opaque, side if grid.square else shape)
     artwork_mm2 = placement["placed_px"][0] * placement["placed_px"][1] * mm_per_pixel**2
     min_share = config.min_color_area_mm2 / artwork_mm2
     cv2.setRNGSeed(config.seed)
@@ -560,11 +566,11 @@ def prepare_target(
     # The same smoothing and nearest-color step as ``snap_to_palette``, before its cleanup filters.
     smooth = cv2.bilateralFilter(canvas, flatten.bilateral_diameter, flatten.bilateral_sigma_color, flatten.bilateral_sigma_space)
     smooth_lab = _lab(smooth)
-    smooth_labels = _nearest_palette(smooth_lab, _lab(palette))[0].reshape(side, side)
+    smooth_labels = _nearest_palette(smooth_lab, _lab(palette))[0].reshape(shape)
     snapped_labels = default_labels
-    cleaned = np.zeros((side, side), bool)
+    cleaned = np.zeros(shape, bool)
     if config.clean_speckles:
-        default_labels, cleaned = merge_undrawn_boundaries(default_labels, inside, smooth_lab.reshape(side, side, 3),
+        default_labels, cleaned = merge_undrawn_boundaries(default_labels, inside, smooth_lab.reshape(*shape, 3),
                                                            palette, config)
     details = detect_details(canvas, inside, palette, smooth_labels, default_labels, smooth, mm_per_pixel, config,
                              cleaned)
@@ -578,7 +584,7 @@ def prepare_target(
         plain_labels, plain_palette = apply_detail_decisions(
             snapped_labels, smooth, default_palette, plain, {k: v for k, v in (decisions or {}).items() if k in known},
             config.merge_delta)
-        before_cleanup = np.empty((side, side, 3), np.uint8)
+        before_cleanup = np.empty((*shape, 3), np.uint8)
         before_cleanup[:] = choose_frame_color(plain_palette)
         before_cleanup[inside] = plain_palette[plain_labels[inside]]
 
@@ -591,13 +597,13 @@ def prepare_target(
     gradient = np.hypot(cv2.Sobel(gray, cv2.CV_32F, 1, 0), cv2.Sobel(gray, cv2.CV_32F, 0, 1))
     interior = cv2.erode((gradient < 40).astype(np.uint8), np.ones((5, 5), np.uint8)).astype(bool)[inside]
 
-    unmatched = np.zeros((side, side), bool)
+    unmatched = np.zeros(shape, bool)
     unmatched[inside] = _blend_distance(canvas_lab, palette_lab) > config.flat_residual_delta
     count, components = cv2.connectedComponents(unmatched.astype(np.uint8), connectivity=8)
     unmatched_sizes = np.bincount(components.ravel())[1:] * mm_per_pixel**2
     large_unmatched = unmatched_sizes[unmatched_sizes >= config.unmatched_min_area_mm2]
 
-    target = np.empty((side, side, 3), np.uint8)
+    target = np.empty((*shape, 3), np.uint8)
     target[:] = frame_rgb
     target[inside] = palette[labels[inside]]
 
@@ -649,7 +655,7 @@ def prepare_target(
         "measurements": {
             "intake_config": asdict(config),
             "flatten_config": asdict(flatten),
-            "artwork_grid_px": side,
+            "artwork_grid_px": side if grid.square else [shape[1], shape[0]],  # rectangular: [width, height]
             "artwork_mm_per_pixel": mm_per_pixel,
             "placement": placement,
             "artwork_size_mm": [round(v * mm_per_pixel, 2) for v in placement["placed_px"]],

@@ -244,7 +244,10 @@ try {
   results.ok = true;
 } catch (error) {
   results.ok = error === "done";  // "done": the revert-mode drive ends early
-  if (!results.ok) results.error = String(error.stack || error);
+  if (!results.ok) {
+    results.error = String(error.stack || error);
+    try { await shot("error_state"); results.error_screenshot = "error_state.png"; } catch {}  // evidence only
+  }
   results.console_errors = consoleErrors;
 }
 

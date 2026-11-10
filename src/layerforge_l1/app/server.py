@@ -54,6 +54,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 from .. import __version__
 from ..core.bambu3mf import environment as bambu_environment
 from ..core.editing import EDIT_OPS
+from ..core.model import read_bytes
 from .jobs import JobConflict, JobRunner, describe_error
 from .workspace import (MAX_UPLOAD_BYTES, PHYSICAL_STATUS, SCALES, AppError, Workspace, check_detail_decisions,
                         process_presets)
@@ -120,7 +121,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _file(self, path: Path) -> None:
         kind = TYPES.get(path.suffix.lower()) or mimetypes.guess_type(path.name)[0] or "application/octet-stream"
-        self._send(200, path.read_bytes(), kind)
+        self._send(200, read_bytes(path), kind)  # a review file may be replaced while it is served
 
     def _body(self, limit: int = MAX_JSON_BYTES) -> bytes:
         length = int(self.headers.get("Content-Length") or 0)
@@ -277,7 +278,7 @@ class Handler(BaseHTTPRequestHandler):
             job = app.submit("resize_search", name, partial(ws.resize_search, name))
         elif action == "resize" and len(parts) == 5 and parts[4] == "preview":
             _, _, analysis = ws.current_analysis(name)
-            size = ws.check_size(body.get("size_mm"), analysis)
+            size = ws.check_size(body.get("width_mm", body.get("size_mm")), analysis, body.get("height_mm"))
             job = app.submit("resize_preview", name, partial(ws.resize_preview, name, size))
         elif action == "resize" and len(parts) == 5 and parts[4] == "retry":
             args = (body.get("preview_id"), body.get("approve_size"), body.get("approve_changes"))

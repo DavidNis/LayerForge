@@ -182,8 +182,10 @@ try {
   // 3b. a 0.6 mm slot in the front sheet (a visible change -> DRAFT_INVALID), shown after a reload
   const slot = await apiEdit({ op: "subtract", sheet: frontSheet, shape: { type: "bar", from_mm: [40, 40], to_mm: [100, 40], width_mm: 0.6 }, precision: "vector" });
   results.slot_job = slot.status;
+  // Readiness of the reloaded page, not the old one: the marker only exists on the page before the reload.
+  await evaluate("window.__beforeReload = true");
   await send("Page.reload");
-  await waitFor(`document.querySelectorAll('[data-testid="layer-row"]').length > 1 && ${bodyHas("Edit #1")} && ${idle}`, "slot shown after reload", 120000);
+  await waitFor(`!window.__beforeReload && document.querySelectorAll('[data-testid="layer-row"]').length > 1 && ${bodyHas("Edit #1")} && ${idle}`, "slot shown after reload", 120000);
   results.after_slot = {
     validation: await text('[data-testid="validation-panel"] h3'),
     change: await text('[data-testid="change-panel"] h3'),
@@ -234,8 +236,9 @@ try {
   await clickSel('[data-testid="history-panel"] > summary');  // Verify lives in the edit history
   await clickSel('[data-action="verify"]');
   await waitFor(`${bodyHas("reproduces the saved geometry exactly")} && ${idle}`, "verify replay", 180000);
+  await evaluate("window.__beforeReload = true");
   await send("Page.reload");
-  await waitFor(`document.querySelectorAll('[data-testid="layer-row"]').length > 1`, "editor after reload", 60000);
+  await waitFor(`!window.__beforeReload && document.querySelectorAll('[data-testid="layer-row"]').length > 1`, "editor after reload", 60000);
   results.history_after_reload = await evaluate(`document.querySelectorAll(".history li").length`);
   results.rim_after_reload = (await evaluate(rimRows)) === results.layer_rows;
   await shot("06_review_after_reload");

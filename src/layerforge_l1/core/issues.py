@@ -83,7 +83,7 @@ def mask_outline(mask: np.ndarray, grid: StackGrid) -> tuple[list, list[float], 
     from shapely.ops import unary_union
 
     rows, cols = np.nonzero(mask)
-    mm, n = grid.mm_per_pixel, grid.outer_pixels
+    mm, n = grid.mm_per_pixel, grid.rows
     bbox = [round(cols.min() * mm, 6), round((n - rows.max() - 1) * mm, 6),
             round((cols.max() + 1) * mm, 6), round((n - rows.min()) * mm, 6)]
     r0, r1, c0, c1 = rows.min(), rows.max() + 1, cols.min(), cols.max() + 1
@@ -266,7 +266,7 @@ def fdm_issues(report: dict[str, Any], source: str = "fdm_estimate") -> tuple[li
 
 # -- proposal (artwork level) ----------------------------------------------------------------------
 def embed_artwork(mask: np.ndarray, grid: StackGrid) -> np.ndarray:
-    full = np.zeros((grid.outer_pixels,) * 2, bool)
+    full = np.zeros(grid.shape, bool)
     p = grid.perimeter_pixels
     full[p:p + mask.shape[0], p:p + mask.shape[1]] = mask
     return full
@@ -320,7 +320,7 @@ def intake_detail_issues(details: list[dict[str, Any]], decisions: dict[str, Any
     These are artwork/intake findings, not sheet defects.  Intake saves each detail's bounding box
     (artwork pixels) and a crop image, not its pixel mask, so the outline is that box (stated)."""
 
-    mm, p, n = grid.mm_per_pixel, grid.perimeter_pixels, grid.outer_pixels
+    mm, p, n = grid.mm_per_pixel, grid.perimeter_pixels, grid.rows
     issues = []
     for d in details:
         r0, c0, r1, c1 = d["bbox_px"]
@@ -346,14 +346,15 @@ def intake_detail_issues(details: list[dict[str, Any]], decisions: dict[str, Any
 def artwork_box(bbox_mm: list[float], grid: StackGrid) -> list[int]:
     """[row0, col0, row1, col1] (end exclusive) of a sheet-mm box on the artwork grid."""
 
-    mm, n, p = grid.mm_per_pixel, grid.outer_pixels, grid.perimeter_pixels
+    mm, n, p = grid.mm_per_pixel, grid.rows, grid.perimeter_pixels
     x0, y0, x1, y1 = bbox_mm
     eps = 1e-6
     c0, c1 = int(np.floor(x0 / mm + eps)) - p, int(np.ceil(x1 / mm - eps)) - p
     r0, r1 = n - int(np.ceil(y1 / mm - eps)) - p, n - int(np.floor(y0 / mm + eps)) - p
-    a = grid.artwork_pixels
+    a, b = grid.artwork_pixels, grid.artwork_rows
     clamp = lambda v: max(0, min(a, v))  # noqa: E731
-    return [clamp(r0), clamp(c0), max(clamp(r1), clamp(r0) + 1), max(clamp(c1), clamp(c0) + 1)]
+    clamp_row = lambda v: max(0, min(b, v))  # noqa: E731
+    return [clamp_row(r0), clamp(c0), max(clamp_row(r1), clamp_row(r0) + 1), max(clamp(c1), clamp(c0) + 1)]
 
 
 def number(issues: list[dict[str, Any]], grid: StackGrid) -> list[dict[str, Any]]:

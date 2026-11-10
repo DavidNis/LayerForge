@@ -58,10 +58,13 @@ class PlanningConfig:
     # Only when the first closure is infeasible: widen the local refinement by this many
     # neighbor rings (-1: whole artwork) to compare sheets and seams; 0 = minimal refinement.
     refinement_extra_rings: int = 0
+    # Outer sheet height (y) when it differs from the width ``outer_sheet_mm`` (x); None: a square sheet.
+    outer_sheet_height_mm: float | None = None
 
     def reveal_config(self, frame_label: int | None) -> RevealConfig:
         return RevealConfig(
             outer_sheet_mm=self.outer_sheet_mm,
+            outer_sheet_height_mm=self.outer_sheet_height_mm,
             scale=self.scale,
             split_regions=True,
             beam_width=self.beam_width,
@@ -72,14 +75,20 @@ class PlanningConfig:
         )
 
 
+def _without_square_height(config: dict[str, Any]) -> dict[str, Any]:
+    if config.get("outer_sheet_height_mm") is None:
+        config.pop("outer_sheet_height_mm", None)
+    return config
+
+
 def plan_stack(
     target_rgb: np.ndarray, config: PlanningConfig = PlanningConfig(), name: str = "stack"
 ) -> tuple[SheetStack, dict[str, Any]]:
     """Plan physical sheets for an exact flat-color target image.
 
-    ``target_rgb`` must be a square uint8 RGB image whose side divides the
-    planner's artwork grid (``512 * scale`` px); every distinct RGB triplet is a
-    palette color.  Raises ``PlanningError`` (with ``report``) when closure is
+    ``target_rgb`` must be a uint8 RGB image that divides the planner's artwork
+    grid by the same factor in both axes (square sheets: ``512 * scale`` px; see
+    ``model.check_target_shape``); every distinct RGB triplet is a palette color.  Raises ``PlanningError`` (with ``report``) when closure is
     infeasible or the bounded beam does not cover every cell.
     """
 
@@ -88,11 +97,14 @@ def plan_stack(
         raise StackError(f"target must be uint8 RGB, got {target_rgb.dtype} {target_rgb.shape}")
     if config.beam_score not in ("area", "colors"):
         raise StackError(f"beam_score must be 'area' or 'colors', got {config.beam_score!r}")
-    grid = StackGrid.for_planner(config.outer_sheet_mm, config.scale)
-    analysis = grid.poc_config().analysis_pixels
+    grid = StackGrid.for_planner(config.outer_sheet_mm, config.scale, config.outer_sheet_height_mm)
+    rows, analysis = grid.poc_config().analysis_shape
     height, width = target_rgb.shape[:2]
-    if height != width or analysis % height:
+    if grid.square and (height != width or analysis % height):
         raise StackError(f"target must be square with a side dividing {analysis} px, got {width}x{height}")
+    if not grid.square and (analysis % width or rows * width != analysis * height):
+        raise StackError(f"target must divide the {analysis} x {rows} px artwork grid by the same factor in both "
+                         f"axes, got {width}x{height}")
     if len(np.unique(target_rgb.reshape(-1, 3), axis=0)) > 255:
         raise StackError("target has more than 255 exact colors; flatten it to a palette first")
 
@@ -109,8 +121,9 @@ def plan_stack(
     planner = RevealPlanner(labels, reveal_config)
     report: dict[str, Any] = {
         "planner": PLANNER_ID,
-        "planning_config": asdict(config),
-        "reveal_config": dict(reveal_config.__dict__),
+        # (the height only for a rectangular sheet: square reports are unchanged)
+        "planning_config": _without_square_height(asdict(config)),
+        "reveal_config": _without_square_height(dict(reveal_config.__dict__)),
         "palette": hexes,
         "cells": planner.cell_count,
     }
