@@ -1,9 +1,9 @@
 """Desktop launcher for the L4 application (the packaged ``LayerForge.exe``).
 
-Double-clicking the executable opens a small control window, starts the same
-local server ``python -m layerforge_l1 app`` runs, and opens the UI in the
-default browser.  The window shows the address and the projects folder; closing
-it (or "Quit") stops the server cleanly.
+Double-clicking the executable starts the same local server ``python -m layerforge_l1 app``
+runs, in the background (no window), and opens the UI in the default browser.  Closing the
+browser leaves it running; "Stop LayerForge" at the bottom of the page stops it cleanly
+(``POST /api/stop``).  Only a startup failure shows a window (an error message).
 
 Where files go (never inside the application folder):
 
@@ -214,74 +214,26 @@ class Runner:
             print("[launcher] server stopped", flush=True)
 
 
-def open_folder(path: Path) -> None:
-    if sys.platform == "win32":
-        os.startfile(path)  # noqa: S606 - the user's own projects folder
-    else:
-        webbrowser.open(path.as_uri())
+def run_background(runner: Runner, lock: InstanceLock, open_browser: bool) -> int:
+    """No window: start the server, open the browser, serve until the page's "Stop LayerForge".
 
+    A startup failure raises (``main`` shows it in a message box).  Closing the browser does not stop the
+    server; launching again only reopens the browser on it (``InstanceLock``)."""
 
-def run_window(runner: Runner, lock: InstanceLock, log: Path, open_browser: bool) -> int:
-    import tkinter as tk
-    from tkinter import messagebox, ttk
-
-    root = tk.Tk()
-    root.title(APP_NAME)
-    root.resizable(False, False)
-    frame = ttk.Frame(root, padding=16)
-    frame.grid()
-    ttk.Label(frame, text=APP_NAME, font=("Segoe UI", 14, "bold")).grid(row=0, column=0, columnspan=3, sticky="w")
-    status = tk.StringVar(value="Starting the local server…")
-    ttk.Label(frame, textvariable=status, wraplength=460).grid(row=1, column=0, columnspan=3, sticky="w", pady=(6, 2))
-    ttk.Label(frame, text=f"Projects folder: {runner.workspace}", wraplength=460,
-              foreground="#555").grid(row=2, column=0, columnspan=3, sticky="w")
-    ttk.Label(frame, text="Closing this window stops LayerForge.", foreground="#555").grid(
-        row=3, column=0, columnspan=3, sticky="w", pady=(0, 10))
-    open_button = ttk.Button(frame, text="Open LayerForge", state="disabled", command=lambda: webbrowser.open(runner.url))
-    open_button.grid(row=4, column=0, sticky="w")
-    ttk.Button(frame, text="Projects folder", command=lambda: open_folder(runner.workspace)).grid(row=4, column=1, padx=8)
-    outcome: dict[str, Any] = {}
-
-    def quit_app() -> None:
-        running = runner.busy()
-        if running and not messagebox.askyesno(
-                APP_NAME, "LayerForge is still working on:\n  " + "\n  ".join(running)
-                + "\n\nQuitting stops it; that step's result is not saved (your project and earlier "
-                  "steps are kept). Quit anyway?", icon="warning"):
-            return
-        status.set("Stopping…")
-        root.update_idletasks()
-        root.destroy()
-
-    ttk.Button(frame, text="Quit", command=quit_app).grid(row=4, column=2, sticky="e")
-    root.protocol("WM_DELETE_WINDOW", quit_app)
-
-    def start_in_background() -> None:
-        try:
-            outcome["url"] = runner.start()
-        except BaseException as error:  # noqa: BLE001 - reported in the window
-            traceback.print_exc()
-            outcome["error"] = error
-
-    def poll() -> None:
-        if "url" in outcome:
-            lock.publish(outcome["url"])
-            status.set(f"Running at {outcome['url']}")
-            open_button.configure(state="normal")
-            if open_browser:
-                webbrowser.open(outcome["url"])
-        elif "error" in outcome:
-            messagebox.showerror(APP_NAME, f"LayerForge could not start.\n\n{_message(outcome['error'])}\n\nLog: {log}")
-            outcome["failed"] = True
-            root.destroy()
-        else:
-            root.after(150, poll)
-
-    threading.Thread(target=start_in_background, name="layerforge-start", daemon=True).start()
-    root.after(150, poll)
-    root.mainloop()
-    runner.stop()
-    return EXIT_STARTUP_ERROR if outcome.get("failed") else 0
+    stop = threading.Event()
+    url = runner.start()
+    runner.server.app.on_stop = stop.set
+    lock.publish(url)
+    if open_browser:
+        webbrowser.open(url)
+    try:
+        while not stop.wait(0.5):
+            pass
+    except KeyboardInterrupt:
+        pass
+    finally:
+        runner.stop()
+    return 0
 
 
 def wait_for_stdin_close() -> None:
@@ -379,11 +331,11 @@ def main(argv: list[str] | None = None) -> int:
                     webbrowser.open(url)
                 return 0
             raise StartupError(f"LayerForge is already running for {workspace} but does not answer yet. "
-                               "Wait a moment and try again, or close the other LayerForge window.")
+                               "Wait a moment and try again.")
         runner = Runner(workspace, args.port, open_folders=not args.headless)
         if args.headless:
             return run_headless(runner, lock)
-        return run_window(runner, lock, log, not args.no_browser)
+        return run_background(runner, lock, not args.no_browser)
     except BaseException as error:  # noqa: BLE001 - every startup failure is shown, not swallowed
         if isinstance(error, (KeyboardInterrupt, SystemExit)):
             raise

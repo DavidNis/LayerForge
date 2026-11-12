@@ -537,15 +537,9 @@ def test_upscale_and_retry_after_a_failed_proposal(app, monkeypatch):
     assert state["proposal"]["planning_config"]["scale"] == 2 and state["proposal"]["planning_config"]["outer_sheet_mm"] == 150.0
     assert state["record"]["processing_scale"] == 2 and state["record"]["proposal_settings"]["scale"] == 1
     assert file_sha256(source) == source_sha  # the original image is untouched
-    attempt = state["upscale"]["attempts"][0]
-    assert attempt["status"] == "NEEDS_USER_DECISION" and attempt["scale"] == 1
-    assert attempt["replaced_by"] == {"upscale_factor": 2, "scale": 2, "status": "PROPOSAL_READY_FOR_REVIEW",
-                                      "approved_visible_changes": len(preview["changes"]), "preview_id": preview["preview_id"]}
-    archived = workspace / name / "attempts" / attempt["id"]
-    old = json.loads((archived / "proposal" / "proposal.json").read_text(encoding="utf-8"))
-    assert "simulated" in old["candidates"][0]["reason"]  # the failure diagnostics are kept
-    assert (archived / "upscale_preview" / "preview.json").is_file()
-    assert client.ok("GET", attempt["images"]["target"])[:4] == b"\x89PNG"
+    # The failed proposal was never accepted: it is discarded, no attempt accumulates.
+    assert state["upscale"]["attempts"] == [] and not (workspace / name / "attempts").exists()
+    assert not (workspace / name / "replaced.tmp").exists()
     assert not state["upscale"]["available"] and not (workspace / name / "upscale").exists()
     assert client.call("POST", f"{project}/preview", {"factor": 2})[0] == 400  # only after a failure
     # The retried proposal continues through the unchanged L2 workflow at the new resolution.
@@ -619,11 +613,7 @@ def test_physical_resize_after_printability_findings(app):
     assert check["from_mm"] == 60.0 and check["to_mm"] == size and "after" in check
     assert check["after"]["counts"]["UNSUPPORTED"] + check["after"]["counts"]["RISK"] < \
         check["before"]["counts"]["UNSUPPORTED"] + check["before"]["counts"]["RISK"]
-    attempt = state["upscale"]["attempts"][0]
-    assert attempt["sheet_mm"] == 60.0 and attempt["replaced_by"]["kind"] == "physical_resize"
-    archived = workspace / name / "attempts" / attempt["id"]
-    assert (archived / "proposal" / "proposal.json").is_file() and (archived / "resize" / "analysis.json").is_file()
-    assert json.loads((archived / "proposal" / "proposal.json").read_text(encoding="utf-8"))["planning_config"]["outer_sheet_mm"] == 60.0
+    assert state["upscale"]["attempts"] == [] and not (workspace / name / "attempts").exists()  # nothing accepted, nothing kept
     # The new proposal continues through the unchanged L2 workflow.
     client.run(name, "review", {"candidate": state["proposal"]["selected"]})
     assert client.state(name)["draft"]["status"]["status"] == "REVIEWED_VALID"
@@ -634,7 +624,8 @@ def test_physical_resize_width_and_height_in_the_same_project(app):
     200 x 200 -> 200 x 150 -> 150 x 250 -> 200 x 150 -> 200 x 200 -> 100 x 200 mm.  Each size is re-planned
     from the artwork (other proportions: the source fitted again, never stretched); the sheets are exactly
     the requested outer size; the current size is offered for editing, also after a restart; each side is
-    at least 100 mm and the sheet must fit the printer as placed or turned; reviews are archived, kits kept."""
+    at least 100 mm and the sheet must fit the printer as placed or turned; replaced plans are discarded (none
+    was accepted), kits kept."""
 
     import numpy as np
 
@@ -654,7 +645,6 @@ def test_physical_resize_width_and_height_in_the_same_project(app):
     back = client.state(name)["draft"]["sheets"][0]["id"]
     client.run(name, "edit", {"op": {"op": "rim", "sheet": back, "enabled": True, "width_mm": 6.0, "total_height_mm": 2.4}})
     kit = client.run(name, "kits", {})["result"]["kit"]
-    review_sha = file_sha256(project / "review" / "sheet_stack.json")
     source = SAILBOAT.read_bytes()
     from PIL import Image
     import io
@@ -696,9 +686,7 @@ def test_physical_resize_width_and_height_in_the_same_project(app):
 
     state = resize(200.0, 150.0)
     assert [p.parent.name for p in workspace.glob("*/project.json")] == [name]  # the same project, no copy
-    first = state["upscale"]["attempts"][0]
-    assert first["stage"] == "review" and first["sheet_mm"] == 200.0
-    assert file_sha256(project / "attempts" / first["id"] / "review" / "sheet_stack.json") == review_sha
+    assert state["upscale"]["attempts"] == [] and not (project / "attempts").exists()
     assert [k["id"] for k in state["kits"]] == [kit] and (project / "kits" / kit).is_dir()
     resize(150.0, 250.0)
     # CAD at 150 x 250: every sheet exported at exactly that outer size and read back against its masks.
@@ -710,8 +698,7 @@ def test_physical_resize_width_and_height_in_the_same_project(app):
     resize(200.0, 150.0)
     resize(200.0, 200.0)
     state = resize(100.0, 200.0)
-    sizes = [a.get("sheet_size_mm") or [a["sheet_mm"]] * 2 for a in state["upscale"]["attempts"]]
-    assert sizes == [[200.0, 200.0], [200.0, 150.0], [150.0, 250.0], [200.0, 150.0], [200.0, 200.0]]
+    assert state["upscale"]["attempts"] == [] and not (project / "attempts").exists()  # five re-plans, none kept
     assert [k["id"] for k in state["kits"]] == [kit]
     # A sheet that fits only turned 90 degrees is allowed (the user turns it in the slicer).
     client.run(name, "resize/analyze", bed)
@@ -885,11 +872,12 @@ def test_trial_planning_finds_a_size_for_a_failed_proposal(app, monkeypatch):
     client.run(name, "resize/retry", {"preview_id": preview["preview_id"], "approve_size": True, "approve_changes": True})
     state = client.state(name)
     assert state["proposal"]["status"] == "PROPOSAL_READY_FOR_REVIEW" and state["record"]["sheet_outer_mm"] == size
-    assert state["upscale"]["attempts"][0]["status"] == "NEEDS_USER_DECISION"
+    assert state["upscale"]["attempts"] == []  # the failed proposal is discarded
 
 
 def test_resize_from_review_keeps_the_original_and_locates_remaining_issues(app):
-    """Resize from an open review: printer limit, approved artwork only, archive, remaining findings located.
+    """Resize from an open review: printer limit, approved artwork only, the accepted original kept, remaining
+    findings located.
 
     The process is a deliberately coarse test process (2.0 mm nozzle, 104 mm bed) so that UNSUPPORTED
     findings remain after the largest fitting resize; it is not a real printer profile.
@@ -908,6 +896,7 @@ def test_resize_from_review_keeps_the_original_and_locates_remaining_issues(app)
     client.run(name, "review", {"candidate": candidate})
     review_sha = file_sha256(workspace / name / "review" / "sheet_stack.json")
     source_sha = file_sha256(workspace / name / state["record"]["source"]["file"])
+    client.run(name, "plan/accept")  # the original is kept by accepting it
     process = {"name": "test_coarse_2.0mm", "source": "test only", "nozzle_diameter_mm": 2.0, "line_width_mm": 2.1,
                "layer_height_mm": 0.2, "first_layer_height_mm": 0.2, "min_opening_mm": 4.0, "min_positive_feature_mm": 4.2,
                "bed_x_mm": 104, "bed_y_mm": 130, "max_z_mm": 100, "filament_density_g_cm3": 1.24}
@@ -941,10 +930,10 @@ def test_resize_from_review_keeps_the_original_and_locates_remaining_issues(app)
     record = state["record"]
     assert record["sheet_outer_mm"] == 104.0 and record["proposal_settings"]["outer_mm"] == 60.0 and record["candidate"] is None
     assert "draft" not in state and file_sha256(workspace / name / state["record"]["source"]["file"]) == source_sha
-    attempt = state["upscale"]["attempts"][0]
-    archived = workspace / name / "attempts" / attempt["id"]
-    assert file_sha256(archived / "review" / "sheet_stack.json") == review_sha  # the original review is kept
-    assert attempt["stage"] == "review" and attempt["sheet_mm"] == 60.0
+    accepted = workspace / name / "attempts" / "accepted"
+    assert file_sha256(accepted / "review" / "sheet_stack.json") == review_sha  # the original review is kept
+    assert state["upscale"]["attempts"] == [] and [p.name for p in accepted.parent.iterdir()] == ["accepted"]
+    assert state["checkpoint"]["summary"]["sheet_size_mm"] == [60.0, 60.0] and not state["checkpoint"]["working_is_accepted"]
     check = state["resize"]["last_check"]
     assert check["artwork_matches_approved_preview"] and "estimate" in check["predicted_basis"]
     assert check["more_unsupported_than_predicted"] == max(0, check["after"]["counts"]["UNSUPPORTED"] - check["predicted"]["UNSUPPORTED"])

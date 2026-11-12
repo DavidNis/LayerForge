@@ -348,7 +348,7 @@ def test_curve_splits_the_sail_fill_one_part_export_blocked_reload_and_replan(ap
         server2.shutdown()
         server2.server_close()
     check = state["proposal"]["artwork_check"]
-    assert (workspace / name / "attempts" / check["archived_as"] / "review" / "sheet_stack.json").is_file()  # kept
+    assert "archived_as" not in check and not (workspace / name / "attempts").exists()  # replaced: nothing accepted
     assert not state["artwork"]["differs_from_planned"] and state["proposal"]["artwork_edits"]["region_recolors"] == 2
     assert np.array_equal(art.load_rgb(workspace / name / "proposal" / "intake" / "target.png"), filled)
     assert _files(workspace / name / "source") == source  # the uploaded image is never changed

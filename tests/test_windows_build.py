@@ -132,7 +132,7 @@ def test_packaged_artwork_recolor_browser(exe_app):
 
 def test_packaged_artwork_editor_curve_fill_restart_and_replan(exe_app):
     """Artwork editor in the frozen app over HTTP: a curve splits the sail, Fill one part, export blocked,
-    restart the exe (saved log verified), undo, re-apply, explicit re-plan keeps the earlier attempt."""
+    restart the exe (saved log verified), undo, re-apply, explicit re-plan replaces the plan."""
 
     import test_artwork_paint as paint
 

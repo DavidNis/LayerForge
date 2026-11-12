@@ -1269,3 +1269,17 @@ follow the light-blue body). Not user approved; no CAD exported.
   17 attempts (cause unknown; evidence capture added).  Five-project pipeline not run (not requested).
   Untested: Upscale & Retry / trial planning on a failed rectangular proposal; scale 4 rectangular.
   Physical print test: PENDING.
+
+- 2026-11-11 - Windows launcher without a window (D-V3-048). State: READY_FOR_USER_TEST; exe/zip rebuilt
+  (zip SHA-256 48D4B210...4BB0); committed with D-V3-049. Launcher tests 9 PASS; packaged tests 9 PASS one at a time;
+  rebuilt exe in normal mode: repeated launch, browser closed, stop from the page, restart PASS.
+
+- 2026-11-12 - One accepted plan as a rollback checkpoint (D-V3-049). State: READY_FOR_USER_TEST; committed
+  (this entry's commit, with D-V3-048); exe/zip rebuilt after it. `attempts/accepted` holds a verified copy of the working plan and its settings; Restore copies it
+  back without planning (journal, rollback on failure, crash recovery at start); re-plans discard the outgoing
+  working plan instead of adding attempt_NN; existing attempts untouched. Tests: test_plan_checkpoint 5 PASS;
+  test_l4_app, artwork recolor/session/paint/fit, candidate switch and launcher 89 PASS (expectations about new
+  attempt_NN folders updated); real-browser Accept / Restore / re-plan warnings: no console errors.
+  Timing on scratch copies of user projects (originals only read): turtle_on_leaf 170.5 MB accept 15.1 s, restore
+  8.4 s; Oscariko 29.6 MB 5.9 s / 3.3 s; chupa 7.3 MB 2.5 s / 1.7 s (mostly per-file open cost of the hash checks).
+  README_FIRST.txt and the (local) Hebrew GUI guide explain it. Physical print test: PENDING.

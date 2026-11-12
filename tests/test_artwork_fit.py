@@ -430,7 +430,7 @@ def test_fit_on_a_planned_project_blocks_export_until_replanned(app):
     client.run(name, "artwork/replan")
     after = json.loads((workspace / name / "proposal" / "proposal.json").read_text())
     assert after["status"] == "PROPOSAL_READY_FOR_REVIEW" and after["composition_ops"]
-    assert (workspace / name / "attempts" / "attempt_01_artwork" / "proposal" / "proposal.json").is_file()  # kept
+    assert not (workspace / name / "attempts").exists()  # the replaced plan is discarded (nothing was accepted)
     assert not client.state(name)["artwork"].get("differs_from_planned")
 
 

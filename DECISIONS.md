@@ -1379,3 +1379,41 @@ FDM thresholds remain generic assumptions until a print calibrates them).
   imports stay square (a rectangular sheet comes from Physical size); Upscale & Retry and trial planning on a failed
   rectangular proposal are untested; the resize panel's manual-correction tip still names sheet tools that Review
   layers no longer has (pre-existing text).
+
+## D-V3-048 | 2026-11-11 | Windows launcher without a window
+
+- USER_REQUIRED: double-clicking LayerForge.exe starts the local server in the background and opens the default
+  browser; no launcher window, tray or new window.  Only a startup failure shows a window (the existing message box).
+- DESIGN_CHOICE: the server keeps running when the browser closes; launching again reopens the browser on the
+  running copy (unchanged single-instance lock).  "Stop LayerForge" in the page footer stops it (`POST /api/stop`,
+  offered only when started by the launcher, refused from other origins by the existing check); running steps are
+  named and need a second confirmation, as the window's Quit did.  `--headless` (packaged tests) is unchanged.
+
+## D-V3-049 | 2026-11-12 | One accepted plan (rollback checkpoint); re-plans no longer add attempts
+
+- USER_REQUIRED: keep the last accepted plan beside the working plan; experiments (artwork edits, re-plans,
+  Physical size, Upscale & Retry) never write it; Restore brings it back without planning; accepting again
+  replaces it; rejected experiments do not accumulate.  No version history; minimal UI.
+- DESIGN_CHOICE, storage: one folder `attempts/accepted` (existing Earlier attempts storage) holding a copy of the
+  working plan's parts - `proposal/` (candidates, planned artwork and its edit log), `review/` (layer masks,
+  review edits, widening), `reviews/` (saved reviews of other candidates), `draft/`, `printability/`, `artwork/`,
+  `issue_reviews.json` - and `checkpoint.json` (plan settings: proposal settings, candidate, processing scale,
+  sheet width/height, detail choices; a fingerprint; size and SHA-256 of every copied file).  Source image, kits
+  and earlier attempts are never copied or touched.
+- DESIGN_CHOICE, accept: refused with unsaved artwork changes or when the artwork differs from the planned sheets,
+  and when the plan files disagree with the settings (size, scale, reviewed candidate); allowed with failing or
+  warning validation, whose status is shown; it never claims printability.  The copy is written to
+  `accepted.next`, verified file by file, then swapped in (the previous checkpoint is renamed aside and deleted
+  only after the swap).
+- DESIGN_CHOICE, restore: the checkpoint is verified (hashes) first, copied to `restore.next` and verified; a
+  journal (`restore.json`) records the working plan's settings; the working parts (and the size/upscale previews)
+  move aside, the copy moves in, the settings are restored, and the result must equal the accepted fingerprint.
+  Any failure puts the working plan back; a crash is undone when the app starts again.  The checkpoint is kept.
+- DESIGN_CHOICE, retention (user decision 1): a successful re-plan (artwork, Physical size, Upscale & Retry)
+  discards the outgoing working plan after the new one is in place, instead of archiving `attempt_NN`; the
+  planning, its staging and its failure handling are unchanged.  Existing `attempt_NN` folders and record entries
+  are left untouched and still listed (decision 2).  Before a re-plan the UI warns when the replaced sheets are not
+  the accepted plan and offers Accept (decision 4).
+- LIMITATION: the checkpoint is a full copy (0.5 MB for the sailboat; a proposal of 5-170 MB in the user's
+  projects is copied whole); the failed proposal's diagnostics are no longer kept after Upscale & Retry unless it
+  was accepted; re-running intake (no review yet) still replaces the proposal directly, as before.

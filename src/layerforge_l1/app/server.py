@@ -83,6 +83,8 @@ class App:
         self.jobs = JobRunner()
         # Only an interactive desktop session may open file-manager windows (not headless/tests).
         self.open_folders = open_folders
+        # Set by the desktop launcher (no window): "Stop LayerForge" on the page calls it (POST /api/stop).
+        self.on_stop: Callable[[], None] | None = None
 
     def submit(self, kind: str, project: str, work: Callable[[Callable[..., None]], Any]) -> dict[str, Any]:
         self.workspace.path(project)  # unknown project -> AppError before queueing
@@ -201,7 +203,7 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"version": __version__, "workspace": ws.root.as_posix(), "edit_ops": list(EDIT_OPS),
                         "scales": list(SCALES), "physical": PHYSICAL_STATUS, "process_presets": process_presets(),
                         "max_upload_mb": MAX_UPLOAD_BYTES // (1024 * 1024), "bambu": bambu_environment(),
-                        "can_open_folders": self.app.open_folders})
+                        "can_open_folders": self.app.open_folders, "can_stop": self.app.on_stop is not None})
         elif parts == ["api", "projects"]:
             self._json({"projects": ws.projects()})
         elif len(parts) == 3 and parts[:2] == ["api", "projects"]:
@@ -229,6 +231,18 @@ class Handler(BaseHTTPRequestHandler):
 
     def _post(self, parts: list[str], query: dict[str, list[str]]) -> None:
         ws, app = self.app.workspace, self.app
+        if parts == ["api", "stop"]:  # the page's "Stop LayerForge" (desktop launcher only)
+            if app.on_stop is None:
+                self._error(404, "stopping is only available when LayerForge was started with LayerForge.exe")
+                return
+            running = [f"{job.kind} ({job.project})" for job in app.jobs.running()]
+            if running and self._json_body().get("force") is not True:
+                self._json({"error": {"message": "LayerForge is still working on: " + ", ".join(running),
+                                      "running": running}}, 409)
+                return
+            self._json({"stopping": True, "running": running})  # answered before the server stops
+            threading.Thread(target=app.on_stop, name="layerforge-stop", daemon=True).start()
+            return
         if parts == ["api", "projects"]:
             settings = {k: v[0] for k, v in query.items()}
             filename = settings.pop("filename", "")
@@ -320,6 +334,12 @@ class Handler(BaseHTTPRequestHandler):
         elif action == "artwork" and len(parts) == 5 and parts[4] == "replan":
             ws.check_artwork_replan(name)  # nothing to plan, or a log that does not replay: refused now
             job = app.submit("artwork_replan", name, partial(ws.artwork_replan, name))
+        elif action == "plan" and len(parts) == 5 and parts[4] == "accept":
+            ws.check_accept(name)  # nothing planned, unsaved or inconsistent: refused now
+            job = app.submit("accept_plan", name, partial(ws.accept_plan, name))
+        elif action == "plan" and len(parts) == 5 and parts[4] == "restore":
+            ws.check_restore(name)  # no accepted plan, or nothing to restore: refused now
+            job = app.submit("restore_plan", name, partial(ws.restore_plan, name))
         elif action == "review" and len(parts) == 4:
             widen = ws.check_widening_choice(body.get("widen_openings"))
             job = app.submit("start_review", name, partial(ws.start_review, name, str(body.get("candidate", "")),

@@ -202,7 +202,8 @@ def test_session_through_the_server_save_reload_export_and_replan(app):
         client.run(name, "artwork/replan")  # only on the explicit request
         state = client.state(name)
         check = state["proposal"]["artwork_check"]
-        assert (workspace / name / "attempts" / check["archived_as"] / "review" / "sheet_stack.json").is_file()
+        assert "archived_as" not in check and not (workspace / name / "attempts").exists()  # replaced: nothing accepted
+        assert not (workspace / name / "replaced.tmp").exists()
         assert state["proposal"]["artwork_edits"]["region_recolors"] == 3 and not state["artwork"]["differs_from_planned"]
         assert np.array_equal(art.load_rgb(workspace / name / "proposal" / "intake" / "target.png"), committed)
         edits = json.loads((workspace / name / "proposal" / "artwork_edits" / "edits.json").read_text(encoding="utf-8"))

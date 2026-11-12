@@ -310,7 +310,7 @@ def test_recolor_before_planning_undo_eyedropper_reload_and_plan(app):
     assert art.rgb_sha256(planned) == edited_sha  # the planner got the edited artwork
     check = p["artwork_check"]
     assert check["before"]["sheet_count"] is None and check["after"]["sheet_count"] >= 1
-    assert check["after"]["palette_size"] == 5 and check["archived_as"] is None  # intake only: nothing to archive
+    assert check["after"]["palette_size"] == 5 and "archived_as" not in check
     assert (workspace / name / "proposal" / "artwork_edits" / "edits.json").is_file()
     assert not (workspace / name / "artwork").exists() and file_sha256(source) == source_sha
     stack_target = art.load_rgb(workspace / name / "proposal" / "candidates" / p["selected"] / "stack" / "target.png")
@@ -359,11 +359,7 @@ def test_failed_proposal_recovers_by_recoloring_and_replanning(app, monkeypatch)
     check = state["proposal"]["artwork_check"]
     assert check["before"]["status"] == "NEEDS_USER_DECISION" and check["before"]["palette_size"] == 5
     assert check["after"]["palette_size"] == 4 and check["after"]["sheet_count"] >= 1
-    attempt = state["upscale"]["attempts"][0]
-    assert attempt["id"] == check["archived_as"] == "attempt_01_artwork"
-    assert attempt["status"] == "NEEDS_USER_DECISION" and attempt["replaced_by"]["kind"] == "artwork_edit"
-    old = json.loads((workspace / name / "attempts" / attempt["id"] / "proposal" / "proposal.json").read_text(encoding="utf-8"))
-    assert "simulated" in old["candidates"][0]["reason"]  # the failed attempt's diagnostics are kept
+    assert state["upscale"]["attempts"] == [] and not (workspace / name / "attempts").exists()  # the failed plan is discarded
     assert file_sha256(workspace / name / state["record"]["source"]["file"]) == source_sha
     client.run(name, "review", {"candidate": state["proposal"]["selected"]})
     assert client.state(name)["draft"]["status"]["status"] == "REVIEWED_VALID"
@@ -378,6 +374,7 @@ def test_review_artwork_edit_blocks_export_until_replanned_or_undone(app):
     sheets_before = len(state["draft"]["sheets"])
     manifest_before = (workspace / name / "review" / "sheet_stack.json").read_bytes()
     assert state["artwork"]["stage"] == "review" and not state["artwork"]["differs_from_planned"]
+    client.run(name, "plan/accept")  # the reviewed plan is kept as the accepted plan
 
     # Sea is one connected region; a limit box recolors only its left part (one "leg").
     left = _recolor(client, name, SEA_LEFT, "#2E5FA8", box_px=[400, 0, 512, 256])
@@ -392,18 +389,21 @@ def test_review_artwork_edit_blocks_export_until_replanned_or_undone(app):
     # Validated export of the old stack is refused while the artwork differs.
     status, error = client.call("POST", f"/api/projects/{name}/kits", {})
     assert status == 400 and "planned" in error["error"]["message"]
+    status, error = client.call("POST", f"/api/projects/{name}/plan/accept", {})  # nor accepted
+    assert status == 400 and "after these sheets were planned" in error["error"]["message"]
     client.ok("POST", f"/api/projects/{name}/artwork/undo", {"keep": 0})
     assert not client.state(name)["artwork"]["differs_from_planned"]
 
     _recolor(client, name, SEA_LEFT, "#2E5FA8", box_px=[400, 0, 512, 256])
     client.run(name, "artwork/replan")
     state = client.state(name)
-    assert "draft" not in state and state["record"]["candidate"] is None  # the review is archived
+    assert "draft" not in state and state["record"]["candidate"] is None  # the review is replaced
     check = state["proposal"]["artwork_check"]
     assert check["before"]["stage"] == "review" and check["before"]["sheet_count"] == sheets_before
     assert check["after"]["palette_size"] == check["before"]["palette_size"] + 1
-    archive = workspace / name / "attempts" / check["archived_as"]
-    assert (archive / "review" / "sheet_stack.json").read_bytes() == manifest_before
+    accepted = workspace / name / "attempts" / "accepted"  # the accepted review is kept, nothing else
+    assert (accepted / "review" / "sheet_stack.json").read_bytes() == manifest_before
+    assert [p.name for p in (workspace / name / "attempts").iterdir()] == ["accepted"]
     assert not state["artwork"]["differs_from_planned"]
     status, error = client.call("POST", f"/api/projects/{name}/propose", {})
     assert status == 400 and "planned from artwork with your edits" in error["error"]["message"]
@@ -457,8 +457,7 @@ def test_physical_resize_keeps_region_recolors(app):
     log = json.loads((workspace / name / "proposal" / "artwork_edits" / "edits.json").read_text(encoding="utf-8"))
     assert len(log["edits"]) == 1 and not (workspace / name / "artwork").exists()
     assert state["resize"]["last_check"]["artwork_edits"]["kept_pixel_for_pixel"]
-    first = state["upscale"]["attempts"][0]
-    assert first["replaced_by"]["kind"] == "physical_resize" and first["sheet_mm"] == 60.0
+    assert state["upscale"]["attempts"] == [] and not (workspace / name / "attempts").exists()
     assert file_sha256(source) == source_sha
     assert not state["artwork"]["differs_from_planned"]
 
@@ -473,9 +472,8 @@ def test_physical_resize_keeps_region_recolors(app):
     client.run(name, "resize/retry", {"preview_id": preview["preview_id"], "approve_size": True})
     state = client.state(name)
     assert np.array_equal(art.load_rgb(workspace / name / "proposal" / "intake" / "target.png"), edited)
-    second = state["upscale"]["attempts"][1]
-    assert (workspace / name / "attempts" / second["id"] / "proposal" / "artwork_edits" / "edits.json").is_file()
-    assert (workspace / name / "proposal" / "artwork_edits" / "edits.json").is_file()
+    assert state["upscale"]["attempts"] == [] and not (workspace / name / "replaced.tmp").exists()
+    assert (workspace / name / "proposal" / "artwork_edits" / "edits.json").is_file()  # the history moves with the plan
 
 
 def test_multi_region_batch_recolor_through_the_server(app):

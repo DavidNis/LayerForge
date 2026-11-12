@@ -205,6 +205,10 @@ function afterJob(job) {
     if (pending && ui.state.draft) setTimeout(() => inspEditLayer(pending), 0);
   }
   if (job.kind === "artwork_replan") { setTab("proposal"); ui.art = freshArt(); ui.fit = freshFit(); ui.tips = freshTips(); }
+  if (job.kind === "restore_plan") {
+    setTab(ui.state.draft ? "review" : "proposal");
+    ui.art = freshArt(); ui.fit = freshFit(); ui.tips = freshTips(); ui.pending = null; ui.resizeApproved = {}; ui.resizeSize = null; ui.upscaleApproved = {};
+  }
   if (job.kind === "kit") { setTab("kit"); ui.kitBuildOpen = false; }
   if (job.kind === "printability") setTab("printability");
 }
@@ -220,7 +224,9 @@ function jobLabel(job) {
     upscale_retry: "Upscale & Retry (L1 proposal at the finer resolution)",
     start_review: "Opening the review of this candidate (a saved review is restored; a new one is widened if on)",
     widen: "Widening narrow cutouts into hidden material",
-    artwork_replan: "Planning sheets from the edited artwork (L1 proposal, validation, CAD check; previous attempt kept)",
+    artwork_replan: "Planning sheets from the edited artwork (L1 proposal, validation, CAD check)",
+    accept_plan: "Accepting this plan (copying and checking it)",
+    restore_plan: "Restoring the accepted plan (checked copy; no planning)",
     edit: "Applying the edit",
     undo: "Undo / revert (replaying the edit log)",
     verify: "Verifying save/reload (replaying the edit log)",
@@ -409,7 +415,7 @@ function renderProjectSelect() {
   const options = ['<option value="">Open project…</option>'].concat(
     ui.projects.map((p) => `<option value="${esc(p.name)}" ${p.name === ui.name ? "selected" : ""}>${esc(p.name)} · ${esc(p.stage)}</option>`));
   select.innerHTML = options.join("");
-  $("#footer").innerHTML = ui.info ? `LayerForge ${esc(ui.info.version)} · workspace <code>${esc(ui.info.workspace)}</code> · local only` : "";
+  $("#footer").innerHTML = ui.info ? `LayerForge ${esc(ui.info.version)} · workspace <code>${esc(ui.info.workspace)}</code> · local only${ui.info.can_stop ? ` · <a href="#" data-action="app-stop" data-testid="app-stop">Stop LayerForge</a>` : ""}` : "";
 }
 
 function errorBanner() {
@@ -805,12 +811,13 @@ function resizePreview(v, a) {
       ${v.refit ? `<div class="banner warn small" data-testid="resize-refit">Other proportions: the artwork is fitted into the new aperture again (aspect kept, padded, never stretched or cropped), so it is resampled. Compare the two images below and approve the new artwork.</div>` : ""}
       ${v.images?.comparison ? `<figure><img class="img" style="max-width:720px" src="${esc(v.images.comparison)}" alt="current target | new target"><figcaption>Current target | target at the new size (changes outlined)</figcaption></figure>` : ""}
       ${changeRows ? `<div class="table-wrap"><table><tbody>${changeRows}</tbody></table></div>` : ""}</div>
-    ${ok ? `${review ? '<div class="banner warn">A review exists: it is archived with this attempt and a new proposal is planned at the new size; review edits are not carried over.</div>' : ""}
+    ${ok ? `${review ? '<div class="banner warn">A review exists: a new proposal is planned at the new size; review edits are not carried over.</div>' : ""}
+      ${replaceWarning()}
       <label class="check"><input type="checkbox" data-resize-approve="size" data-preview="${esc(v.preview_id)}" data-testid="resize-approve-size" ${ap.size ? "checked" : ""}> I approve changing the sheet from ${from} to ${to}</label>
       ${v.refit ? `<label class="check"><input type="checkbox" data-resize-approve="changes" data-preview="${esc(v.preview_id)}" data-testid="resize-approve-changes" ${ap.changes ? "checked" : ""}> I approve the artwork fitted into the new proportions (shown above)</label>` : ""}
       ${changes.length ? `<label class="check"><input type="checkbox" data-resize-approve="changes" data-preview="${esc(v.preview_id)}" data-testid="resize-approve-changes" ${ap.changes ? "checked" : ""}> I approve the ${changes.length} visible artwork change(s) above</label>` : ""}
       <div class="row"><button class="primary" data-action="resize-retry" data-preview="${esc(v.preview_id)}" data-testid="resize-retry" ${canRetry ? "" : "disabled"}>Resize to ${to} &amp; retry</button>
-        <span class="small muted">The current attempt (proposal, review, estimate) is archived in this project; the image is unchanged.</span></div>` : ""}
+        <span class="small muted">Replaces the current proposal, review and estimate; the image and print kits are unchanged.</span></div>` : ""}
   </div>`;
 }
 
@@ -873,22 +880,64 @@ function upscalePreview(v) {
     ${notes ? `<div><h4>Physical printability notes <span class="small muted">(separate from visual fidelity; upscaling does not change them)</span></h4><ul class="small">${notes}</ul></div>` : ""}
     ${ok ? `${changes.length ? `<label class="check"><input type="checkbox" data-upscale-approve="${esc(v.preview_id)}" data-testid="upscale-approve" ${approved ? "checked" : ""} ${busy() ? "disabled" : ""}> I approve these ${changes.length} visible changes to the artwork</label>` : ""}
       <div class="row"><button class="primary" data-action="upscale-retry" data-factor="${v.factor}" data-preview="${esc(v.preview_id)}" data-testid="upscale-retry" ${canRetry ? "" : "disabled"}>Retry at ${v.factor}× (scale ${v.to_scale})</button>
-        <span class="small muted">The failed proposal and its diagnostics are archived in this project.</span></div>` : ""}
+        <span class="small muted">Replaces the failed proposal and its diagnostics.</span></div>${replaceWarning()}` : ""}
   </div>`;
+}
+
+// Validation of the working plan as shown to the user before accepting it (accepting never checks it).
+function workingStatus() {
+  const v = ui.state.draft?.validation?.status;
+  return v ? `validation ${badge(v === "PASS" ? "ok" : "warn", v)}` : ui.state.proposal ? `proposal ${badge(ui.state.proposal.status === "PROPOSAL_READY_FOR_REVIEW" ? "neutral" : "warn", ui.state.proposal.status)}` : "";
+}
+
+// Shown where a re-plan replaces the working plan: whether it can be brought back afterwards.
+function replaceWarning() {
+  const c = ui.state.checkpoint;
+  if (!c?.working_plan) return "";
+  if (c.replaced_is_accepted) return `<p class="small muted" data-testid="replace-kept">These sheets are the accepted plan: after re-planning you can bring them back with Restore accepted plan (Previous attempts).</p>`;
+  const accept = c.accept_blocked ? ` <span class="muted">Accepting is not available now: ${esc(c.accept_blocked)}.</span>`
+    : ` <button data-action="plan-accept" data-testid="replace-accept" ${busy() ? "disabled" : ""}>Accept this plan</button>`;
+  return `<div class="banner warn small" data-testid="replace-warning">${c.exists
+    ? `The current plan is not the accepted plan: re-planning discards it. (Restore accepted plan brings back the plan accepted ${esc(c.accepted_utc)}.)`
+    : "No plan is accepted in this project: re-planning discards the current plan and it cannot be restored."} Accept it first to be able to come back to it.${accept}</div>`;
+}
+
+async function restorePlan() {
+  const c = ui.state.checkpoint, s = c.summary;
+  const lost = ["the current proposal and review with their edits", ui.state.artwork?.edits?.length && !ui.state.artwork?.planned ? "artwork edits not planned yet" : "", "the size and upscale previews"].filter(Boolean);
+  if (!confirm(`Restore the accepted plan?\n\nAccepted ${c.accepted_utc}: ${s.candidate || "no candidate in review"}, ${s.sheets ?? "?"} sheets, ${sizeLabel(s.sheet_size_mm)}, scale ${s.scale}.\n\nThis discards the working plan (${lost.join(", ")}). Print kits, the source image and earlier attempts are kept. Nothing is planned again.`)) return;
+  submit(`/api/projects/${encodeURIComponent(ui.name)}/plan/restore`, {});
 }
 
 function attemptsPanel() {
   const attempts = ui.state.upscale?.attempts || [];
-  if (!attempts.length) return "";
+  const c = ui.state.checkpoint || {};
+  if (!attempts.length && !c.exists && !c.working_plan) return "";
+  const s = c.summary || {};
+  const accepted = c.exists ? `<tr data-testid="accepted-plan">
+      <td><strong>Accepted plan</strong>${c.working_is_accepted ? ` ${badge("ok", "in use")}` : ""}<br><span class="small muted">${esc(c.accepted_utc)}</span></td>
+      <td>scale ${s.scale}<br>${s.validation ? `validation ${badge(s.validation === "PASS" ? "ok" : "warn", s.validation)}` : badge(s.proposal_status === "PROPOSAL_READY_FOR_REVIEW" ? "neutral" : "warn", s.proposal_status)}</td>
+      <td class="small">${esc(s.candidate || "no candidate in review")}: ${s.sheets ?? "?"} sheets${s.review_edits ? ` · ${s.review_edits} review edit${s.review_edits === 1 ? "" : "s"}` : ""}${s.saved_reviews?.length ? `<br>saved reviews: ${esc(s.saved_reviews.join(", "))}` : ""}${s.artwork_edits ? `<br>${s.artwork_edits} artwork edit${s.artwork_edits === 1 ? "" : "s"}` : ""}</td>
+      <td class="small">${sizeLabel(s.sheet_size_mm)} sheet</td>
+      <td class="small">${(c.bytes / 1048576).toFixed(1)} MB copy in this project</td></tr>` : "";
+  const actions = `<div class="row" data-testid="plan-checkpoint">
+      ${c.working_plan && !c.working_is_accepted ? `<button data-action="plan-accept" data-testid="plan-accept" ${c.accept_blocked || busy() ? "disabled" : ""}>Accept this plan</button>
+        <span class="small">Current plan: ${workingStatus()}</span>${c.accept_blocked ? `<span class="small muted" data-testid="accept-blocked">${esc(c.accept_blocked)}</span>` : ""}` : ""}
+      ${c.exists && !c.working_is_accepted ? `<button data-action="plan-restore" data-testid="plan-restore" ${busy() ? "disabled" : ""}>Restore accepted plan</button>` : ""}
+      ${c.working_is_accepted ? `<span class="small">The current plan is the accepted plan.</span>` : ""}
+    </div>
+    ${(c.recovered || []).map((n) => `<div class="banner info small">${esc(n)}</div>`).join("")}
+    <p class="small muted" style="margin:0">Accept keeps one copy of the current plan (artwork, candidates, reviews with their edits and widening, issue decisions, sheet size and scale) so you can come back to it without planning again; accepting again replaces that copy. Accepting does not check or mean that the plan prints. Re-planning discards the current plan unless it is the accepted one${attempts.length ? "; the earlier attempts listed below are kept as they were" : ""}.</p>`;
   const rows = attempts.map((a) => `<tr data-testid="attempt">
       <td><strong>${esc(a.id)}</strong><br><span class="small muted">${esc(a.archived_utc)}</span></td>
       <td>scale ${a.scale}<br>${badge(a.status === "PROPOSAL_READY_FOR_REVIEW" ? "neutral" : "bad", a.status)} ${(a.blockers || []).map((b) => badge("neutral", b)).join(" ")}</td>
       <td class="small">${a.candidates.map((c) => `${esc(c.name)}: ${esc(c.status)}${c.reason ? ` — ${esc(c.reason)}` : ""}`).join("<br>")}</td>
       <td class="small">${a.sheet_mm ? `${sizeLabel(a.sheet_size_mm || [a.sheet_mm, a.sheet_mm])} sheet · ` : ""}replaced by ${a.replaced_by.kind === "physical_resize" ? `resize to ${sizeLabel(a.replaced_by.sheet_size_mm || [a.replaced_by.sheet_mm, a.replaced_by.sheet_mm])}` : a.replaced_by.kind === "artwork_edit" ? `planning from the edited artwork (${a.replaced_by.region_recolors} artwork edit${a.replaced_by.region_recolors === 1 ? "" : "s"})` : `${a.replaced_by.upscale_factor}× processing (scale ${a.replaced_by.scale})`}: ${esc(a.replaced_by.status)}; ${a.replaced_by.approved_visible_changes} visible changes approved</td>
       <td class="small"><a href="${esc(a.images.target)}" target="_blank" rel="noopener">target</a>${a.images.obstruction.map((u) => ` · <a href="${esc(u)}" target="_blank" rel="noopener">obstruction map</a>`).join("")} · ${a.images.comparison ? `<a href="${esc(a.images.comparison)}" target="_blank" rel="noopener">preview comparison</a>` : ""}</td></tr>`).join("");
-  return `<details class="panel section" data-section="attempts" data-testid="attempts" ${openAttr("attempts")}>
-    <summary><h3>Previous attempts ${badge("neutral", String(attempts.length))}</h3><span class="small muted">archived proposals with their diagnostics and settings</span></summary>
-    <div class="section-body"><div class="table-wrap"><table><thead><tr><th>Attempt</th><th>Result</th><th>Candidates</th><th>Retry</th><th>Evidence</th></tr></thead><tbody>${rows}</tbody></table></div></div>
+  return `<details class="panel section" data-section="attempts" data-testid="attempts" ${openAttr("attempts", c.working_plan && !c.working_is_accepted)}>
+    <summary><h3>Previous attempts ${badge("neutral", String(attempts.length))}</h3><span class="small muted">${c.exists ? "accepted plan" + (c.working_is_accepted ? " (in use)" : "") + (attempts.length ? " · " : "") : ""}${attempts.length ? "earlier proposals with their diagnostics and settings" : c.exists ? "" : "no accepted plan"}</span></summary>
+    <div class="section-body stack">${actions}
+    ${accepted || rows ? `<div class="table-wrap"><table><thead><tr><th>Attempt</th><th>Result</th><th>Candidates</th><th>Retry</th><th>Evidence</th></tr></thead><tbody>${accepted}${rows}</tbody></table></div>` : ""}</div>
   </details>`;
 }
 
@@ -1486,7 +1535,7 @@ function artworkPanel() {
   const savedDis = u.count || busy() ? "disabled" : "";  // the saved history waits for Save / Discard
 
   const banners = [
-    a.differs_from_planned ? `<div class="banner warn" data-testid="art-differs"><strong>Artwork edited after the sheets were planned.</strong> Print-kit export is blocked until you plan sheets from this artwork or undo the edits. ${infoTip(`The current ${a.stage === "review" ? "reviewed stack" : "proposal"} is validated against the previous artwork only, not this one. Planning keeps the current attempt under Previous attempts.`)}</div>` : "",
+    a.differs_from_planned ? `<div class="banner warn" data-testid="art-differs"><strong>Artwork edited after the sheets were planned.</strong> Print-kit export is blocked until you plan sheets from this artwork or undo the edits. ${infoTip(`The current ${a.stage === "review" ? "reviewed stack" : "proposal"} is validated against the previous artwork only, not this one. Planning replaces it (Accept this plan first to be able to come back to it).`)}</div>` : "",
     a.base_changed ? '<div class="banner info small">The reviewed artwork changed (accepted front view) after these artwork edits started; planning uses the edited artwork shown here.</div>' : "",
     a.planned_from_edited_artwork && !edits.length ? `<p class="small muted" style="margin:0">The current sheets were planned from artwork you edited (${a.planned_from_edited_artwork.region_recolors} artwork edit${a.planned_from_edited_artwork.region_recolors === 1 ? "" : "s"}).</p>` : "",
   ].join("");
@@ -1568,15 +1617,15 @@ function artworkPanel() {
 
   // Planning from the artwork; also shown where Apply was after a color change.
   const pending = a.can_replan && edits.length > 0 && !u.count;
-  const replanNote = `Runs the same automatic proposal (unchanged planner and validators) on the artwork shown here.${a.planned ? " The current attempt (proposal, review, estimate) is archived under Previous attempts." : ""} The palette size and the measured sheet count are shown afterwards; merging colors does not guarantee fewer sheets.`;
+  const replanNote = `Runs the same automatic proposal (unchanged planner and validators) on the artwork shown here.${a.planned ? " It replaces the current proposal, review and estimate; the accepted plan (Previous attempts) is kept." : ""} The palette size and the measured sheet count are shown afterwards; merging colors does not guarantee fewer sheets.`;
   const replanButton = (testid) => `<button class="plan tip" data-action="art-replan" data-testid="${testid}" ${u.count ? 'disabled data-tip="Save Changes first: planning uses the saved artwork"' : dis}>${ICON.plan}<span>Plan sheets from this artwork</span></button>`;
   const callout = pending && !sel && !shape ? `<div class="banner ok art-callout" data-testid="art-try-again-callout">
       <div><strong>${edits.length} artwork edit${edits.length === 1 ? "" : "s"} saved.</strong>
       <span class="small">The sheets are not planned for ${edits.length === 1 ? "it" : "them"} yet. Choose Plan sheets from this artwork to plan ${edits.length === 1 ? "it" : "them"}, or keep editing first.</span></div>
-      <div class="row">${replanButton("art-try-again")}</div></div>` : "";
+      <div class="row">${replanButton("art-try-again")}</div>${a.planned ? replaceWarning() : ""}</div>` : "";
   const replan = a.can_replan ? `<div class="subpanel art-replan" data-testid="art-replan">
       ${replanButton("art-replan-button")}
-      <span class="small muted">${u.count ? "Save Changes first." : "Nothing is planned until you click."} ${infoTip(replanNote)}</span></div>` : "";
+      <span class="small muted">${u.count ? "Save Changes first." : "Nothing is planned until you click."} ${infoTip(replanNote)}</span>${a.planned && !callout ? replaceWarning() : ""}</div>` : "";
 
   return `<details class="panel section art-panel" data-section="artwork" data-testid="artwork-panel" ${openAttr("artwork", true)}>
     <summary><h3>Artwork editor ${badge("neutral", "artwork edit · not a sheet edit")}</h3>
@@ -3824,6 +3873,28 @@ async function deleteProject(name) {
   render();
 }
 
+// "Stop LayerForge" (desktop launcher only): asks first, and again if a step is still running; the server
+// answers before it stops.  The page then says how to start again.
+async function stopApp() {
+  if (!confirm("Stop LayerForge?\n\nYour projects are saved. To start it again, double-click LayerForge.exe.")) return;
+  let result;
+  try {
+    result = await api("POST", "/api/stop", {});
+  } catch (err) {
+    if (err.status !== 409) { showError(err, "Could not stop LayerForge"); return; }
+    if (!confirm(`${err.message}.\n\nStopping now ends that step; its result is not saved (your project and earlier steps are kept). Stop anyway?`)) return;
+    try {
+      result = await api("POST", "/api/stop", { force: true });
+    } catch (err2) { showError(err2, "Could not stop LayerForge"); return; }
+  }
+  clearTimeout(pollTimer);
+  document.body.innerHTML = `<main class="panel stack" style="max-width:560px;margin:48px auto" data-testid="app-stopped">
+    <h2 style="margin:0">LayerForge has stopped</h2>
+    <p>Your projects are saved in <code>${esc(ui.info?.workspace || "")}</code>.</p>
+    <p>To start LayerForge again, double-click <strong>LayerForge.exe</strong>. You can close this tab.</p></main>`;
+  return result;
+}
+
 async function deleteKit(kitId) {
   ui.confirmDelete = null;
   try {
@@ -3857,6 +3928,10 @@ async function onClick(event) {
   const project = `/api/projects/${encodeURIComponent(ui.name)}`;
   const sheet = ui.sheet;
   switch (a) {
+    case "app-stop":
+      event.preventDefault();
+      stopApp();
+      break;
     case "tab":
       event.preventDefault();
       setTab(el.dataset.tab);
@@ -3897,6 +3972,10 @@ async function onClick(event) {
       submit(`${project}/upscale/retry`, { factor: Number(el.dataset.factor), preview_id: el.dataset.preview, approve_changes: Boolean(ui.upscaleApproved[el.dataset.preview]) });
       break;
     case "start-review": submit(`${project}/review`, { candidate: el.dataset.candidate, widen_openings: widenOn() }); break;
+    case "plan-accept":
+      if (confirm(`Accept this plan?\n\nCurrent plan: ${workingStatus().replace(/<[^>]+>/g, "")}.\n\nA copy is kept in this project so you can come back to it without planning again${ui.state.checkpoint?.exists ? "; it replaces the plan accepted " + ui.state.checkpoint.accepted_utc : ""}. Accepting does not check or mean that the plan prints.`)) submit(`${project}/plan/accept`, {});
+      break;
+    case "plan-restore": restorePlan(); break;
     case "widen": submit(`${project}/widen`, {}); break;
     case "widen-issues":  // the remaining risky cutouts are listed in the Issues section above
       ui.sections.issues = true;

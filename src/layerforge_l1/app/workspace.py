@@ -326,6 +326,16 @@ class Workspace:
         self._issue_lock = threading.Lock()
         self._tips_cache: dict[str, tuple[Any, dict[str, Any]]] = {}  # project -> (artwork + sites, tip suggestion)
         self._planned_images: dict[str, tuple[Any, Any]] = {}  # project -> (file stamp, artwork the sheets were planned from)
+        # An accept or restore cut short by a crash is finished or undone before anything else runs.
+        self.recovered: dict[str, list[str]] = {}
+        for path in sorted(self.root.iterdir()):
+            if path.is_dir() and (path / "project.json").is_file() and any(
+                    os.path.lexists(path / marker) for marker in ("restore.json", "restore.next", "restore.old",
+                                                                  "attempts/accepted.next", "attempts/accepted.old")):
+                try:
+                    self.recovered[path.name] = self.recover_checkpoint(path)
+                except (OSError, AppError) as error:
+                    self.recovered[path.name] = [f"could not recover an interrupted accept/restore: {error}"]
 
     # -- paths and records -----------------------------------------------------------
     def path(self, name: str) -> Path:
@@ -598,9 +608,9 @@ class Workspace:
                       progress: Callable[..., None]) -> dict[str, Any]:
         """Re-run the proposal at the previewed resolution in this project.
 
-        The new run is written next to the current proposal and swapped in only when it finishes;
-        the failed proposal (with its diagnostics) and the approved preview are archived under
-        ``attempts/``.  On any error the current proposal stays untouched.
+        The new run is written next to the current proposal and swapped in only when it finishes; then
+        the failed proposal and the approved preview are discarded (the accepted plan, if any, is kept
+        in ``attempts/accepted``).  On any error the current proposal stays untouched.
         """
 
         from ..core.planning import PlanningConfig
@@ -625,25 +635,13 @@ class Workspace:
         except BaseException:
             shutil.rmtree(staging, ignore_errors=True)
             raise
-        previous = _read_json(path / "proposal" / "proposal.json")
-        attempts = record.setdefault("attempts", [])
-        folder = f"attempt_{len(attempts) + 1:02d}_scale{saved['from_scale']}"
-        archive = path / "attempts" / folder
-        archive.mkdir(parents=True, exist_ok=False)
-        (path / "proposal").replace(archive / "proposal")
-        (path / "upscale" / f"x{saved['factor']}").replace(archive / "upscale_preview")
+        self._set_aside(path, ("proposal",))
         staging.replace(path / "proposal")
         shutil.rmtree(path / "upscale", ignore_errors=True)
-        attempts.append({
-            "id": folder, "archived_utc": _now(), "scale": saved["from_scale"], "status": previous["status"],
-            "blockers": [f["code"] for f in previous["flags"] if f["severity"] == "BLOCKER"],
-            "detail_decisions": record.get("detail_decisions") or {},
-            "replaced_by": {"upscale_factor": saved["factor"], "scale": saved["to_scale"], "status": result["status"],
-                            "approved_visible_changes": len(saved["changes"]), "preview_id": saved["preview_id"]},
-        })
         record["processing_scale"] = saved["to_scale"]
         record["detail_decisions"] = saved["decisions"]
         self._save_record(name, record)
+        self._drop_set_aside(path)
         return {"status": result["status"], "selected": result["selected"], "scale": saved["to_scale"]}
 
     # -- 1c. physical resize -----------------------------------------------------------------
@@ -851,13 +849,14 @@ class Workspace:
         """Re-plan in this project at the approved size, then re-measure printability.
 
         The new proposal is built beside the current state and swapped in when it finishes; the
-        previous proposal, review draft, printability estimate and the size analysis/preview are
-        archived under ``attempts/`` (kits stay listed).  The image is never changed.  Planning uses
-        the same planner, including its local cell refinement when a closure is infeasible.
+        previous proposal, review draft, printability estimate and the size analysis/preview are then
+        discarded (kits stay listed; the accepted plan, if any, is kept in ``attempts/accepted``).  The
+        image is never changed.  Planning uses the same planner, including its local cell refinement
+        when a closure is infeasible.
 
         With region recolors (unplanned, or already planned), the edited artwork shown in the preview
         is planned pixel for pixel instead of the source's intake, and its edit log moves with the new
-        proposal (``proposal/artwork_edits/``); the archived attempt keeps the previous state.
+        proposal (``proposal/artwork_edits/``).
         """
 
         from ..core.model import load_stack
@@ -907,19 +906,10 @@ class Workspace:
             shutil.rmtree(staging, ignore_errors=True)
             raise AppError("the re-planned artwork differs from the approved preview; nothing was changed. "
                            "Preview the size again.")
-        previous = _read_json(path / "proposal" / "proposal.json")
-        attempts = record.setdefault("attempts", [])
-        sides = saved.get("from_size_mm") or [saved["from_mm"]]
-        label = "x".join(f"{v:g}" for v in (sides if sides[0] != sides[-1] else sides[:1]))  # square: "200", else "200x150"
-        folder = f"attempt_{len(attempts) + 1:02d}_{label}mm".replace(".", "_")
-        archive = path / "attempts" / folder
-        archive.mkdir(parents=True, exist_ok=False)
-        for part in ("proposal", "review", "draft", "printability", "resize", "reviews"):
-            if (path / part).exists():
-                (path / part).replace(archive / part)
+        outgoing = self._set_aside(path, self.REPLACED_PARTS)
         staging.replace(path / "proposal")
         shutil.rmtree(path / "upscale", ignore_errors=True)
-        self._carry_artwork_log(path, archive, edited)
+        self._carry_artwork_log(path, outgoing, edited)
 
         check: dict[str, Any] = {"from_mm": saved["from_mm"], "to_mm": saved["to_mm"],
                                  **{k: saved[k] for k in ("from_size_mm", "to_size_mm") if k in saved},
@@ -946,17 +936,6 @@ class Workspace:
                                               for i in after if i["severity"] == "UNSUPPORTED"]}
             check["more_unsupported_than_predicted"] = max(0, report["counts"]["UNSUPPORTED"] - check["predicted"]["UNSUPPORTED"])
         _write_json(path / "proposal" / "resize_check.json", check)
-        attempts.append({
-            "id": folder, "archived_utc": _now(), "scale": self.processing_scale(record), "sheet_mm": saved["from_mm"],
-            **({"sheet_size_mm": saved["from_size_mm"]} if "from_size_mm" in saved else {}),
-            "status": previous["status"], "stage": analysis["basis"]["stage"],
-            "blockers": [f["code"] for f in previous["flags"] if f["severity"] == "BLOCKER"],
-            "detail_decisions": record.get("detail_decisions") or {},
-            "replaced_by": {"kind": "physical_resize", "sheet_mm": saved["to_mm"],
-                            **({"sheet_size_mm": saved["to_size_mm"]} if "to_size_mm" in saved else {}),
-                            "status": result["status"], "refit": bool(saved.get("refit")),
-                            "approved_visible_changes": len(saved["changes"]), "preview_id": saved["preview_id"]},
-        })
         record["sheet_outer_mm"] = saved["to_mm"]
         if to_height is None:
             record.pop("sheet_outer_height_mm", None)
@@ -965,8 +944,331 @@ class Workspace:
         record["detail_decisions"] = saved["decisions"]
         record["candidate"] = None
         self._save_record(name, record)
+        self._drop_set_aside(path)
         return {"status": result["status"], "selected": result["selected"], "sheet_mm": saved["to_mm"],
                 "sheet_size_mm": self.sheet_size_mm(record), "after": check.get("after", {}).get("counts")}
+
+    # -- 1d. accepted plan: one rollback checkpoint ----------------------------------------------
+    # What a re-plan replaces: moved aside, swapped for the new plan, then deleted.
+    REPLACED_PARTS = ("proposal", "review", "draft", "printability", "resize", "reviews")
+    # The working plan as accepted: planning candidates (with the planned artwork and its edit log), the
+    # review (layer masks, edits, widening) and the parked reviews of other candidates, their caches and
+    # estimate, unplanned artwork edits and the issue decisions.
+    PLAN_PARTS = ("proposal", "review", "draft", "printability", "reviews", "artwork", "issue_reviews.json")
+    PREVIEW_PARTS = ("resize", "upscale")  # previews of the working plan: dropped by a restore
+    PLAN_SETTINGS = ("proposal_settings", "candidate", "processing_scale", "sheet_outer_mm",
+                     "sheet_outer_height_mm", "detail_decisions")
+    CHECKPOINT_FILE = "checkpoint.json"
+
+    @staticmethod
+    def checkpoint_dir(path: Path) -> Path:
+        return path / "attempts" / "accepted"
+
+    @staticmethod
+    def _set_aside(path: Path, parts: tuple[str, ...]) -> Path:
+        """Move the outgoing working plan aside before a new one is swapped in (all or nothing)."""
+
+        outgoing = path / "replaced.tmp"
+        if outgoing.exists():
+            shutil.rmtree(outgoing)  # left by an interrupted replacement; the plan in use is elsewhere
+        outgoing.mkdir()
+        moved = []
+        try:
+            for part in parts:
+                if (path / part).exists():
+                    replace_path(path / part, outgoing / part)
+                    moved.append(part)
+        except BaseException:
+            for part in moved:
+                replace_path(outgoing / part, path / part)
+            raise
+        return outgoing
+
+    @staticmethod
+    def _drop_set_aside(path: Path) -> None:
+        shutil.rmtree(path / "replaced.tmp", ignore_errors=True)  # a leftover goes with the next replacement
+
+    def _plan_settings(self, record: dict[str, Any]) -> dict[str, Any]:
+        return {k: copy.deepcopy(record[k]) for k in self.PLAN_SETTINGS if k in record}
+
+    def _fingerprint(self, root: Path, settings: dict[str, Any]) -> dict[str, Any]:
+        """What identifies a plan: settings, the proposal, every review manifest (masks, edits, widening),
+        the artwork logs and the issue decisions."""
+
+        files = {}
+        for rel in ("proposal/proposal.json", f"review/{MANIFEST_NAME}", "issue_reviews.json", "artwork/edits.json",
+                    "proposal/artwork_edits/edits.json"):
+            if (root / rel).is_file():
+                files[rel] = file_sha256(root / rel)
+        for manifest in sorted((root / "reviews").glob(f"*/review/{MANIFEST_NAME}")):
+            files[manifest.relative_to(root).as_posix()] = file_sha256(manifest)
+        return {"settings": settings, "files": files}
+
+    def _check_consistent(self, root: Path, settings: dict[str, Any]) -> None:
+        """The plan files belong to these settings: same sheet size and scale, the reviewed candidate."""
+
+        proposal = _read_json(root / "proposal" / "proposal.json") or {}
+        config = proposal.get("planning_config") or {}
+        width = self.sheet_outer_mm(settings)
+        height = self.sheet_height_mm(settings)
+        problems = []
+        if "outer_sheet_mm" in config and abs(float(config["outer_sheet_mm"]) - width) > 1e-6:
+            problems.append(f"planned at {config['outer_sheet_mm']:g} mm wide, settings say {width:g} mm")
+        planned_height = config.get("outer_sheet_height_mm")
+        if (None if planned_height in (None, config.get("outer_sheet_mm")) else float(planned_height)) != \
+                (None if height in (None, width) else height):
+            problems.append(f"planned sheet height {planned_height}, settings say {height}")
+        if "scale" in config and int(config["scale"]) != self.processing_scale(settings):
+            problems.append(f"planned at scale {config['scale']}, settings say {self.processing_scale(settings)}")
+        manifest = _read_json(root / "review" / MANIFEST_NAME)
+        if manifest is not None:
+            base = (manifest.get("review") or {}).get("base") or {}
+            names = {c["name"] for c in proposal.get("candidates", [])}
+            if settings.get("candidate") not in names or base.get("name") not in (None, settings.get("candidate")):
+                problems.append(f"the review is of {base.get('name')!r}, settings say {settings.get('candidate')!r}")
+        if problems:
+            raise AppError("the plan files and the project settings disagree (" + "; ".join(problems)
+                           + "); nothing was changed")
+
+    @staticmethod
+    def _plan_files(root: Path, parts: tuple[str, ...]) -> dict[str, list[Any]]:
+        """{relative path: [bytes, sha256]} of every file of these parts (links are refused)."""
+
+        files: dict[str, list[Any]] = {}
+        for part in parts:
+            top = root / part
+            if _is_link(top):
+                raise AppError(f"{part} is a link to another location; it is not copied")
+            if top.is_file():
+                files[part] = [top.stat().st_size, file_sha256(top)]
+                continue
+            for folder, dirs, names in os.walk(top) if top.is_dir() else ():
+                for entry in dirs + names:
+                    if _is_link(Path(folder) / entry):
+                        raise AppError(f"{(Path(folder) / entry).relative_to(root).as_posix()} is a link; it is not copied")
+                for file in names:
+                    item = Path(folder) / file
+                    files[item.relative_to(root).as_posix()] = [item.stat().st_size, file_sha256(item)]
+        return files
+
+    @staticmethod
+    def _verify_files(root: Path, files: dict[str, list[Any]], what: str) -> None:
+        for rel, (size, sha) in files.items():
+            item = root / rel
+            if not item.is_file() or item.stat().st_size != size or file_sha256(item) != sha:
+                raise AppError(f"{what} is incomplete or changed ({rel}); nothing was changed")
+
+    def _copy_plan(self, source: Path, destination: Path) -> dict[str, list[Any]]:
+        files = self._plan_files(source, self.PLAN_PARTS)
+        for part in self.PLAN_PARTS:
+            if (source / part).is_dir():
+                shutil.copytree(source / part, destination / part)
+            elif (source / part).is_file():
+                shutil.copy2(source / part, destination / part)
+        self._verify_files(destination, files, "the copy")
+        return files
+
+    def checkpoint_info(self, path: Path) -> dict[str, Any] | None:
+        info = _read_json(self.checkpoint_dir(path) / self.CHECKPOINT_FILE)
+        return info if isinstance(info, dict) and info.get("schema") == "layerforge.accepted_plan" else None
+
+    def _plan_summary(self, root: Path, settings: dict[str, Any]) -> dict[str, Any]:
+        proposal = _read_json(root / "proposal" / "proposal.json") or {}
+        manifest = _read_json(root / "review" / MANIFEST_NAME)
+        draft = _read_json(root / "draft" / "state.json") or {}
+        out = {"proposal_status": proposal.get("status"), "candidate": settings.get("candidate"),
+               "sheet_size_mm": self.sheet_size_mm(settings), "scale": self.processing_scale(settings),
+               "stage": "review" if manifest is not None else "proposal",
+               "saved_reviews": sorted(p.parent.parent.name for p in (root / "reviews").glob(f"*/review/{MANIFEST_NAME}")),
+               "artwork_edits": (proposal.get("artwork_edits") or {}).get("region_recolors", 0)}
+        if manifest is not None:
+            out.update(sheets=len(manifest.get("sheets", [])), review_edits=len((manifest.get("review") or {}).get("edits", [])),
+                       validation=(draft.get("validation") or {}).get("status"))
+        else:
+            row = next((c for c in proposal.get("candidates", []) if c["name"] == proposal.get("selected")), None)
+            out["sheets"] = row["sheet_count"] if row else None
+        return out
+
+    def check_accept(self, name: str) -> tuple[Path, dict[str, Any], dict[str, Any]]:
+        """Accepting is possible: a plan exists, nothing unsaved, sheets planned from this artwork."""
+
+        from ..core.propose import NOT_PLANNED
+
+        path, record = self.path(name), self.record(name)
+        proposal = _read_json(path / "proposal" / "proposal.json")
+        if proposal is None or proposal["status"] == NOT_PLANNED:
+            raise AppError("nothing is planned yet; there is no plan to accept")
+        self.refuse_if_unsaved(name, "accepting this plan")
+        differs = self.artwork_differs(name)
+        if differs:
+            raise AppError(f"the artwork was edited ({differs['edits']} artwork edit(s)) after these sheets were planned; "
+                           "plan sheets from this artwork or undo the edits before accepting")
+        settings = self._plan_settings(record)
+        self._check_consistent(path, settings)
+        fingerprint = self._fingerprint(path, settings)
+        info = self.checkpoint_info(path)
+        if info is not None and info.get("fingerprint") == fingerprint:
+            raise AppError("this plan is already the accepted plan; nothing changed since it was accepted")
+        return path, record, fingerprint
+
+    def accept_plan(self, name: str, progress: Callable[..., None]) -> dict[str, Any]:
+        """Copy the working plan into the one checkpoint ``attempts/accepted`` (replacing the previous one
+        only once the new copy is complete and verified).  Accepting does not check printability."""
+
+        path, record, fingerprint = self.check_accept(name)
+        self.recover_checkpoint(path)
+        target = self.checkpoint_dir(path)
+        staging, old = target.with_name("accepted.next"), target.with_name("accepted.old")
+        progress("PLAN_ACCEPT_COPYING")
+        staging.mkdir(parents=True)
+        try:
+            files = self._copy_plan(path, staging)
+            settings = fingerprint["settings"]
+            info = {"schema": "layerforge.accepted_plan", "accepted_utc": _now(), "source_sha256": record["source"]["sha256"],
+                    "settings": settings, "fingerprint": fingerprint, "summary": self._plan_summary(path, settings),
+                    "bytes": sum(size for size, _ in files.values()), "files": files}
+            _write_json(staging / self.CHECKPOINT_FILE, info)
+            if self._fingerprint(path, self._plan_settings(self.record(name))) != fingerprint:
+                raise AppError("the plan changed while it was being accepted; nothing was changed")
+            if target.exists():
+                replace_path(target, old)
+            try:
+                replace_path(staging, target)
+            except BaseException:
+                if old.exists() and not target.exists():
+                    replace_path(old, target)
+                raise
+        except BaseException:
+            shutil.rmtree(staging, ignore_errors=True)
+            raise
+        shutil.rmtree(old, ignore_errors=True)
+        return {"accepted_utc": info["accepted_utc"], **info["summary"], "bytes": info["bytes"]}
+
+    def check_restore(self, name: str) -> tuple[Path, dict[str, Any], dict[str, Any]]:
+        path, record = self.path(name), self.record(name)
+        info = self.checkpoint_info(path)
+        if info is None:
+            raise AppError("there is no accepted plan in this project; use Accept this plan first")
+        if info["source_sha256"] != record["source"]["sha256"]:
+            raise AppError("the accepted plan belongs to another source image; nothing was changed")
+        self.refuse_if_unsaved(name, "restoring the accepted plan")
+        if self._fingerprint(path, self._plan_settings(record)) == info["fingerprint"]:
+            raise AppError("the working plan is already the accepted plan; there is nothing to restore")
+        return path, record, info
+
+    def restore_plan(self, name: str, progress: Callable[..., None]) -> dict[str, Any]:
+        """Replace the working plan by a copy of the accepted plan (no planning; the checkpoint is kept).
+
+        The copy is made and verified first; then the working plan is moved aside, the copy moved in and
+        the settings restored.  A journal (``restore.json``) lets a failure, or a crash, put the working
+        plan back as it was."""
+
+        path, record, info = self.check_restore(name)
+        self.recover_checkpoint(path)
+        source = self.checkpoint_dir(path)
+        progress("PLAN_RESTORE_CHECKING", accepted_utc=info["accepted_utc"])
+        self._verify_files(source, info["files"], "the accepted plan")
+        self._check_consistent(source, info["settings"])
+        staging, aside, journal = path / "restore.next", path / "restore.old", path / "restore.json"
+        staging.mkdir()
+        try:
+            progress("PLAN_RESTORE_COPYING")
+            self._copy_plan(source, staging)
+            self._verify_files(staging, info["files"], "the restored copy")
+            had = [part for part in self.PLAN_PARTS + self.PREVIEW_PARTS if os.path.lexists(path / part)]
+            _write_json(journal, {"record": record, "had": had, "started_utc": _now()})
+            aside.mkdir()
+            with review.project_lock(path / "review"):
+                for part in had:
+                    replace_path(path / part, aside / part)
+                for part in self.PLAN_PARTS:
+                    if os.path.lexists(staging / part):
+                        replace_path(staging / part, path / part)
+            restored = copy.deepcopy(record)
+            for key in self.PLAN_SETTINGS:
+                if key in info["settings"]:
+                    restored[key] = copy.deepcopy(info["settings"][key])
+                else:
+                    restored.pop(key, None)
+            self._save_record(name, restored)
+            if self._fingerprint(path, self._plan_settings(self.record(name))) != info["fingerprint"]:
+                raise AppError("the restored plan does not match the accepted plan; the working plan was put back")
+            journal.unlink()
+        except BaseException:
+            if journal.is_file():
+                self._undo_restore(path)
+            raise
+        finally:
+            self._forget_caches(name)
+            shutil.rmtree(staging, ignore_errors=True)
+        shutil.rmtree(aside, ignore_errors=True)
+        return {"restored_utc": _now(), "accepted_utc": info["accepted_utc"], **info["summary"]}
+
+    def _undo_restore(self, path: Path) -> None:
+        """Put the working plan of an unfinished restore back (from ``restore.old``, per ``restore.json``)."""
+
+        journal = _read_json(path / "restore.json")
+        aside = path / "restore.old"
+        with review.project_lock(path / "review"):
+            for part in self.PLAN_PARTS + self.PREVIEW_PARTS:
+                current, kept = path / part, aside / part
+                if part in journal["had"] and not os.path.lexists(kept):
+                    continue  # never moved
+                if os.path.lexists(current):  # the restored copy
+                    shutil.rmtree(current) if current.is_dir() and not _is_link(current) else current.unlink()
+                if os.path.lexists(kept):
+                    replace_path(kept, current)
+        _write_json(path / "project.json", journal["record"])
+        (path / "restore.json").unlink()
+        shutil.rmtree(aside, ignore_errors=True)
+        shutil.rmtree(path / "restore.next", ignore_errors=True)
+
+    def recover_checkpoint(self, path: Path) -> list[str]:
+        """Finish or undo an accept/restore that was interrupted (app closed or crashed in between)."""
+
+        notes = []
+        if (path / "restore.json").is_file():
+            self._undo_restore(path)
+            notes.append("an interrupted restore was undone; the working plan is as it was")
+        for leftover in ("restore.next", "restore.old"):
+            if (path / leftover).exists():
+                shutil.rmtree(path / leftover, ignore_errors=True)
+        target = self.checkpoint_dir(path)
+        staging, old = target.with_name("accepted.next"), target.with_name("accepted.old")
+        if staging.exists():
+            shutil.rmtree(staging)
+            notes.append("an interrupted accept was discarded")
+        if old.exists():
+            if target.exists():
+                shutil.rmtree(old)
+            else:
+                replace_path(old, target)
+                notes.append("the previously accepted plan was put back after an interrupted accept")
+        return notes
+
+    def _checkpoint_view(self, path: Path, record: dict[str, Any]) -> dict[str, Any]:
+        from ..core.propose import NOT_PLANNED
+
+        info = self.checkpoint_info(path)
+        proposal = _read_json(path / "proposal" / "proposal.json")
+        working = proposal is not None and proposal.get("status") != NOT_PLANNED
+        view: dict[str, Any] = {"exists": info is not None, "working_plan": working}
+        current = self._fingerprint(path, self._plan_settings(record)) if working else None
+        if info is not None:
+            # What a re-plan replaces (the artwork log moves on to the new plan; issue decisions stay).
+            def replaced(fingerprint: dict[str, Any]) -> dict[str, Any]:
+                return {**fingerprint, "files": {k: v for k, v in fingerprint["files"].items()
+                                                 if k not in ("artwork/edits.json", "issue_reviews.json")}}
+
+            view.update({k: info[k] for k in ("accepted_utc", "summary", "bytes")},
+                        working_is_accepted=current == info["fingerprint"],
+                        replaced_is_accepted=working and replaced(current) == replaced(info["fingerprint"]))
+        if working and not view.get("working_is_accepted"):
+            try:
+                self.check_accept(record["name"])
+            except AppError as error:
+                view["accept_blocked"] = str(error)
+        return view
 
     # -- 2. review / edit (L2) -----------------------------------------------------------
     @staticmethod
@@ -1543,7 +1845,7 @@ class Workspace:
         if differs:
             raise AppError(f"the artwork was edited ({differs['edits']} artwork edit(s)) after these sheets were planned; "
                            "the sheets are validated only against the previous artwork. Plan from the edited artwork "
-                           "(the current attempt is kept) or undo the artwork edits before exporting.")
+                           "or undo the artwork edits before exporting.")
 
     def _artwork_op(self, op: Any) -> dict[str, Any]:
         from ..core import artwork as art
@@ -2004,8 +2306,9 @@ class Workspace:
 
         The proposal is re-run with the same source, settings and detail choices; its intake target
         is replaced by the edited artwork (frame and grid unchanged) and planned by the unchanged
-        planner.  The previous proposal, review, estimate and size check are archived as an attempt
-        (kits stay listed); the artwork log moves with the new proposal as its provenance."""
+        planner.  The previous proposal, review, estimate and size check are then discarded (kits stay
+        listed; the accepted plan, if any, is kept in ``attempts/accepted``); the artwork log moves with
+        the new proposal as its provenance."""
 
         from ..core import artwork as art
         from ..core.model import load_stack
@@ -2050,17 +2353,7 @@ class Workspace:
             shutil.rmtree(staging, ignore_errors=True)
             raise AppError("the planned artwork differs from the edited artwork; nothing was changed")
         with self._artwork_lock:
-            attempts = record.setdefault("attempts", [])
-            if proposal["status"] == NOT_PLANNED:
-                shutil.rmtree(path / "proposal")  # intake only: nothing was planned, nothing to archive
-                folder = None
-            else:
-                folder = f"attempt_{len(attempts) + 1:02d}_artwork"
-                archive = path / "attempts" / folder
-                archive.mkdir(parents=True, exist_ok=False)
-                for part in ("proposal", "review", "draft", "printability", "resize", "reviews"):
-                    if (path / part).exists():
-                        (path / part).replace(archive / part)
+            self._set_aside(path, self.REPLACED_PARTS)
             staging.replace(path / "proposal")
             shutil.rmtree(path / "upscale", ignore_errors=True)
             if (path / "artwork").exists():
@@ -2076,21 +2369,12 @@ class Workspace:
         after = {"status": result["status"], "palette_size": result["intake"]["palette_size"],
                  "sheet_count": after_sheets, "selected": result["selected"], "artwork_sha256": edited_sha}
         _write_json(path / "proposal" / "artwork_check.json", {
-            "before": before, "after": after, "region_recolors": len(edits), "archived_as": folder, "checked_utc": _now(),
+            "before": before, "after": after, "region_recolors": len(edits), "checked_utc": _now(),
             "note": "Sheet counts are measured from the planned stacks. Merging colors can leave the count unchanged "
                     "or raise it; only these measured values count."})
-        if folder:
-            attempts.append({
-                "id": folder, "archived_utc": _now(), "scale": self.processing_scale(record),
-                "sheet_mm": self.sheet_outer_mm(record), "sheet_size_mm": self.sheet_size_mm(record),
-                "status": proposal["status"], "stage": origin["stage"],
-                "blockers": [f["code"] for f in proposal["flags"] if f["severity"] == "BLOCKER"],
-                "detail_decisions": record.get("detail_decisions") or {},
-                "replaced_by": {"kind": "artwork_edit", "region_recolors": len(edits), "status": result["status"],
-                                "approved_visible_changes": len(edits)},
-            })
         record["candidate"] = None
         self._save_record(name, record)
+        self._drop_set_aside(path)
         return {"status": result["status"], "selected": result["selected"], "before": before, "after": after}
 
     def _artwork_view(self, name: str, path: Path, proposal: dict[str, Any]) -> dict[str, Any]:
@@ -2423,6 +2707,9 @@ class Workspace:
             state["upscale"] = self._upscale_view(name, path, record, proposal)
             state["resize"] = self._resize_view(name, path, record, proposal)
             state["artwork"] = self._artwork_view(name, path, proposal)
+        state["checkpoint"] = self._checkpoint_view(path, record)
+        if name in self.recovered:
+            state["checkpoint"]["recovered"] = self.recovered[name]
         draft = _read_json(path / "draft" / "state.json")
         if draft is not None:
             state["draft"] = self._draft_view(name, path, draft, current_sha)

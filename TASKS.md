@@ -425,3 +425,20 @@ No complete UI/server, arbitrary photographic depth estimation, frame design, gl
 - [x] Committed; exe/zip rebuilt.
 - [ ] Untested: Upscale & Retry and trial planning on a failed rectangular proposal; scale 4 rectangular.
 - [ ] Physical print test of a rectangular stack (pending).
+
+## Windows launcher without a window (2026-11-11, D-V3-048)
+
+- [x] Background start, browser opened, single instance, "Stop LayerForge" in the page footer, error box only on
+  startup failure; launcher tests and real-process checks (source and packaged exe); exe/zip rebuilt.
+- [x] Committed together with D-V3-049.
+
+## Accepted plan: one rollback checkpoint (2026-11-12, D-V3-049)
+
+- [x] Accept / Restore (`attempts/accepted`, verified copies, journal, crash recovery); re-plans discard the
+  outgoing working plan (no new `attempt_NN`); existing attempts untouched; UI in Previous attempts and a warning
+  before re-plans.
+- [x] Tests: test_plan_checkpoint 5 (accept, experiments, exact restore, re-accept, restart, failing validation,
+  Upscale & Retry, injected failures and a crash, earlier attempts); updated expectations in test_l4_app and the
+  artwork tests; real-browser Accept / Restore / warnings (scratch drive).
+- [x] User guide (Hebrew GUI guide, local) and README_FIRST.txt explain Accept / Restore / retention.
+- [x] Committed (with D-V3-048); exe/zip rebuilt after the commit, packaged tests in the session report.
