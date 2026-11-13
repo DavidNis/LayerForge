@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from layerforge_l1.layer_optimization import (
     DEFAULT_OPTIMIZATION_CONFIG,
     _advance_neighbours,
@@ -15,8 +17,13 @@ from layerforge_l1.width_aware_planner import (
 )
 
 
+FOX = Path("fox_simple_input.png")  # a local reference image, not part of the repository (removed 2026-11-13)
+
+
+@pytest.mark.skipif(not FOX.is_file(), reason="fox_simple_input.png is a local image the user removed from the repo; "
+                                              "put it in the repository root to run this check")
 def test_fox_topology_cohort_adds_missing_valid_orange_pair() -> None:
-    analysis = analyze_image(Path("fox_simple_input.png"))
+    analysis = analyze_image(FOX)
     graph = build_region_graph(analysis["labels"], connectivity=4, minimum_contact_pixels=1)
     evaluator = _ActualMaskEvaluator(
         graph, DEFAULT_CONFIG, DEFAULT_OPTIMIZATION_CONFIG
