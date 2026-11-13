@@ -1,9 +1,11 @@
 """Desktop launcher for the L4 application (the packaged ``LayerForge.exe``).
 
 Double-clicking the executable starts the same local server ``python -m layerforge_l1 app``
-runs, in the background (no window), and opens the UI in the default browser.  Closing the
-browser leaves it running; "Stop LayerForge" at the bottom of the page stops it cleanly
-(``POST /api/stop``).  Only a startup failure shows a window (an error message).
+runs, in the background (no window), and opens the UI in the default browser.  It stops by
+itself when the last LayerForge tab has been closed, once nothing is running (``lifecycle.py``:
+reloads, a second tab and running jobs keep it open; a crashed browser is noticed when its
+heartbeats stop).  Exit in the page's top bar stops it at once (``POST /api/stop``).  Only a
+startup failure shows a window (an error message).
 
 Where files go (never inside the application folder):
 
@@ -136,10 +138,13 @@ class InstanceLock:
         self.handle = handle
         return True
 
-    def running_url(self) -> str | None:
+    def running_url(self, announce: bool = False) -> str | None:
+        """The running app's URL if it answers; ``announce``: a page is about to be opened on it, so it
+        waits for that page instead of stopping for lack of open tabs."""
+
         try:
             url = json.loads(self.record_path.read_text(encoding="utf-8"))["url"]
-            with urllib.request.urlopen(url + "api/info", timeout=3) as response:
+            with urllib.request.urlopen(url + "api/info" + ("?launch=1" if announce else ""), timeout=3) as response:
                 return url if response.status == 200 else None
         except (OSError, ValueError, KeyError):
             return None
@@ -208,27 +213,36 @@ class Runner:
             self.abandoned = self.busy()
             if self.abandoned:
                 print(f"[launcher] stopping while running: {self.abandoned}", flush=True)
+            lifecycle = self.server.app.lifecycle
+            lifecycle.close_now(lifecycle.reason or "stopped")  # later requests are refused (503), not cut off
             self.server.shutdown()  # stop accepting requests; the job thread ends with the process
+            if not lifecycle.wait_idle(30):  # a save or download being answered finishes first
+                print("[launcher] requests still being answered after 30 s; stopping anyway", flush=True)
             self.server.server_close()
             self.server = None
             print("[launcher] server stopped", flush=True)
 
 
 def run_background(runner: Runner, lock: InstanceLock, open_browser: bool) -> int:
-    """No window: start the server, open the browser, serve until the page's "Stop LayerForge".
+    """No window: start the server, open the browser, serve until the last LayerForge tab is closed (and
+    nothing is running) or Exit on the page.
 
-    A startup failure raises (``main`` shows it in a message box).  Closing the browser does not stop the
-    server; launching again only reopens the browser on it (``InstanceLock``)."""
+    A startup failure raises (``main`` shows it in a message box).  Launching again while it runs only
+    reopens the browser on it (``InstanceLock``)."""
 
     stop = threading.Event()
     url = runner.start()
-    runner.server.app.on_stop = stop.set
+    app = runner.server.app
+    app.on_stop = stop.set
     lock.publish(url)
     if open_browser:
         webbrowser.open(url)
     try:
-        while not stop.wait(0.5):
-            pass
+        while not stop.wait(1.0):
+            reason = app.lifecycle.try_close(jobs_running=bool(app.jobs.running()))
+            if reason:
+                print(f"[launcher] {reason}; stopping", flush=True)
+                break
     except KeyboardInterrupt:
         pass
     finally:
@@ -321,17 +335,29 @@ def main(argv: list[str] | None = None) -> int:
         workspace = check_workspace(args.workspace or documents_folder() / APP_NAME)
         lock = InstanceLock(workspace)
         if not lock.acquire():
-            url = lock.running_url()
-            if args.headless:
+            url = lock.running_url(announce=not args.headless and not args.no_browser)
+            if url is None and not args.headless:
+                # The running copy may be closing right now (its last tab was just closed): wait for it.
+                for _ in range(40):
+                    time.sleep(0.5)
+                    if lock.acquire():
+                        break
+                    url = lock.running_url(announce=not args.no_browser)
+                    if url:
+                        break
+            if lock.handle is not None:
+                print("[launcher] the previous copy has stopped; starting", flush=True)
+            elif args.headless:
                 _show_error(f"already running for {workspace} at {url}", True)
                 return EXIT_ALREADY_RUNNING
-            if url:
+            elif url:
                 print(f"[launcher] already running at {url}", flush=True)
                 if not args.no_browser:
                     webbrowser.open(url)
                 return 0
-            raise StartupError(f"LayerForge is already running for {workspace} but does not answer yet. "
-                               "Wait a moment and try again.")
+            else:
+                raise StartupError(f"LayerForge is already running for {workspace} but does not answer yet. "
+                                   "Wait a moment and try again.")
         runner = Runner(workspace, args.port, open_folders=not args.headless)
         if args.headless:
             return run_headless(runner, lock)

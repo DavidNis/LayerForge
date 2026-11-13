@@ -69,7 +69,9 @@ def test_browser_review_layers_is_read_only_and_keeps_inspection(app, tmp_path):
 
     sel = r["select"]
     second = sel["rows"][1]
-    assert sel["selected"] == second["id"] and sel["panel"] == second["name"] and sel["view"] == "Layer"
+    # The inspector names the selected layer as the list does ("Layer 2"; the color and file name are secondary).
+    assert sel["selected"] == second["id"] and sel["panel"].split(" of ")[0] == second["name"].split(" #")[0] == "Layer 2"
+    assert sel["view"] == "Layer"
     assert sel["src"].split("?")[0] == sel["sheet_image"].split("?")[0]  # the layer alone is shown
     assert sel["after_arrow"] == sel["rows"][2]["id"]  # arrow down: the next layer toward the back
     assert r["views"]["labels"][:2] == ["Assembled", "Layer"] and "assembled" in r["views"]["front_src"]

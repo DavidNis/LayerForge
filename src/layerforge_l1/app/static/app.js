@@ -99,6 +99,35 @@ const r3 = (v) => Math.round(v * 1000) / 1000;
 const fmt = (v, d = 2) => (v === null || v === undefined ? "–" : typeof v === "number" ? (Number.isInteger(v) ? String(v) : v.toFixed(d)) : esc(v));
 const badge = (cls, text, title = "") => `<span class="badge ${cls}"${title ? ` title="${esc(title)}"` : ""}>${esc(text)}</span>`;
 const swatch = (hex, big = false) => `<span class="swatch${big ? " big" : ""}" style="background:${esc(hex)}" title="${esc(hex)}"></span>`;
+// User-facing words for internal status codes; the code itself stays in the tooltip / Technical details.
+const STATUS_TEXT = {
+  PROPOSAL_READY_FOR_REVIEW: "Ready for review", ARTWORK_READY_NOT_PLANNED: "Not planned yet", REVIEWED_VALID: "Valid",
+  DRAFT_INVALID: "Invalid", CAD_VALID: "Files verified", CAD_INVALID: "File problems", VALID: "Valid",
+  PLANNING_FAILED: "Planning failed", PASS: "Checks pass", FAIL: "Checks fail", NOT_VERIFIED: "Not verified",
+  NO_RISKS_FOUND: "No risks found", RISKS_REPORTED: "Risks reported", UNSUPPORTED_FEATURES: "Unsupported features",
+  READY_TO_RESIZE: "Ready to resize", WARN: "Check", INFO: "Info", BLOCKER: "Blocker",
+};
+const ACRONYMS = new Set(["CAD", "STL", "STEP", "FDM", "3MF", "AMS", "PNG", "UTC"]);
+const humanize = (code) => {
+  const words = String(code ?? "").split(/[_\s]+/).filter(Boolean)
+    .map((w) => (ACRONYMS.has(w.toUpperCase()) ? w.toUpperCase() : w.toLowerCase()));
+  if (words.length && !ACRONYMS.has(words[0])) words[0] = words[0][0].toUpperCase() + words[0].slice(1);
+  return words.join(" ");
+};
+const statusText = (code) => STATUS_TEXT[code] || humanize(code);
+const statusBadge = (cls, code) => badge(cls, statusText(code), code);
+const localTime = (utc) => { const t = utc ? new Date(utc) : null; return !t ? "" : Number.isNaN(t.getTime()) ? String(utc) : t.toLocaleString(); };
+// Candidates are numbered in the order the planner proposed them; the planner's own name is in the tooltip.
+const candLabel = (name) => {
+  const i = (ui.state?.proposal?.candidates || []).findIndex((c) => c.name === name);
+  return i < 0 ? String(name ?? "") : `Candidate ${i + 1}`;
+};
+// Layers are numbered from the front, as in Review layers; the export file name is in the tooltip.
+const layerNo = (sheetId) => {
+  const sheets = ui.state?.draft?.sheets || [];
+  const i = sheets.findIndex((s) => s.id === sheetId);
+  return i < 0 ? null : sheets.length - i;
+};
 const yesno = (v) => (v === null || v === undefined ? "–" : v === true || v === "PASS" ? '<span class="yes">✓</span>' : '<span class="no">✗</span>');
 // `open` attribute for a collapsible section: the user's last choice, else the default.
 const openAttr = (key, byDefault = false, force = false) => (force || (ui.sections[key] ?? byDefault) ? "open" : "");
@@ -117,7 +146,7 @@ async function api(method, path, body, raw) {
   try {
     response = await fetch(path, options);
   } catch (err) {
-    throw { message: "The LayerForge server is not reachable. Is `python -m layerforge_l1 app` still running?", hint: String(err) };
+    throw { message: "LayerForge is not running. Start it again (double-click LayerForge.exe), then reload this page.", hint: String(err) };
   }
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw { message: data.error?.message || `HTTP ${response.status}`, hint: data.error?.hint, status: response.status };
@@ -192,7 +221,11 @@ function pollJob(job, label) {
 }
 
 function afterJob(job) {
+  ui.switchNotice = null;
   if (job.status !== "done") { ui.inspPendingEdit = null; return; }
+  if (job.kind === "start_review" && job.result?.previous_candidate && job.result.previous_candidate !== job.result.candidate) {
+    ui.switchNotice = { candidate: job.result.candidate, previous: job.result.previous_candidate, saved: Boolean(job.result.previous_review_saved) };
+  }
   if (job.kind === "propose" || job.kind === "upscale_preview") ui.tab = "proposal";
   if (job.kind === "upscale_retry") { ui.tab = "proposal"; ui.upscaleApproved = {}; }
   if (job.kind === "resize_analysis") { setTab("proposal"); ui.resizeSize = null; }
@@ -215,23 +248,23 @@ function afterJob(job) {
 
 function jobLabel(job) {
   return {
-    propose: "L1 proposal (planning, validation, CAD check)",
+    propose: "Planning the layers (with validation and a CAD check)",
     upscale_preview: "Upscale preview (intake at the finer resolution, comparison)",
-    resize_analysis: "Checking printability at other sheet sizes (FDM estimate)",
+    resize_analysis: "Checking printability at other sheet sizes",
     resize_preview: "Previewing the artwork at the new sheet size",
     resize_search: "Trial planning at larger sheet sizes (no CAD)",
-    resize_retry: "Resize & retry (L1 proposal at the new size, then the FDM estimate)",
-    upscale_retry: "Upscale & Retry (L1 proposal at the finer resolution)",
-    start_review: "Opening the review of this candidate (a saved review is restored; a new one is widened if on)",
+    resize_retry: "Re-planning at the new sheet size",
+    upscale_retry: "Re-planning at the finer resolution (Upscale & Retry)",
+    start_review: "Opening the layer review",
     widen: "Widening narrow cutouts into hidden material",
-    artwork_replan: "Planning sheets from the edited artwork (L1 proposal, validation, CAD check)",
+    artwork_replan: "Planning the layers from the artwork",
     accept_plan: "Accepting this plan (copying and checking it)",
     restore_plan: "Restoring the accepted plan (checked copy; no planning)",
     edit: "Applying the edit",
     undo: "Undo / revert (replaying the edit log)",
     verify: "Verifying save/reload (replaying the edit log)",
-    printability: "FDM printability estimate",
-    kit: "Building the print kit (export, reopen, compare, estimate)",
+    printability: "Checking printability",
+    kit: "Building the print kit (exporting and checking every file)",
   }[job.kind] || job.kind;
 }
 
@@ -386,7 +419,9 @@ function workflowSteps() {
 
 function workflowNav() {
   const steps = workflowSteps();
-  const current = { proposal: "plan", review: "review", printability: "printability", kit: "kit" }[ui.tab];
+  const notPlanned = ui.state.proposal?.status === "ARTWORK_READY_NOT_PLANNED";
+  const current = ui.tab === "proposal" && notPlanned ? "artwork"
+    : { proposal: "plan", review: "review", printability: "printability", kit: "kit" }[ui.tab];
   return `<nav class="workflow" role="tablist" aria-label="Workflow">${steps.map((st, i) => {
     const [state, sub] = st.state;
     const mark = STEP_MARK[state] || String(i + 1);
@@ -413,9 +448,44 @@ function tabBody() {
 function renderProjectSelect() {
   const select = $("#project-select");
   const options = ['<option value="">Open project…</option>'].concat(
-    ui.projects.map((p) => `<option value="${esc(p.name)}" ${p.name === ui.name ? "selected" : ""}>${esc(p.name)} · ${esc(p.stage)}</option>`));
+    ui.projects.map((p) => `<option value="${esc(p.name)}" ${p.name === ui.name ? "selected" : ""}>${esc(p.name)} · ${esc(stageText(p.stage))}</option>`));
   select.innerHTML = options.join("");
-  $("#footer").innerHTML = ui.info ? `LayerForge ${esc(ui.info.version)} · workspace <code>${esc(ui.info.workspace)}</code> · local only${ui.info.can_stop ? ` · <a href="#" data-action="app-stop" data-testid="app-stop">Stop LayerForge</a>` : ""}` : "";
+  $("#footer").innerHTML = ui.info ? `LayerForge ${esc(ui.info.version)} · workspace <code>${esc(ui.info.workspace)}</code> · local only` : "";
+  $("#app-exit").hidden = !ui.info?.can_stop;
+}
+
+const stageText = (stage) => ({ new: "imported", proposal: "planned", review: "in review", kit: "print kit built" }[stage] || stage);
+
+// The Artwork editor sits directly below the Issues of the current stage: on Plan until a review exists, then in
+// Review layers (user choice 2026-11-05).  Every "Edit artwork" entry (stepper, Plan, Review, issue card) opens it
+// there, so the editing context (the artwork the current sheets come from) never changes with the entry used.
+const artworkTab = () => (ui.state?.draft ? "review" : "proposal");
+function editArtworkButton(cls = "") {
+  const a = ui.state?.artwork;
+  if (!a?.available) return "";
+  const n = unsavedArt();
+  return `<a class="button ${cls}" href="#/${encodeURIComponent(ui.name)}/${artworkTab()}" data-action="tab" data-tab="${artworkTab()}" data-focus="artwork" data-testid="edit-artwork"
+    title="Open the Artwork editor (${ui.state.draft ? "in Review layers, below Issues" : "on this page, below Issues"})">Edit artwork${n ? ` <span class="badge warn">${n} unsaved</span>` : a.differs_from_planned ? ' <span class="badge warn">not planned</span>' : ""}</a>`;
+}
+
+// One next step per stage, shown at the top of the Plan card.
+function planNextAction(p, sel, reviewing) {
+  const a = ui.state.artwork;
+  const dis = busy() ? "disabled" : "";
+  if (a?.can_replan) {  // not planned yet, or the artwork changed after planning
+    const blocked = unsavedArt() ? 'disabled title="Save or discard the artwork changes first: planning uses the saved artwork"' : dis;
+    return `<div class="next-action" data-testid="plan-next">
+      <button class="primary large" data-action="art-replan" data-testid="plan-next-button" ${blocked}>${a.planned ? "Plan sheets from the edited artwork" : "Plan sheets from this artwork"}</button>
+      ${editArtworkButton()}
+    </div>${a.planned ? replaceWarning() : ""}`;
+  }
+  if (!sel) return "";
+  return reviewing
+    ? `<div class="next-action" data-testid="plan-next"><a class="button primary large" href="#/${encodeURIComponent(ui.name)}/review" data-action="tab" data-tab="review" data-testid="plan-next-button">Continue to Review layers →</a>
+        ${editArtworkButton()}
+        <span class="small muted">Reviewing <strong title="${esc(reviewing)}">${esc(candLabel(reviewing))}</strong> · <a href="#" data-action="tab" data-tab="proposal" data-focus="candidates" data-testid="to-candidates">compare or switch candidates</a></span></div>`
+    : `<div class="next-action" data-testid="plan-next"><button class="primary large" data-action="start-review" data-candidate="${esc(sel.name)}" data-testid="plan-next-button" ${dis}>Review this candidate</button>
+        ${editArtworkButton()}${widenChoiceBox()}</div>`;
 }
 
 function errorBanner() {
@@ -441,8 +511,8 @@ function jobBanner() {
     <div class="spinner" aria-hidden="true"></div>
     <div style="flex:1">
       <div class="spread"><strong>${esc(jobLabel(job))}</strong><span class="muted coords">${job.status === "queued" ? "queued" : `${fmt(job.elapsed_s, 1)} s`}</span></div>
-      <div class="small">${last ? `Current step: <code>${esc(last.stage)}</code>` : "Waiting for the worker…"} — the page stays usable; results appear when the job finishes.</div>
-      <div class="events">${events}</div>
+      <div class="small">${last ? esc(humanize(last.stage)) : "Waiting to start…"} <span class="muted">· you can keep working; results appear when it finishes.</span></div>
+      <details class="small" data-section="job-events"${ui.sections["job-events"] ? " open" : ""}><summary>Technical details</summary><div class="events">${events}</div></details>
     </div>
   </div>`;
 }
@@ -463,14 +533,14 @@ function statusStrip() {
   const kit = latestKit();
   let geo;
   if (!draft) {
-    geo = ["neutral", "No reviewed stack yet", "Pick a candidate from the proposal to start the review."];
+    geo = ["neutral", "Not reviewed yet", "Review a candidate to check its layers."];
   } else if (draft.status.printable) {
     const cad = kit && !kit.stale
-      ? (kit.status.cad === "CAD_VALID" ? `CAD verified by reopening every STEP/STL (${kit.id}).` : `CAD INVALID in ${kit.id}.`)
-      : kit ? (kit.candidate && kit.candidate !== ui.state.record.candidate ? `Latest kit was built from candidate ${kit.candidate}, not the one in review.` : "Latest kit is out of date: the draft changed after it was built.") : "CAD not exported yet (build a print kit).";
-    geo = [kit && !kit.stale && kit.status.cad !== "CAD_VALID" ? "bad" : "ok", "Valid geometry", `Validators PASS. ${cad}`];
+      ? (kit.status.cad === "CAD_VALID" ? `CAD verified by reopening every STEP/STL (${kit.id}).` : `File problems in ${kit.id}.`)
+      : kit ? (kit.candidate && kit.candidate !== ui.state.record.candidate ? `The latest print kit was built from ${candLabel(kit.candidate)}, not the one in review.` : "The latest print kit is out of date: the layers changed after it was built.") : "Files are made when you build the print kit.";
+    geo = [kit && !kit.stale && kit.status.cad !== "CAD_VALID" ? "bad" : "ok", "Valid", `All layer checks pass. ${cad}`];
   } else {
-    geo = ["bad", "Invalid draft", `${draft.validation.failures.length} validation failure(s); not exportable until fixed.`];
+    geo = ["bad", "Invalid", `${draft.validation.failures.length} validation failure(s); cannot be exported until fixed.`];
   }
   if (unsavedArt()) {
     geo = ["warn", "Unsaved artwork changes", `${unsavedArt()} artwork change(s) are not saved yet. Save or discard them in the Artwork editor; export is blocked until then.`];
@@ -479,20 +549,24 @@ function statusStrip() {
   }
   let fdm = ["neutral", "Not estimated", "Run the printability estimate or build a kit."];
   const est = kit && !kit.stale ? { status: kit.printability.status, counts: kit.printability.counts, from: `kit ${kit.id}` }
-    : s.printability && !s.printability.stale ? { status: s.printability.status, counts: s.printability.counts, from: "draft estimate" } : null;
+    : s.printability && !s.printability.stale ? { status: s.printability.status, counts: s.printability.counts, from: "latest check" } : null;
   if (est) {
     const cls = est.status === "NO_RISKS_FOUND" ? "ok" : est.status === "RISKS_REPORTED" ? "warn" : "bad";
     fdm = [cls, fdmLabel(est.status), `${est.counts.UNSUPPORTED} unsupported · ${est.counts.RISK} risk (${est.from})`];
   } else if (s.printability || kit) {
-    fdm = ["neutral", "Estimate out of date", "The draft changed since the last estimate."];
+    fdm = ["neutral", "Estimate out of date", "The layers changed since the last check."];
   }
+  // Shown once there is something to report: a review exists, or the artwork needs attention.  On Export the
+  // current kit's own cards say the same, so the strip only stays there for a warning.
+  const warning = geo[0] === "warn" || geo[0] === "bad";
+  if (ui.tab === "kit" || (!warning && !draft)) return "";
   return `<div class="status-strip" data-testid="status-strip">
-    ${statusCard("Geometry / CAD", geo, "status-geometry")}
-    ${statusCard("FDM printability (estimate)", fdm, "status-fdm")}
+    ${statusCard("Layers", geo, "status-geometry")}
+    ${statusCard("Printability (estimate)", fdm, "status-fdm")}
     <div class="status-card neutral physical" data-testid="status-physical">
       <div class="label">Physical print</div>
       <div class="value">${badge("outline", "NOT VERIFIED")}</div>
-      <div class="note">Only your test print can confirm a result. ${infoTip(s.physical.note + " Test print L-G10 is pending.")}</div>
+      <div class="note">Only your test print can confirm a result. ${infoTip(s.physical.note + " No test print has been reported yet.")}</div>
     </div>
   </div>`;
 }
@@ -519,24 +593,24 @@ function importView() {
       <label class="field"><span>Project name</span><input id="f-name" placeholder="from file name"></label>
       <label class="check small"><input type="checkbox" id="f-plan-later" data-testid="plan-later" ${ui.planLater ? "checked" : ""}> Edit artwork colors before planning ${infoTip("Prepares the flat-color artwork only. You plan the sheets when you choose.")}</label>
       <details class="section subtle" data-section="import-settings" ${openAttr("import-settings")}>
-        <summary><h4 style="margin:0">Settings</h4><span class="small muted">sheet size, thickness, grid scale, colors</span></summary>
+        <summary><h4 style="margin:0">Settings</h4><span class="small muted">sheet size, thickness, detail, colors</span></summary>
         <div class="section-body">
       <div class="form-grid">
-        <label class="field"><span>Grid scale</span><select id="f-scale">${scales.map((s) => `<option value="${s}" ${s === 2 ? "selected" : ""}>${s} · ${(0.390625 / s).toFixed(3)} mm/px${s === 1 ? " · fast" : s === 4 ? " · slow" : ""}</option>`).join("")}</select></label>
+        <label class="field"><span>Detail (grid scale)</span><select id="f-scale">${scales.map((s) => `<option value="${s}" ${s === 2 ? "selected" : ""}>${s} · ${s === 1 ? "coarse, fast" : s === 4 ? "fine, slow" : "standard"} (${(0.390625 / s).toFixed(3)} mm/px)</option>`).join("")}</select></label>
         <label class="field"><span>Sheet size (mm)</span><input id="f-outer" type="number" value="225" min="50" step="1"></label>
         <label class="field"><span>Sheet thickness (mm)</span><input id="f-thick" type="number" value="1.6" min="0.2" step="0.2"></label>
         <label class="field"><span>Max colors</span><input id="f-colors" type="number" value="12" min="2" max="32"></label>
       </div>
-      <p class="small muted">The artwork fills the sheet minus a 12.5 mm shared border. Scale 4 can take many minutes and much memory.</p>
+      <p class="small muted">The artwork fills the sheet minus a 12.5 mm border. Fine detail (4) can take many minutes and much memory.</p>
         </div>
       </details>
-      <div class="row"><button class="primary" data-action="create" ${ui.upload && !busy() ? "" : "disabled"}>${ui.planLater ? "Import and prepare artwork" : "Import and propose layers"}</button></div>
+      <div class="row"><button class="primary" data-action="create" ${ui.upload && !busy() ? "" : "disabled"}>${ui.planLater ? "Import and prepare artwork" : "Import and plan layers"}</button></div>
     </div>
     <div class="panel stack">
       <h2>Projects</h2>
       ${projectNotice()}
-      ${ui.projects.length ? `<table><thead><tr><th>Name</th><th>Stage</th><th>Created (UTC)</th><th></th></tr></thead><tbody>${ui.projects.map((p) => `
-        <tr data-testid="project-row" data-project="${esc(p.name)}"><td><a href="#/${encodeURIComponent(p.name)}">${esc(p.name)}</a></td><td>${esc(p.stage)}</td><td class="small muted">${esc(p.created_utc)}</td>
+      ${ui.projects.length ? `<table><thead><tr><th>Name</th><th>Stage</th><th>Created</th><th></th></tr></thead><tbody>${ui.projects.map((p) => `
+        <tr data-testid="project-row" data-project="${esc(p.name)}"><td><a href="#/${encodeURIComponent(p.name)}">${esc(p.name)}</a></td><td>${esc(stageText(p.stage))}</td><td class="small muted">${esc(localTime(p.created_utc))}</td>
           <td>${ui.confirmProject === p.name ? "" : `<button class="small ghost danger" data-action="delete-project-ask" data-project="${esc(p.name)}" data-testid="project-delete">Delete…</button>`}</td></tr>
         ${ui.confirmProject === p.name ? `<tr><td colspan="4">${projectDeleteConfirm(p.name)}</td></tr>` : ""}`).join("")}</tbody></table>`
         : '<p class="muted">No projects yet.</p>'}
@@ -603,18 +677,18 @@ function proposalView() {
   const notPlanned = p.status === "ARTWORK_READY_NOT_PLANNED";
   const reviewing = record.candidate;
   const saved = p.saved_reviews || {};
-  const flags = (p.flags || []).map((f) => `<li>${badge(f.severity === "BLOCKER" ? "bad" : f.severity === "WARN" ? "warn" : "neutral", f.severity)} <strong>${esc(f.code)}</strong> — ${esc(f.message)}</li>`).join("");
+  // Only columns that differ between candidates are shown; the sheets themselves are the thumbnails.
+  const anySplit = p.candidates.some((c) => c.source_regions_split_across_sheets);
+  const anyMismatch = p.candidates.some((c) => c.reconstruction_mismatched_pixels);
   const rows = p.candidates.map((c) => `
-    <tr class="${c.name === p.selected ? "selected" : ""}">
-      <td><strong>${esc(c.name)}</strong>${c.name === p.selected ? " " + badge("ok", "selected") : ""}${c.name === reviewing ? " " + badge("neutral", "in review") : ""}${saved[c.name] ? " " + badge("outline", "saved review", `Saved ${saved[c.name].parked_utc} with ${saved[c.name].edits} edit(s)`) : ""}</td>
-      <td>${badge(c.status === "VALID" ? "ok" : "bad", c.status)}</td>
-      <td>${fmt(c.sheet_count)}</td>
-      <td>${(c.front_to_back_colors || []).map((h) => swatch(h)).join(" ")}</td>
-      <td>${fmt(c.source_regions_split_across_sheets)}${c.seam_length_mm != null ? ` <span class="muted small">(${fmt(c.seam_length_mm)} mm)</span>` : ""}${c.cell_refinement ? " " + badge("neutral", "refined cells") : ""}</td>
-      <td>${fmt(c.reconstruction_mismatched_pixels)}</td>
-      <td>${fmt(c.planning_seconds, 1)}</td>
+    <tr class="${c.name === p.selected ? "selected" : ""} ${c.name === reviewing ? "reviewing" : ""}" data-candidate="${esc(c.name)}" title="${esc(`Planner: ${c.name} · planned in ${fmt(c.planning_seconds, 1)} s`)}">
+      <td><div class="cand-name"><strong>${esc(candLabel(c.name))}</strong>${c.name === reviewing ? " " + badge("neutral", "in review") : ""}${c.name === p.selected ? " " + badge("ok", "recommended") : ""}${saved[c.name] ? " " + badge("outline", "saved review", `Saved ${localTime(saved[c.name].parked_utc)} with ${saved[c.name].edits} edit(s)`) : ""}${c.status === "VALID" ? "" : " " + statusBadge("bad", c.status)}</div>
+        ${c.sheet_masks ? `<div class="sheet-strip" data-testid="cand-sheets" aria-label="Sheets front to back">${c.sheet_masks.map((m, i) => `<i class="sheet-thumb" style="background-color:${esc(m.color)};-webkit-mask-image:url('${esc(m.url)}');mask-image:url('${esc(m.url)}')" title="Layer ${i + 1} · ${esc(m.color)}"></i>`).join("")}</div>` : ""}</td>
+      <td>${fmt(c.sheet_count)}${c.same_sheets_as_selected ? ` <span class="small muted" data-testid="cand-same">same sheets as recommended</span>` : ""}</td>
+      ${anySplit ? `<td>${c.source_regions_split_across_sheets ? `${fmt(c.source_regions_split_across_sheets)}${c.seam_length_mm != null ? ` <span class="muted small">(${fmt(c.seam_length_mm)} mm seams)</span>` : ""}` : "none"}${c.cell_refinement ? " " + badge("neutral", "refined cells") : ""}</td>` : ""}
+      ${anyMismatch ? `<td>${c.reconstruction_mismatched_pixels === 0 ? '<span class="yes">✓</span> exact' : c.reconstruction_mismatched_pixels == null ? "–" : `${fmt(c.reconstruction_mismatched_pixels)} px differ`}</td>` : ""}
       <td>${c.status === "PLANNING_FAILED" ? `<span class="small muted">${esc(c.reason || "")}</span>` :
-        c.name === reviewing ? "" : `<button class="small" data-action="start-review" data-candidate="${esc(c.name)}" data-testid="candidate-review" ${busy() ? "disabled" : ""}${reviewing ? ` title="${esc(`Your review of ${reviewing} is saved and can be reopened from this table`)}"` : ""}>${saved[c.name] ? "Resume saved review" : "Review this candidate"}</button>`}</td>
+        c.name === reviewing ? "" : `<button class="small" data-action="start-review" data-candidate="${esc(c.name)}" data-testid="candidate-review" ${busy() ? "disabled" : ""}${reviewing ? ` title="${esc(`Your review of ${candLabel(reviewing)} is saved and can be reopened from this table`)}"` : ""}>${saved[c.name] ? "Resume saved review" : "Review this candidate"}</button>`}</td>
     </tr>`).join("");
   const img = p.images || {};
   const obstruction = p.candidates.filter((c) => c.obstruction_url);
@@ -622,18 +696,14 @@ function proposalView() {
   const blockers = (p.flags || []).filter((f) => f.severity === "BLOCKER");
   const notes = (p.flags || []).filter((f) => f.severity !== "BLOCKER");
   const warnings = notes.filter((f) => f.severity === "WARN").length;
-  const cadLine = p.cad ? `<p class="small muted" style="margin:0">CAD check of the selected candidate: reopened STL ${p.cad.revalidation_pass ? "PASS" : "FAIL"}, stack mismatch ${fmt(p.cad.stack_mismatch_px)} px, ${p.cad.step_verification === "PENDING_PRINT_KIT" ? "STEP verified with the print kit" : `STEP single solids ${p.cad.all_step_valid_single_solid ? "yes" : "no"}`}, watertight STL ${p.cad.all_stl_watertight_single_component ? "yes" : "no"}.</p>` : "";
-  const reviewAction = !sel ? "" : reviewing
-    ? `<a class="button" href="#/${encodeURIComponent(ui.name)}/review" data-action="tab" data-tab="review">Open the editor →</a><span class="small muted">Reviewing <strong>${esc(reviewing)}</strong> · <a href="#" data-action="tab" data-tab="proposal" data-focus="candidates" data-testid="to-candidates">compare or switch candidates</a></span>`
-    : `<button class="primary large" data-action="start-review" data-candidate="${esc(sel.name)}" ${busy() ? "disabled" : ""}>Review this candidate</button>${widenChoiceBox()}`;
+  const cadLine = p.cad ? `<p class="small muted" style="margin:0">CAD check of the recommended candidate: reopened STL ${p.cad.revalidation_pass ? "PASS" : "FAIL"}, stack mismatch ${fmt(p.cad.stack_mismatch_px)} px, ${p.cad.step_verification === "PENDING_PRINT_KIT" ? "STEP verified with the print kit" : `STEP single solids ${p.cad.all_step_valid_single_solid ? "yes" : "no"}`}, watertight STL ${p.cad.all_stl_watertight_single_component ? "yes" : "no"}.</p>` : "";
+  const next = planNextAction(p, sel, reviewing);
   const summary = sel ? `<div class="plan-summary">
       ${img.assembled_front ? `<img class="img plan-thumb" src="${esc(img.assembled_front)}" alt="assembled front view of the selected plan">` : ""}
       <div class="stack" style="gap:6px">
         <div class="plan-figure"><strong>${fmt(sel.sheet_count)} sheets</strong> <span class="muted">· ${(p.palette || []).length} colors</span></div>
         <div class="row" title="Colors front to back">${(sel.front_to_back_colors || []).map((h) => swatch(h, true)).join("")}<span class="small muted">front → back</span></div>
-        <div class="small muted">Candidate <strong>${esc(sel.name)}</strong> · ${fmt(sel.source_regions_split_across_sheets)} split region(s) · ${fmt(sel.reconstruction_mismatched_pixels)} px mismatch</div>
-        ${p.cad && p.cad.step_verification === "PENDING_PRINT_KIT" ? `<div class="small muted" data-testid="step-pending">STEP check: done when you build the print kit.</div>` : ""}
-        <div class="row">${reviewAction}</div>
+        <div class="small muted" title="${esc(`Planner: ${sel.name}`)}"><strong>${esc(candLabel(sel.name))}</strong> (recommended) · ${sel.source_regions_split_across_sheets ? `${fmt(sel.source_regions_split_across_sheets)} color region(s) split across layers` : "no color split across layers"} · ${sel.reconstruction_mismatched_pixels === 0 ? "matches the artwork exactly" : `${fmt(sel.reconstruction_mismatched_pixels)} px differ from the artwork`}</div>
       </div></div>`
     : `<div class="row"><h4 style="margin:0">Palette</h4>${(p.palette || []).map((h) => swatch(h, true)).join("")}</div>`;
   return `<div class="panel stack">
@@ -641,28 +711,30 @@ function proposalView() {
         <h2>Plan ${badge(ready ? "ok" : notPlanned ? "neutral" : "warn", ready ? "Ready for review" : notPlanned ? "Artwork prepared · not planned yet" : "Needs your decision")}</h2>
         <span class="muted small">Automatic proposal · ${fmt(p.seconds, 1)} s${p.artwork_edits ? ` · planned from artwork you edited (${p.artwork_edits.region_recolors} artwork edit${p.artwork_edits.region_recolors === 1 ? "" : "s"})` : ""} ${infoTip("No manual layer plan is used: the sheets are proposed automatically, validated, exported to STL, reopened and checked. STEP files are exported and verified when you build the print kit.")}</span>
       </div>
-      ${notPlanned ? `<div class="banner info">The flat-color artwork is ready; no sheets are planned yet. Edit the artwork in the <strong>Artwork editor</strong> below if needed, then choose <strong>Plan sheets from this artwork</strong>.</div>` : ""}
+      ${next}
       ${p.artwork_check ? artworkCheck(p.artwork_check) : ""}
       ${ready || notPlanned ? "" : `<div class="banner warn">No candidate passed every check. Nothing was edited automatically. ${obstruction.length ? "The obstruction maps (Previews) show where the planner cannot support the artwork." : "See the notes below."}${ui.state.upscale?.available ? " You can also try <strong>Upscale &amp; Retry</strong> below." : ""}</div>`}
-      ${blockers.length ? `<ul class="banner error small blockers" data-testid="proposal-blockers">${blockers.map((f) => `<li><strong>${esc(f.code)}</strong> — ${esc(f.message)}</li>`).join("")}</ul>` : ""}
+      ${blockers.length ? `<ul class="banner error small blockers" data-testid="proposal-blockers">${blockers.map((f) => `<li title="${esc(f.code)}"><strong>${esc(humanize(f.code))}</strong> — ${esc(f.message)}</li>`).join("")}</ul>` : ""}
       ${ui.state.upscale && ui.state.upscale.scale !== ui.state.upscale.import_scale ? `<p class="small muted" data-testid="processing-scale">Processing resolution: scale ${ui.state.upscale.scale} (imported at scale ${ui.state.upscale.import_scale}; raised by Upscale &amp; Retry). Physical size unchanged.</p>` : ""}
       ${summary}
       ${rows ? `<details class="section subtle" data-section="candidates" data-testid="candidates-section" ${openAttr("candidates", !ready && !notPlanned)}>
         <summary><h4 style="margin:0">Compare candidates</h4><span class="small muted">${p.candidates.length} candidate${p.candidates.length === 1 ? "" : "s"} · ${p.candidates.filter((c) => c.status === "VALID").length} valid</span></summary>
         <div class="section-body"><div class="table-wrap"><table>
-        <thead><tr><th>Candidate</th><th>Status</th><th>Sheets</th><th>Colors front → back</th><th>Split regions (seams)</th><th>Mismatch px</th><th>Time s</th><th></th></tr></thead>
+        <thead><tr><th>Candidate · sheets front → back</th><th>Sheets</th>${anySplit ? "<th>Colors split across layers</th>" : ""}${anyMismatch ? "<th>Front view vs artwork</th>" : ""}<th></th></tr></thead>
         <tbody>${rows}</tbody></table></div></div></details>` : ""}
       ${notes.length || cadLine ? `<details class="section subtle" data-section="flags" ${openAttr("flags", !ready && !notPlanned)}>
         <summary><h4 style="margin:0">Notes</h4><span class="small muted">${notes.length} note${notes.length === 1 ? "" : "s"}${warnings ? ` · ${warnings} to check` : ""}</span></summary>
-        <div class="section-body stack" style="gap:6px"><ul class="small" style="margin:0">${notes.map((f) => `<li>${badge(f.severity === "WARN" ? "warn" : "neutral", f.severity)} <strong>${esc(f.code)}</strong> — ${esc(f.message)}</li>`).join("")}</ul>${cadLine}</div></details>` : ""}
+        <div class="section-body stack" style="gap:6px"><ul class="small" style="margin:0">${notes.map((f) => `<li title="${esc(f.code)}">${statusBadge(f.severity === "WARN" ? "warn" : "neutral", f.severity)} ${esc(f.message)}</li>`).join("")}</ul>
+          <details class="small"><summary>Technical details</summary><p class="small muted" style="margin:4px 0">Note codes: ${notes.map((f) => `<code>${esc(f.code)}</code>`).join(" ")}</p>${cadLine}</details></div></details>` : ""}
     </div>
     ${ui.state.draft ? "" : issuesPanel()}
-    ${ui.state.draft ? `<p class="small muted panel tight">The artwork is edited in <a href="#/${encodeURIComponent(ui.name)}/review" data-action="tab" data-tab="review" data-focus="artwork">Review layers</a> while a review exists.</p>` : artworkPanel()}
+    ${ui.state.draft ? "" : artworkPanel()}
+    ${attemptsPanel()}
+    <h4 class="group-label" data-testid="more-options">More options</h4>
     ${resizePanel()}
     ${upscalePanel()}
     ${cleanupPanel(p, reviewing)}
     ${detailsPanel(p, reviewing)}
-    ${attemptsPanel()}
     <details class="panel section" data-section="proposal-previews" ${openAttr("proposal-previews", !ready && !notPlanned)}>
       <summary><h3>Previews</h3><span class="small muted">source · flat-color target · assembled · exploded${obstruction.length ? " · obstruction maps" : ""} ${infoTip("Drawn from the reopened STL of the selected candidate. Click an image to open it full size.")}</span></summary>
       <div class="section-body stack">
@@ -698,9 +770,8 @@ function resizePanel() {
       ${env.printers.map((x) => `<option value="${esc(x.preset)}" ${x.preset === chosen ? "selected" : ""}>${esc(x.model)} (keep-out zones excluded)</option>`).join("")}</select></label>` : "";
   const failed = ui.state.proposal?.status === "NEEDS_USER_DECISION";
   return `<details class="panel section" data-section="resize" data-testid="resize-panel" ${openAttr("resize", Boolean(a || last || failed))}>
-    <summary><h3>Physical size ${r.sheet_mm !== r.import_sheet_mm ? badge("neutral", `resized from ${fmt(r.import_sheet_mm, 1)} mm`) : ""}</h3><span class="small muted">${sizeLabel(r.sheet_size_mm || [r.sheet_mm, r.sheet_mm])} sheet · make the sheets larger or smaller</span></summary>
+    <summary><h3>Physical size ${r.sheet_mm !== r.import_sheet_mm ? badge("neutral", `resized from ${fmt(r.import_sheet_mm, 1)} mm`) : ""}</h3><span class="small muted">${sizeLabel(r.sheet_size_mm || [r.sheet_mm, r.sheet_mm])} sheet · make the sheets larger or smaller ${infoTip("A larger sheet widens every opening and strip by the same ratio; a smaller one narrows them. Every printability threshold is in millimetres, so some findings clear by size alone; others (topology, unmeasured necks) cannot. Nothing is resized without your approval; the image is never edited.")}</span></summary>
     <div class="section-body stack">
-    <p class="small muted" style="margin:0">A larger sheet widens every opening and strip by the same ratio; a smaller one narrows them. Nothing is resized without your approval. ${infoTip("Every printability threshold is in millimetres (planner structural width, nozzle, minimum opening and material width), so some findings clear by size alone; others (topology, unmeasured necks) cannot. The image is never edited.")}</p>
     ${last ? resizeCheck(last) : ""}
     ${r.available ? `<details class="section" data-section="resize-process" ${openAttr("resize-process")}><summary>Printer and process for the check: <strong>${esc(ui.process.name)}</strong></summary>${processForm("rs")}</details>
     <div class="row">${printers}<button class="${a ? "" : "primary"}" data-action="resize-analyze" data-testid="resize-analyze" ${busy() ? "disabled" : ""}>Check printability at other sizes</button></div>`
@@ -745,7 +816,7 @@ function resizeCheck(c) {
       <div class="table-wrap"><table><thead><tr><th>#</th><th>Finding</th><th>Width</th><th>Sheet</th><th>Location (x, y)</th></tr></thead><tbody>${rows}</tbody></table></div>
       ${after.map_urls?.length ? `<details data-section="resize-maps" ${openAttr("resize-maps")}><summary>Maps (unsupported red, risk orange)</summary><div class="gallery">${after.map_urls.map((u) => `<figure><img class="img" src="${esc(u)}" alt="map" loading="lazy"><figcaption>${esc(u.split("/").pop().split("?")[0])}</figcaption></figure>`).join("")}</div></details>` : ""}
       ${path}` : after ? `<p class="small">No unsupported findings were measured after re-planning${after.counts.RISK ? `; ${after.counts.RISK} risk finding(s) remain` : ""}.</p>` : ""}
-    <p class="small muted">Measured findings come from the FDM estimate of the re-planned stack (an estimate, not a slicer); ${badge("outline", "NOT VERIFIED")} until printed. Geometric validation does not guarantee a successful print. Proposal time ${fmt(c.proposal_seconds, 0)} s.</p></div>`;
+    <p class="small muted">Estimate of the re-planned stack · proposal ${fmt(c.proposal_seconds, 0)} s ${infoTip("Measured by the FDM estimate (not a slicer); not verified until printed. Geometric validation does not guarantee a successful print.")}</p></div>`;
 }
 
 function resizeAnalysis(a) {
@@ -762,7 +833,7 @@ function resizeAnalysis(a) {
     <p class="small">${badge("outline", "prediction")} ${rec ? `Smallest useful larger size: <strong>${rowSize(rec)}</strong> (predicted ${rec.UNSUPPORTED} unsupported and ${rec.RISK} risk — an estimate, not a guarantee).` : "No larger sheet that fits this printer is predicted to improve the findings."}
       ${o.unsupported_not_fixable_within_printer.length ? ` ${o.unsupported_not_fixable_within_printer.length} unsupported finding(s) would need a sheet larger than the printer allows.` : ""}
       ${o.not_size_related.length ? ` ${o.not_size_related.length} finding(s) are not size-related and stay.` : ""}
-      Predictions multiply each measured width by the ratio; the retry re-plans and re-measures, and only that measured result counts.</p>
+      ${infoTip("Predictions multiply each measured width by the ratio; the retry re-plans and re-measures, and only that measured result counts.")}</p>
     ${a.trial_search?.available ? trialSearch(a.trial_search, a.current) : ""}
     ${a.current ? `<div class="row"><label class="field"><span>Width (mm)</span><input type="number" id="resize-width" data-testid="resize-width" min="${a.limit.min_sheet_mm}" step="1" value="${esc(size[0])}"></label>
       <label class="field"><span>Height (mm)</span><input type="number" id="resize-height" data-testid="resize-height" min="${a.limit.min_sheet_mm}" step="1" value="${esc(size[1])}"></label>
@@ -795,19 +866,19 @@ function resizePreview(v, a) {
       <td class="small">${swatch(c.previous_hex)} ${esc(c.previous_hex)} → ${swatch(c.new_hex)} ${esc(c.new_hex)} · ${fmt(c.area_mm2, 2)} mm²</td></tr>`).join("");
   const review = a.basis.stage === "review";
   return `<div class="stack" data-testid="resize-preview-result">
-    <h4 style="margin:0">Preview: ${from} → ${to} (×${fmt(v.ratio, 3)}) ${badge(ok ? "ok" : "bad", v.current ? v.status : "out of date")}</h4>
+    <h4 style="margin:0">Preview: ${from} → ${to} (×${fmt(v.ratio, 3)}) ${v.current ? statusBadge(ok ? "ok" : "bad", v.status) : badge("bad", "out of date")}</h4>
     <div class="table-wrap"><table><tbody><tr><td>Current</td><td class="small">${dims(v.dimensions_now)}</td></tr><tr><td>Proposed</td><td class="small">${dims(v.dimensions_new)}</td></tr></tbody></table></div>
     <details class="section" data-section="resize-boundaries" ${openAttr("resize-boundaries", !v.boundaries.pass)}><summary><strong>Dimensions and boundaries</strong> ${badge(v.boundaries.pass ? "ok" : "bad", v.boundaries.pass ? "all checks pass" : "failed")}</summary>
       <div class="table-wrap"><table><tbody>${checks}</tbody></table></div></details>
     <div><h4>Printability — prediction ${badge("outline", "estimate, not a result")}</h4>
-      <p class="small">Predicted: ${pr.cleared.length} cleared · ${pr.improved.length} improved · ${(pr.worsened || []).length} worse · ${pr.remaining.length} remain. ${esc(v.prediction_basis)}. The actual findings are measured after the retry.</p>
+      <p class="small">Predicted: ${pr.cleared.length} cleared · ${pr.improved.length} improved · ${(pr.worsened || []).length} worse · ${pr.remaining.length} remain ${infoTip(`${v.prediction_basis}. The actual findings are measured after the retry.`)}</p>
       ${pr.improved.length || pr.cleared.length ? `<details data-section="resize-improve" ${openAttr("resize-improve")}><summary>Improve (${pr.cleared.length + pr.improved.length})</summary><ul class="small">${list([...pr.improved, ...pr.cleared])}</ul></details>` : ""}
       ${(pr.worsened || []).length ? `<details data-section="resize-worse" data-testid="resize-worse" ${openAttr("resize-worse", true)}><summary>Get worse (${pr.worsened.length})</summary><ul class="small">${list(pr.worsened)}</ul></details>` : ""}
       ${pr.remaining.length ? `<details data-section="resize-remain" ${openAttr("resize-remain", true)}><summary>Remain (${pr.remaining.length})</summary><ul class="small">${list(pr.remaining)}</ul></details>` : ""}</div>
     <div><h4>Artwork fidelity ${v.refit ? badge("warn", "fitted again") : badge(changes.length ? "warn" : "ok", `${changes.length} visible change${changes.length === 1 ? "" : "s"}`)}</h4>
       ${v.artwork_edits ? `<div class="banner info small" data-testid="resize-keeps-artwork">Your ${v.artwork_edits.region_recolors} artwork edit${v.artwork_edits.region_recolors === 1 ? "" : "s"}${v.artwork_edits.pending ? " (not planned yet)" : ""} ${v.artwork_edits.region_recolors === 1 ? "is" : "are"} kept: the edited artwork is planned at the new size pixel for pixel, and its edit history moves with the new proposal. ${esc(v.artwork_edits.note)}</div>`
         : v.refit ? `<p class="small muted">The source image is fitted into the new aperture and flattened again by the intake; ${(v.details || []).length} intake detail(s) at this size (earlier detail choices are not carried: their positions change).</p>`
-        : `<p class="small muted">Same pixels and colors; the intake filters work in millimetres, so a larger sheet can keep details a smaller one merged (and a smaller sheet can merge or drop details). ${(v.details || []).length} intake detail(s) at this size (removed pieces such as eye highlights are kept by default).</p>`}
+        : `<p class="small muted">Same pixels and colors · ${(v.details || []).length} intake detail(s) at this size ${infoTip("The intake filters work in millimetres, so a larger sheet can keep details a smaller one merged (and a smaller sheet can merge or drop details). Removed pieces such as eye highlights are kept by default.")}</p>`}
       ${v.refit ? `<div class="banner warn small" data-testid="resize-refit">Other proportions: the artwork is fitted into the new aperture again (aspect kept, padded, never stretched or cropped), so it is resampled. Compare the two images below and approve the new artwork.</div>` : ""}
       ${v.images?.comparison ? `<figure><img class="img" style="max-width:720px" src="${esc(v.images.comparison)}" alt="current target | new target"><figcaption>Current target | target at the new size (changes outlined)</figcaption></figure>` : ""}
       ${changeRows ? `<div class="table-wrap"><table><tbody>${changeRows}</tbody></table></div>` : ""}</div>
@@ -863,7 +934,7 @@ function upscalePreview(v) {
   const added = (v.palette || []).filter((h) => !(v.previous_palette || []).includes(h));
   const removed = (v.previous_palette || []).filter((h) => !(v.palette || []).includes(h));
   return `<div class="stack" data-testid="upscale-preview-result">
-    <h4 style="margin:0">Preview at ${v.factor}× (scale ${v.from_scale} → ${v.to_scale}) ${badge(ok ? "ok" : "bad", v.current ? v.status : "out of date")}</h4>
+    <h4 style="margin:0">Preview at ${v.factor}× (scale ${v.from_scale} → ${v.to_scale}) ${v.current ? statusBadge(ok ? "ok" : "bad", v.status) : badge("bad", "out of date")}</h4>
     ${v.current ? "" : '<div class="banner warn">The image, settings or detail choices changed since this preview; preview again.</div>'}
     ${v.status === "BOUNDARY_CHECK_FAILED" ? '<div class="banner error">The physical boundaries could not be preserved at this resolution. Nothing will be retried.</div>' : ""}
     ${v.status === "INSUFFICIENT_MEMORY" ? `<div class="banner error">Not enough memory: ${esc(v.resources?.reason || "")}</div>` : ""}
@@ -887,25 +958,23 @@ function upscalePreview(v) {
 // Validation of the working plan as shown to the user before accepting it (accepting never checks it).
 function workingStatus() {
   const v = ui.state.draft?.validation?.status;
-  return v ? `validation ${badge(v === "PASS" ? "ok" : "warn", v)}` : ui.state.proposal ? `proposal ${badge(ui.state.proposal.status === "PROPOSAL_READY_FOR_REVIEW" ? "neutral" : "warn", ui.state.proposal.status)}` : "";
+  return v ? `layer checks ${statusBadge(v === "PASS" ? "ok" : "warn", v)}` : ui.state.proposal ? `${statusBadge(ui.state.proposal.status === "PROPOSAL_READY_FOR_REVIEW" ? "neutral" : "warn", ui.state.proposal.status)}` : "";
 }
 
 // Shown where a re-plan replaces the working plan: whether it can be brought back afterwards.
 function replaceWarning() {
   const c = ui.state.checkpoint;
   if (!c?.working_plan) return "";
-  if (c.replaced_is_accepted) return `<p class="small muted" data-testid="replace-kept">These sheets are the accepted plan: after re-planning you can bring them back with Restore accepted plan (Previous attempts).</p>`;
+  if (c.replaced_is_accepted) return `<p class="small muted" data-testid="replace-kept">These sheets are the accepted plan (Restore brings them back).</p>`;
   const accept = c.accept_blocked ? ` <span class="muted">Accepting is not available now: ${esc(c.accept_blocked)}.</span>`
     : ` <button data-action="plan-accept" data-testid="replace-accept" ${busy() ? "disabled" : ""}>Accept this plan</button>`;
-  return `<div class="banner warn small" data-testid="replace-warning">${c.exists
-    ? `The current plan is not the accepted plan: re-planning discards it. (Restore accepted plan brings back the plan accepted ${esc(c.accepted_utc)}.)`
-    : "No plan is accepted in this project: re-planning discards the current plan and it cannot be restored."} Accept it first to be able to come back to it.${accept}</div>`;
+  return `<div class="banner warn small" data-testid="replace-warning" title="${esc(c.exists ? `Restore accepted plan brings back the plan accepted ${localTime(c.accepted_utc)}.` : "Accept it first to be able to come back to it.")}">Re-planning discards the current plan${c.exists ? " (not the accepted one)" : ""}.${accept}</div>`;
 }
 
 async function restorePlan() {
   const c = ui.state.checkpoint, s = c.summary;
   const lost = ["the current proposal and review with their edits", ui.state.artwork?.edits?.length && !ui.state.artwork?.planned ? "artwork edits not planned yet" : "", "the size and upscale previews"].filter(Boolean);
-  if (!confirm(`Restore the accepted plan?\n\nAccepted ${c.accepted_utc}: ${s.candidate || "no candidate in review"}, ${s.sheets ?? "?"} sheets, ${sizeLabel(s.sheet_size_mm)}, scale ${s.scale}.\n\nThis discards the working plan (${lost.join(", ")}). Print kits, the source image and earlier attempts are kept. Nothing is planned again.`)) return;
+  if (!confirm(`Restore the accepted plan?\n\nAccepted ${localTime(c.accepted_utc)}: ${s.candidate ? candLabel(s.candidate) : "no candidate in review"}, ${s.sheets ?? "?"} sheets, ${sizeLabel(s.sheet_size_mm)}, scale ${s.scale}.\n\nThis discards the working plan (${lost.join(", ")}). Print kits, the source image and earlier attempts are kept. Nothing is planned again.`)) return;
   submit(`/api/projects/${encodeURIComponent(ui.name)}/plan/restore`, {});
 }
 
@@ -915,9 +984,9 @@ function attemptsPanel() {
   if (!attempts.length && !c.exists && !c.working_plan) return "";
   const s = c.summary || {};
   const accepted = c.exists ? `<tr data-testid="accepted-plan">
-      <td><strong>Accepted plan</strong>${c.working_is_accepted ? ` ${badge("ok", "in use")}` : ""}<br><span class="small muted">${esc(c.accepted_utc)}</span></td>
-      <td>scale ${s.scale}<br>${s.validation ? `validation ${badge(s.validation === "PASS" ? "ok" : "warn", s.validation)}` : badge(s.proposal_status === "PROPOSAL_READY_FOR_REVIEW" ? "neutral" : "warn", s.proposal_status)}</td>
-      <td class="small">${esc(s.candidate || "no candidate in review")}: ${s.sheets ?? "?"} sheets${s.review_edits ? ` · ${s.review_edits} review edit${s.review_edits === 1 ? "" : "s"}` : ""}${s.saved_reviews?.length ? `<br>saved reviews: ${esc(s.saved_reviews.join(", "))}` : ""}${s.artwork_edits ? `<br>${s.artwork_edits} artwork edit${s.artwork_edits === 1 ? "" : "s"}` : ""}</td>
+      <td><strong>Accepted plan</strong>${c.working_is_accepted ? ` ${badge("ok", "in use")}` : ""}<br><span class="small muted">${esc(localTime(c.accepted_utc))}</span></td>
+      <td>scale ${s.scale}<br>${s.validation ? `layer checks ${statusBadge(s.validation === "PASS" ? "ok" : "warn", s.validation)}` : statusBadge(s.proposal_status === "PROPOSAL_READY_FOR_REVIEW" ? "neutral" : "warn", s.proposal_status)}</td>
+      <td class="small">${esc(s.candidate ? candLabel(s.candidate) : "no candidate in review")}: ${s.sheets ?? "?"} sheets${s.review_edits ? ` · ${s.review_edits} review edit${s.review_edits === 1 ? "" : "s"}` : ""}${s.saved_reviews?.length ? `<br>saved reviews: ${esc(s.saved_reviews.join(", "))}` : ""}${s.artwork_edits ? `<br>${s.artwork_edits} artwork edit${s.artwork_edits === 1 ? "" : "s"}` : ""}</td>
       <td class="small">${sizeLabel(s.sheet_size_mm)} sheet</td>
       <td class="small">${(c.bytes / 1048576).toFixed(1)} MB copy in this project</td></tr>` : "";
   const actions = `<div class="row" data-testid="plan-checkpoint">
@@ -927,15 +996,16 @@ function attemptsPanel() {
       ${c.working_is_accepted ? `<span class="small">The current plan is the accepted plan.</span>` : ""}
     </div>
     ${(c.recovered || []).map((n) => `<div class="banner info small">${esc(n)}</div>`).join("")}
-    <p class="small muted" style="margin:0">Accept keeps one copy of the current plan (artwork, candidates, reviews with their edits and widening, issue decisions, sheet size and scale) so you can come back to it without planning again; accepting again replaces that copy. Accepting does not check or mean that the plan prints. Re-planning discards the current plan unless it is the accepted one${attempts.length ? "; the earlier attempts listed below are kept as they were" : ""}.</p>`;
+    <p class="small muted" style="margin:0">Keeps one copy of this plan to come back to; accepting again replaces it. ${infoTip(`The copy holds the artwork, candidates, reviews with their edits and widening, issue decisions, sheet size and scale. Accepting does not check or mean that the plan prints. Re-planning discards the current plan unless it is the accepted one${attempts.length ? "; the earlier attempts listed here are kept as they were" : ""}.`)}</p>`;
   const rows = attempts.map((a) => `<tr data-testid="attempt">
-      <td><strong>${esc(a.id)}</strong><br><span class="small muted">${esc(a.archived_utc)}</span></td>
-      <td>scale ${a.scale}<br>${badge(a.status === "PROPOSAL_READY_FOR_REVIEW" ? "neutral" : "bad", a.status)} ${(a.blockers || []).map((b) => badge("neutral", b)).join(" ")}</td>
+      <td><strong>${esc(a.id)}</strong><br><span class="small muted">${esc(localTime(a.archived_utc))}</span></td>
+      <td>scale ${a.scale}<br>${statusBadge(a.status === "PROPOSAL_READY_FOR_REVIEW" ? "neutral" : "bad", a.status)} ${(a.blockers || []).map((b) => badge("neutral", b)).join(" ")}</td>
       <td class="small">${a.candidates.map((c) => `${esc(c.name)}: ${esc(c.status)}${c.reason ? ` — ${esc(c.reason)}` : ""}`).join("<br>")}</td>
       <td class="small">${a.sheet_mm ? `${sizeLabel(a.sheet_size_mm || [a.sheet_mm, a.sheet_mm])} sheet · ` : ""}replaced by ${a.replaced_by.kind === "physical_resize" ? `resize to ${sizeLabel(a.replaced_by.sheet_size_mm || [a.replaced_by.sheet_mm, a.replaced_by.sheet_mm])}` : a.replaced_by.kind === "artwork_edit" ? `planning from the edited artwork (${a.replaced_by.region_recolors} artwork edit${a.replaced_by.region_recolors === 1 ? "" : "s"})` : `${a.replaced_by.upscale_factor}× processing (scale ${a.replaced_by.scale})`}: ${esc(a.replaced_by.status)}; ${a.replaced_by.approved_visible_changes} visible changes approved</td>
       <td class="small"><a href="${esc(a.images.target)}" target="_blank" rel="noopener">target</a>${a.images.obstruction.map((u) => ` · <a href="${esc(u)}" target="_blank" rel="noopener">obstruction map</a>`).join("")} · ${a.images.comparison ? `<a href="${esc(a.images.comparison)}" target="_blank" rel="noopener">preview comparison</a>` : ""}</td></tr>`).join("");
-  return `<details class="panel section" data-section="attempts" data-testid="attempts" ${openAttr("attempts", c.working_plan && !c.working_is_accepted)}>
-    <summary><h3>Previous attempts ${badge("neutral", String(attempts.length))}</h3><span class="small muted">${c.exists ? "accepted plan" + (c.working_is_accepted ? " (in use)" : "") + (attempts.length ? " · " : "") : ""}${attempts.length ? "earlier proposals with their diagnostics and settings" : c.exists ? "" : "no accepted plan"}</span></summary>
+  const state = c.working_is_accepted ? badge("ok", "current plan accepted") : c.exists ? badge("warn", "current plan not accepted") : badge("neutral", "nothing accepted yet");
+  return `<details class="panel section" data-section="attempts" data-testid="attempts" ${openAttr("attempts", Boolean(c.exists || c.working_plan))}>
+    <summary><h3>Accepted plan${attempts.length ? " &amp; earlier attempts" : ""}</h3><span class="small">${state}${c.exists ? ` <span class="muted">accepted ${esc(localTime(c.accepted_utc))}</span>` : ""}${attempts.length ? ` <span class="muted">· ${attempts.length} earlier attempt${attempts.length === 1 ? "" : "s"}</span>` : ""}</span></summary>
     <div class="section-body stack">${actions}
     ${accepted || rows ? `<div class="table-wrap"><table><thead><tr><th>Attempt</th><th>Result</th><th>Candidates</th><th>Retry</th><th>Evidence</th></tr></thead><tbody>${accepted}${rows}</tbody></table></div>` : ""}</div>
   </details>`;
@@ -949,7 +1019,7 @@ function widenOn() {
 
 function widenChoiceBox() {
   return `<label class="small check tip" data-tip="When the review starts, cutouts narrower than 0.8 mm are widened by up to 0.35 mm per side into material that layers in front already hide. The front view, visible shapes and layer count stay the same; it is logged as edit 1 and can be undone.">
-    <input type="checkbox" data-testid="widen-choice" ${widenOn() ? "checked" : ""} ${busy() ? "disabled" : ""}> Widen narrow cutouts into hidden material</label>`;
+    <input type="checkbox" data-testid="widen-choice" ${widenOn() ? "checked" : ""} ${busy() ? "disabled" : ""}> Widen narrow cutouts where it does not change the look</label>`;
 }
 
 // Details intake would recolor or erase: original | default intake | as planned, with a choice each.
@@ -1034,14 +1104,15 @@ function detailsPanel(p, reviewing) {
 const ART_SOURCES = { palette: "palette color", picker: "color picker", eyedropper: "eyedropper" };
 
 function artworkCheck(c) {
+  if (!c.region_recolors && !c.archived_as) return "";  // nothing was edited: before = after
   const n = (v) => (v == null ? "–" : String(v));
   return `<div class="subpanel stack" data-testid="artwork-check">
-    <h4 style="margin:0">Planned from the edited artwork ${badge(c.after.status === "PROPOSAL_READY_FOR_REVIEW" ? "ok" : "warn", c.after.status)}</h4>
+    <h4 style="margin:0">Planned from the edited artwork ${statusBadge(c.after.status === "PROPOSAL_READY_FOR_REVIEW" ? "ok" : "warn", c.after.status)}</h4>
     <div class="table-wrap"><table><thead><tr><th></th><th>Palette (colors)</th><th>Sheets (measured)</th><th>Status</th></tr></thead><tbody>
-      <tr><td>Before (${esc(c.before.stage)})</td><td>${n(c.before.palette_size)}</td><td>${n(c.before.sheet_count)}</td><td class="small">${esc(c.before.status)}</td></tr>
-      <tr data-testid="artwork-check-after"><td>After ${c.region_recolors} artwork edit${c.region_recolors === 1 ? "" : "s"}</td><td>${n(c.after.palette_size)}</td><td>${n(c.after.sheet_count)}${c.after.selected ? ` <span class="muted small">(${esc(c.after.selected)})</span>` : ""}</td><td class="small">${esc(c.after.status)}</td></tr>
+      <tr><td>Before</td><td>${n(c.before.palette_size)}</td><td>${n(c.before.sheet_count)}</td><td class="small">${esc(statusText(c.before.status))}</td></tr>
+      <tr data-testid="artwork-check-after"><td>After ${c.region_recolors} artwork edit${c.region_recolors === 1 ? "" : "s"}</td><td>${n(c.after.palette_size)}</td><td>${n(c.after.sheet_count)}${c.after.selected ? ` <span class="muted small">(${esc(candLabel(c.after.selected))})</span>` : ""}</td><td class="small">${esc(statusText(c.after.status))}</td></tr>
     </tbody></table></div>
-    <p class="small muted" style="margin:0">${esc(c.note)}${c.archived_as ? ` The previous attempt is kept as <code>${esc(c.archived_as)}</code> (Previous attempts).` : ""}</p></div>`;
+    ${infoTip(`${c.note}${c.archived_as ? ` The previous attempt is kept as ${c.archived_as}.` : ""}`)}</div>`;
 }
 
 const swatches = (hexes) => (hexes || []).map((h) => swatch(h)).join(" ");
@@ -1602,7 +1673,7 @@ function artworkPanel() {
         <button class="icon-btn tip" data-action="art-session" data-session="undo" data-testid="art-session-undo" aria-label="Undo" data-tip="Undo the last unsaved change (Ctrl+Z)" ${u.count && !u.stale ? dis : "disabled"}>${ICON.undo}</button>
         <button class="icon-btn tip" data-action="art-session" data-session="redo" data-testid="art-session-redo" aria-label="Redo" data-tip="Redo (Ctrl+Y)" ${u.redo && !u.stale ? dis : "disabled"}><span class="flip">${ICON.undo}</span></button>
         <button class="ghost" data-action="art-discard-ask" data-testid="art-discard" ${u.count || u.stale ? dis : "disabled"}>Discard Changes</button>
-        <button class="primary" data-action="art-session" data-session="save" data-testid="art-save" ${(u.count || shape) && !u.stale ? dis : "disabled"}>${ICON.check}<span>Save Changes</span></button>
+        <button class="save" data-action="art-session" data-session="save" data-testid="art-save" ${(u.count || shape) && !u.stale ? dis : "disabled"}>${ICON.check}<span>Save Changes</span></button>
       </div></div>`;
 
   const v = a.verify;
@@ -1612,23 +1683,26 @@ function artworkPanel() {
           <button class="small ghost tip" data-action="art-undo" data-keep="${e.index}" ${e.index === edits.length ? "disabled" : savedDis} data-tip="Keep edits 1..${e.index}">Revert here</button></li>`).join("")}</ul>` : '<p class="small muted" style="margin:0">No artwork edits.</p>'}
       <div class="row"><button class="tool-btn" data-action="art-undo" data-testid="art-undo" ${edits.length ? savedDis : "disabled"}>${ICON.undo}<span>Undo last saved</span></button>
         <button class="tool-btn" data-action="art-undo" data-keep="0" ${edits.length > 1 ? savedDis : "disabled"}>Revert all</button>
-        <button class="tool-btn tip" data-action="art-verify" data-testid="art-verify" ${edits.length ? dis : "disabled"} data-tip="Reload the saved log and replay it from its base">Verify save/reload</button></div>
+        <button class="tool-btn ghost tip" data-action="art-verify" data-testid="art-verify" ${edits.length ? dis : "disabled"} data-tip="Technical check: reload the saved edit log and replay it from its base">Verify save/reload</button></div>
       ${v ? `<p class="small" data-testid="art-verify-result">${v.replay_identical ? `<span class="yes">✓</span> Replaying all ${v.edits} saved edit(s) from the base reproduces the saved artwork exactly.` : `<span class="no">✗</span> ${esc(v.problems.join("; "))}`} <span class="muted">(${esc(v.checked_utc)})</span></p>` : ""}</div>`;
 
   // Planning from the artwork; also shown where Apply was after a color change.
   const pending = a.can_replan && edits.length > 0 && !u.count;
-  const replanNote = `Runs the same automatic proposal (unchanged planner and validators) on the artwork shown here.${a.planned ? " It replaces the current proposal, review and estimate; the accepted plan (Previous attempts) is kept." : ""} The palette size and the measured sheet count are shown afterwards; merging colors does not guarantee fewer sheets.`;
-  const replanButton = (testid) => `<button class="plan tip" data-action="art-replan" data-testid="${testid}" ${u.count ? 'disabled data-tip="Save Changes first: planning uses the saved artwork"' : dis}>${ICON.plan}<span>Plan sheets from this artwork</span></button>`;
+  const replanNote = `Runs the same automatic proposal (unchanged planner and validators) on the artwork shown here.${a.planned ? " It replaces the current proposal, review and estimate; the accepted plan is kept." : ""} The palette size and the measured sheet count are shown afterwards; merging colors does not guarantee fewer sheets.`;
+  const replanButton = (testid) => `<button class="tip" data-action="art-replan" data-testid="${testid}" ${u.count ? 'disabled data-tip="Save Changes first: planning uses the saved artwork"' : dis}>${ICON.plan}<span>Plan sheets from this artwork</span></button>`;
   const callout = pending && !sel && !shape ? `<div class="banner ok art-callout" data-testid="art-try-again-callout">
       <div><strong>${edits.length} artwork edit${edits.length === 1 ? "" : "s"} saved.</strong>
       <span class="small">The sheets are not planned for ${edits.length === 1 ? "it" : "them"} yet. Choose Plan sheets from this artwork to plan ${edits.length === 1 ? "it" : "them"}, or keep editing first.</span></div>
-      <div class="row">${replanButton("art-try-again")}</div>${a.planned ? replaceWarning() : ""}</div>` : "";
+      <div class="row">${replanButton("art-try-again")}</div>${a.planned && ui.tab !== "proposal" ? replaceWarning() : ""}</div>` : "";
   const replan = a.can_replan ? `<div class="subpanel art-replan" data-testid="art-replan">
       ${replanButton("art-replan-button")}
-      <span class="small muted">${u.count ? "Save Changes first." : "Nothing is planned until you click."} ${infoTip(replanNote)}</span>${a.planned && !callout ? replaceWarning() : ""}</div>` : "";
+      <span class="small muted">${u.count ? "Save Changes first." : "Nothing is planned until you click."} ${infoTip(replanNote)}</span>${a.planned && !callout && ui.tab !== "proposal" ? replaceWarning() : ""}</div>` : "";
 
-  return `<details class="panel section art-panel" data-section="artwork" data-testid="artwork-panel" ${openAttr("artwork", true)}>
-    <summary><h3>Artwork editor ${badge("neutral", "artwork edit · not a sheet edit")}</h3>
+  // Open by default while editing is the task at hand (nothing planned yet, unsaved or unplanned changes);
+  // folded once the sheets match the artwork (one click, or any "Edit artwork" entry, opens it).
+  const editing = !a.planned || Boolean(u.count) || a.differs_from_planned || pending;
+  return `<details class="panel section art-panel" data-section="artwork" data-testid="artwork-panel" ${openAttr("artwork", editing)}>
+    <summary><h3>Artwork editor</h3>
       <span class="small muted">${palette.length ? `${palette.length} colors · ` : ""}${edits.length} edit${edits.length === 1 ? "" : "s"}${u.count ? ` · <span class="unsaved-dot" aria-hidden="true"></span>${u.count} unsaved` : ""}${a.differs_from_planned ? " · not planned yet" : ""}</span></summary>
     <div class="section-body stack">
       <p class="small muted" style="margin:0">Edit the flat-color artwork: recolor and fill regions, draw lines and curves (they split regions), close contour gaps, paint inside a region. Sheets change only when you plan again. ${infoTip("The uploaded image is never changed and no sheet is edited here. Examples: unify two skin tones, change a necklace, or change one leg only with the Box tool.")}</p>
@@ -2373,6 +2447,7 @@ async function artworkPost(action, body) {
 const SEV_CLASS = { FAIL: "bad", BLOCKER: "bad", UNSUPPORTED: "bad", RISK: "warn", WARN: "warn", INFO: "neutral" };
 const SEV_COLOR = { FAIL: "#ff1f5a", BLOCKER: "#ff1f5a", UNSUPPORTED: "#ff1f5a", RISK: "#ff7a00", WARN: "#f5c400", INFO: "#2f8cff" };
 const SEV_ORDER = ["FAIL", "BLOCKER", "UNSUPPORTED", "RISK", "WARN", "INFO"];
+const SEV_WORD = { FAIL: "fails check", BLOCKER: "blocker", UNSUPPORTED: "unsupported", RISK: "risk", WARN: "check", INFO: "info" };
 const ISSUE_SOURCES = { validation: ["validation", "candidate"], fdm_estimate: ["fdm_estimate"], geometry_check: ["geometry_check"],
   planner: ["proposal"], intake: ["proposal"] };
 
@@ -2485,7 +2560,7 @@ function paddedArtwork(d) {
 function currentIssueBasis() {
   const s = ui.state;
   if (s?.draft) return `draft:${s.draft.updated_utc}`;
-  return `candidate:${s?.proposal?.selected ?? null}`;
+  return `candidate:${s?.proposal?.selected || ""}`;  // same spelling as the server (nothing selected: empty)
 }
 function inspBasisStale(d) {
   return Boolean(d && !d.error && d.basis && d.basis !== currentIssueBasis());
@@ -2597,15 +2672,15 @@ function inspGroupMates(d, issue) {
 
 function inspReviewHtml(d, issue, mates) {
   const rv = issue.review || { state: "needs_review" };
-  const buttons = REVIEW_STATES.map(([s, label, tip]) => `<button class="tool-btn tip ${rv.state === s ? "active" : ""}" aria-pressed="${rv.state === s}"
+  const buttons = REVIEW_STATES.map(([s, label, tip]) => `<button class="tool-btn small tip ${rv.state === s ? "active" : ""}" aria-pressed="${rv.state === s}"
       data-action="insp-review" data-state="${s}" data-testid="insp-review-${s}" data-tip="${esc(tip)}" ${busy() ? "disabled" : ""}>${label}</button>`).join("");
   const differ = mates.filter((m) => (m.review?.state || "needs_review") !== rv.state);
-  return `<div class="insp-review-row">
-      <div class="segmented insp-review" role="group" aria-label="Review decision" data-testid="insp-review" data-state="${esc(rv.state)}">${buttons}</div>
-      ${differ.length ? `<button class="link small" data-action="insp-review" data-state="${esc(rv.state)}" data-scope="group" data-testid="insp-review-group" ${busy() ? "disabled" : ""}>Same for all ${mates.length + 1} layers here</button>` : ""}
-    </div>
-    ${rv.state === "accept_risk" ? '<p class="small muted" style="margin:0" data-testid="insp-accepted">Risk accepted. The geometry and the warning are unchanged.</p>' : ""}
-    ${rv.lapsed ? `<p class="small warn-text" style="margin:0" data-testid="insp-lapsed">Earlier decision “${esc(REVIEW_LABEL[rv.lapsed.state] || rv.lapsed.state)}” no longer applies: ${esc(rv.lapsed.reason)}. Please review again.</p>` : ""}`;
+  return `<span class="insp-review-row">
+      <span class="segmented insp-review" role="group" aria-label="Review decision" data-testid="insp-review" data-state="${esc(rv.state)}">${buttons}</span>
+      ${differ.length ? `<button class="link small" data-action="insp-review" data-state="${esc(rv.state)}" data-scope="group" data-testid="insp-review-group" ${busy() ? "disabled" : ""}>Same for all ${mates.length + 1} layers</button>` : ""}
+      ${rv.state === "accept_risk" ? '<span class="sr-only" data-testid="insp-accepted">Risk accepted. The geometry and the warning are unchanged.</span>' : ""}
+      ${rv.lapsed ? `<span class="small warn-text" data-testid="insp-lapsed" title="${esc(`Earlier decision “${REVIEW_LABEL[rv.lapsed.state] || rv.lapsed.state}” no longer applies: ${rv.lapsed.reason}.`)}">review again</span>` : ""}
+    </span>`;
 }
 
 function inspTags(d, i) {
@@ -2622,9 +2697,7 @@ function checkedText(d, shown) {
   if (shown?.key === "artwork") return "No located artwork or intake findings.";
   if (!c) return "No sheets to check.";
   if (shown?.key === "front") return "The front view matches the artwork (no whole-stack issue). Each layer's own issues are on its tab.";
-  return `No geometric issues found on this layer. Checked: every piece reaches the perimeter, connections at least ${fmt(c.structural_width_mm, 2)} mm,
-    openings at least ${fmt(c.min_opening_mm, 2)} mm (unsupported below ${fmt(c.nozzle_diameter_mm, 2)} mm), material at least
-    ${fmt(c.min_positive_feature_mm, 2)} mm (unsupported below ${fmt(c.line_width_mm, 2)} mm) — ${esc(c.geometry_source)}.`;
+  return `No geometric issues found on this layer <span class="muted" title="${esc(`Every piece reaches the perimeter; unsupported below ${fmt(c.nozzle_diameter_mm, 2)} mm openings / ${fmt(c.line_width_mm, 2)} mm material — ${c.geometry_source}`)}">(connections ≥ ${fmt(c.structural_width_mm, 2)} mm, openings ≥ ${fmt(c.min_opening_mm, 2)} mm, material ≥ ${fmt(c.min_positive_feature_mm, 2)} mm)</span>.`;
 }
 
 function issuesPanel() {
@@ -2667,31 +2740,32 @@ function issuesPanel() {
     const thText = !th ? "–" : th.text ? esc(th.text) : `${esc(th.label)} <strong>${fmt(th.value, 3)} ${esc(th.unit)}</strong>${th.nominal_mm != null ? ` <span class="muted">(nominal ${fmt(th.nominal_mm, 2)} mm)</span>` : ""}${th.unsupported_below_mm != null ? ` <span class="muted">(unsupported below ${fmt(th.unsupported_below_mm, 3)} mm)</span>` : ""}`;
     const fromCandidate = issue.destination === "layer" && !hasDraft && issue.sheet && d.sheet_source === "candidate";
     const layerBtn = issue.destination === "layer"
-      ? `<button class="primary" data-action="insp-edit-layer" data-testid="insp-edit-layer" ${busy() || (!hasDraft && !fromCandidate) ? "disabled" : ""}>Show on layer</button>` : "";
-    const artBtn = issue.artwork_box_px ? `<button class="${issue.destination === "artwork" ? "primary" : ""}" data-action="insp-edit-artwork" data-testid="insp-edit-artwork" ${busy() ? "disabled" : ""}>Edit artwork</button>` : "";
-    const crop = issue.details?.image_url ? `<img class="insp-crop" src="${esc(issue.details.image_url)}" alt="original | default intake | as planned" data-testid="insp-detail-image">
-      <p class="small muted" style="margin:0">original · default intake · as planned</p>` : "";
+      ? `<button class="small primary" data-action="insp-edit-layer" data-testid="insp-edit-layer" ${busy() || (!hasDraft && !fromCandidate) ? "disabled" : ""}${fromCandidate ? ' title="Starts the review of this candidate"' : ""}>Show on layer</button>` : "";
+    const artBtn = issue.artwork_box_px ? `<button class="small ${issue.destination === "artwork" ? "primary" : ""}" data-action="insp-edit-artwork" data-testid="insp-edit-artwork" ${busy() ? "disabled" : ""}>Edit artwork</button>` : "";
+    const crop = issue.details?.image_url ? `<img class="insp-crop" src="${esc(issue.details.image_url)}" alt="original | default intake | as planned" title="original · default intake · as planned" data-testid="insp-detail-image">` : "";
     const mates = inspGroupMates(d, issue);
-    const mateLayers = new Set(mates.map((m) => m.sheet)).size;
-    const group = mates.length ? `<dt>Same place</dt><dd data-testid="insp-group"><span class="muted">${mateLayers} other layer${mateLayers === 1 ? "" : "s"}:</span>
-        ${mates.map((m) => `<button class="insp-mate tip" data-action="insp-goto" data-issue="${esc(m.id)}" data-testid="insp-mate" data-tip="${esc(`${m.title} on ${sheetLabel(d, m.sheet)}: ${m.measured?.value != null ? `${fmt(m.measured.value, 3)} ${m.measured.unit}` : "–"}`)}">
-          <span class="dot" style="background:${SEV_COLOR[m.severity] || "#888"}"></span>${esc(layerShort(d, m.sheet))}${m.measured?.value != null ? ` <span class="muted">${fmt(m.measured.value, 2)}</span>` : ""}</button>`).join("")}</dd>` : "";
+    const actions = [layerBtn, artBtn].filter(Boolean);
+    const where = issue.sheet ? `<span class="swatch" style="background:${esc(d.sheets.find((s) => s.id === issue.sheet)?.color || "#888")}"></span> ${esc(layerShort(d, issue.sheet))}`
+      : issue.destination === "artwork" ? "Artwork" : "Front view";
     return `<div class="subpanel insp-card" data-testid="insp-card" data-key="${esc(issue.key || "")}">
-      <div class="spread"><strong><span class="insp-no">${issueNo(issue)}</span> <span data-testid="insp-title">${esc(issue.title)}</span></strong>${badge(SEV_CLASS[issue.severity] || "neutral", issue.severity)}</div>
-      <dl class="kv small">
-        <dt>Measured</dt><dd data-testid="insp-measured">${measure(issue.measured)}</dd>
-        <dt>Threshold</dt><dd data-testid="insp-threshold">${thText}</dd>
-        <dt>Where</dt><dd data-testid="insp-sheet">${issue.sheet ? `<span class="swatch" style="background:${esc(d.sheets.find((s) => s.id === issue.sheet)?.color || "#888")}"></span> ` : ""}${esc(issue.sheet ? sheetLabel(d, issue.sheet) : issue.destination === "artwork" ? "Artwork (flat color) — not a sheet defect" : "Whole stack (front view)")}${issue.outline_exact ? "" : ' <span class="muted">(bounding box only)</span>'}</dd>
-        ${group}
-      </dl>
-      ${inspCauseHtml(d, issue)}
-      ${inspReviewHtml(d, issue, mates)}
-      ${crop}
+      <div class="insp-card-head">
+        <span class="insp-no" style="background:${SEV_COLOR[issue.severity] || "#888"}">${issueNo(issue)}</span>
+        <strong data-testid="insp-title">${esc(issue.title)}</strong>
+        <span class="insp-measure" data-testid="insp-measured">${measure(issue.measured)}</span>
+        ${badge(SEV_CLASS[issue.severity] || "neutral", SEV_WORD[issue.severity] || issue.severity, issue.severity)}
+        <span class="insp-card-actions">${actions.join("")}</span>
+      </div>
+      <div class="insp-card-line">
+        <span class="small" data-testid="insp-sheet" title="${esc(issue.sheet ? sheetLabel(d, issue.sheet) : issue.destination === "artwork" ? "Artwork (flat color) — not a sheet defect" : "Whole stack (front view)")}">${where}${issue.outline_exact ? "" : ' <span class="muted">(box)</span>'}</span>
+        ${inspReviewHtml(d, issue, mates)}
+        ${mates.length ? `<span class="small" data-testid="insp-group"><span class="muted">also</span> ${mates.map((m) => `<button class="insp-mate tip" data-action="insp-goto" data-issue="${esc(m.id)}" data-testid="insp-mate" data-tip="${esc(`${m.title} on ${sheetLabel(d, m.sheet)}: ${m.measured?.value != null ? `${fmt(m.measured.value, 3)} ${m.measured.unit}` : "–"}`)}">
+          <span class="dot" style="background:${SEV_COLOR[m.severity] || "#888"}"></span>${esc(layerShort(d, m.sheet))}${m.measured?.value != null ? ` <span class="muted">${fmt(m.measured.value, 2)}</span>` : ""}</button>`).join("")}</span>` : ""}
+      </div>
       ${st ? `<p class="small warn-text" data-testid="insp-stale" style="margin:0">Out of date: ${esc(st.stale_reason || "re-check")}</p>` : ""}
-      <div class="row">${layerBtn}${artBtn}</div>
-      ${fromCandidate ? '<p class="small muted" style="margin:0">Show on layer starts the review of this candidate.</p>' : ""}
-      ${issue.destination === "layer" && issue.artwork_box_px ? '<p class="small muted" style="margin:0">A sheet problem: changing the artwork may or may not remove it.</p>' : ""}
-      <details class="small"><summary>Technical details</summary>
+      <details class="small insp-more" data-section="insp-details"${ui.sections["insp-details"] ? " open" : ""}><summary>Details</summary>
+        <dl class="kv"><dt>Threshold</dt><dd data-testid="insp-threshold">${thText}</dd></dl>
+        ${inspCauseHtml(d, issue)}
+        ${crop}
         <dl class="kv"><dt>Code</dt><dd><code>${esc(issue.kind)}</code></dd><dt>Source</dt><dd>${esc(issue.source)}</dd>
           <dt>Box (mm)</dt><dd class="mono">${esc((issue.bbox_mm || []).join(", "))}</dd>
           ${issue.bbox_mm ? (() => { const g = d.grid; const band = g.perimeter_pixels * g.mm_per_pixel; const top = (g.raster_mm?.[1] ?? g.outer_sheet_mm) - band;
@@ -2699,24 +2773,29 @@ function issuesPanel() {
           ${issue.key ? `<dt>Key</dt><dd class="mono">${esc(issue.key)}</dd>` : ""}</dl>
         <pre class="mono small">${esc(JSON.stringify({ measured: issue.measured, threshold: issue.threshold, details: { ...issue.details, held_material_outline_mm: undefined } }, null, 2))}</pre></details>
     </div>`;
-  })() : list.length ? `<div class="small muted" data-testid="insp-card-empty">Click a highlighted area or a row.</div>`
+  })() : list.length ? `<div data-testid="insp-card-empty" hidden></div>`
     : `<div class="subpanel small ${here.length ? "muted" : "ok-text"}" data-testid="insp-card-empty">${here.length ? "No issue here matches the filters." : checkedText(d, shown)}</div>`;
   const rows = list.map((i) => `<li class="${i.id === ui.insp.selected ? "active" : ""} ${issueStale(d, i) ? "stale" : ""}"><button class="insp-row" data-action="insp-select" data-issue="${esc(i.id)}" data-testid="insp-row">
       <span class="insp-no" style="background:${SEV_COLOR[i.severity] || "#888"}">${issueNo(i)}</span><span class="insp-row-title">${esc(i.title)}</span>
-      ${inspTags(d, i)}<span class="small muted">${i.measured && i.measured.value != null ? `${fmt(i.measured.value, i.measured.unit === "px" ? 0 : 2)} ${esc(i.measured.unit)}` : ""}</span></button></li>`).join("");
+      ${inspTags(d, i)}<span class="small muted">${i.measured && i.measured.value != null ? `${fmt(i.measured.value, i.measured.unit === "px" ? 0 : 2)} ${esc(i.measured.unit)}` : ""}</span><span class="insp-sev sev-${esc(SEV_CLASS[i.severity] || "neutral")}">${esc(SEV_WORD[i.severity] || i.severity)}</span></button></li>`).join("");
   const rc = d.review?.counts || {};
   const decided = [rc.accept_risk ? `${rc.accept_risk} accepted` : "", rc.fix_later ? `${rc.fix_later} to fix later` : ""].filter(Boolean).join(", ");
-  const summary = [sheetIssues.length ? `<span class="small muted">sheets</span> ${countBadges(sheetIssues)}` : '<span class="small ok-text">sheets: no issues</span>',
+  const noSheets = !(d.sheets || []).length;  // nothing planned when these issues were found
+  const summary = [sheetIssues.length ? `<span class="small muted">sheets</span> ${countBadges(sheetIssues)}`
+      : noSheets ? '<span class="small muted">no sheets planned yet</span>' : '<span class="small ok-text">sheets: no issues</span>',
     artIssues.length ? `<span class="small muted">artwork</span> ${countBadges(artIssues)}` : "",
     decided ? `<span class="small muted" data-testid="insp-decided">· ${esc(decided)}</span>` : ""].filter(Boolean).join(" ");
   const reviewNotes = [d.review?.lapsed ? `${d.review.lapsed} earlier decision${d.review.lapsed === 1 ? " no longer applies" : "s no longer apply"} because the image, the layers or the print settings changed there (marked “review again”).` : "",
     d.review?.unmatched ? `${d.review.unmatched} earlier decision${d.review.unmatched === 1 ? " matches" : "s match"} no current issue (the issue is gone or changed).` : "",
     d.review?.artwork_edited && (rc.accept_risk || rc.fix_later) ? "The artwork was edited after planning: decisions refer to the planned image until you plan again." : ""].filter(Boolean);
-  return `<details class="panel section insp" data-section="issues" data-testid="issue-inspector" ${openAttr("issues", true)}>
+  // Before planning only artwork notes exist, shown on the same image as the editor below: folded (counts stay visible).
+  const artworkOnly = ui.state.proposal?.status === "ARTWORK_READY_NOT_PLANNED";
+  return `<details class="panel section insp" data-section="issues" data-testid="issue-inspector" ${openAttr("issues", !artworkOnly)}>
     <summary><h3>Issues</h3><span class="small" data-testid="insp-summary">${summary}${stale.length || basisStale ? " " + badge("warn", "out of date") : ""}</span></summary>
     <div class="section-body stack">
-      ${d.notice ? `<div class="banner info small" data-testid="insp-notice">${esc(d.notice)}</div>` : ""}
-      ${basisStale ? `<div class="banner warn small" data-testid="insp-basis-stale">The sheets changed: the locations shown are from before the edit. ${ui.issuesLoading ? "Re-checking…" : "They are checked again shortly."}</div>` : ""}
+      ${d.notice && !basisStale ? `<div class="banner info small" data-testid="insp-notice">${esc(d.notice)}</div>` : ""}
+      ${basisStale ? `<div class="banner ${noSheets ? "info" : "warn"} small" data-testid="insp-basis-stale">${noSheets ? "Checking the planned sheets…"
+        : `The sheets changed: the locations shown are from before the change. ${ui.issuesLoading ? "Re-checking…" : "They are checked again shortly."}`}</div>` : ""}
       ${stale.map((s) => `<div class="banner warn small" data-testid="insp-source-stale"><strong>${esc(s.label)}</strong> is out of date: ${esc(s.stale_reason || "re-check")}.</div>`).join("")}
       ${reviewNotes.length ? `<div class="banner info small" data-testid="insp-review-notes">${reviewNotes.map(esc).join("<br>")}</div>` : ""}
       <div class="insp-chips" role="tablist" aria-label="Layer" data-testid="insp-layers">${chips}</div>
@@ -2747,10 +2826,10 @@ function issuesPanel() {
             <select id="insp-kind" data-testid="insp-filter-kind" aria-label="Type"><option value="">All types</option>${options(kinds, ui.insp.kind)}</select>
             <select id="insp-severity" data-testid="insp-filter-severity" aria-label="Severity"><option value="">All severities</option>${options(sevs, ui.insp.severity)}</select>
             <select id="insp-status" data-testid="insp-filter-status" aria-label="Review status"><option value="">All statuses</option>${options(statuses, ui.insp.status)}</select>
-          </div>
-          <div class="row"><button class="tool-btn" data-action="insp-step" data-step="-1" data-testid="insp-prev" ${list.length ? "" : "disabled"}>◀</button>
+            <span class="insp-nav"><button class="tool-btn small" data-action="insp-step" data-step="-1" data-testid="insp-prev" aria-label="Previous issue" ${list.length ? "" : "disabled"}>◀</button>
             <span class="small" data-testid="insp-position">${index >= 0 ? index + 1 : "–"} / ${list.length}</span>
-            <button class="tool-btn" data-action="insp-step" data-step="1" data-testid="insp-next" ${list.length ? "" : "disabled"}>▶</button></div>` : ""}
+            <button class="tool-btn small" data-action="insp-step" data-step="1" data-testid="insp-next" aria-label="Next issue" ${list.length ? "" : "disabled"}>▶</button></span>
+          </div>` : ""}
           ${card}
           ${list.length ? `<ul class="insp-list" data-testid="insp-list">${rows}</ul>` : ""}
         </div>
@@ -3018,7 +3097,7 @@ function inspEditArtwork(issue) {
   if (!box) return;
   ui.sections.artwork = true;
   ui.art.focus = box;
-  setTab(ui.state.draft ? "review" : "proposal");
+  setTab(artworkTab());
   render();
   $('[data-testid="artwork-panel"]')?.scrollIntoView({ block: "start" });
   afterImage("#art-image", () => focusView("art", [box[1], box[0], box[3], box[2]]));
@@ -3065,19 +3144,32 @@ function reviewBar() {
   return `<div class="review-bar" data-testid="review-bar">
     <div class="review-bar-status">
       ${badge(ok ? "ok" : "bad", ok ? "Valid" : "Invalid")}
-      <span class="small muted">${d.sheets.length} layers · ${fmt(d.total_height_mm)} mm stack · ${d.edits.length} edit${d.edits.length === 1 ? "" : "s"}</span>
-      ${ui.state.record.candidate ? `<span class="small muted" data-testid="review-candidate">Candidate <strong>${esc(ui.state.record.candidate)}</strong> · <a href="#" data-action="tab" data-tab="proposal" data-focus="candidates" data-testid="review-to-candidates">Compare candidates</a></span>` : ""}
+      <span class="small muted">${d.sheets.length} layers · ${fmt(d.total_height_mm)} mm stack${userEdits(d).length ? ` · ${userEdits(d).length} edit${userEdits(d).length === 1 ? "" : "s"}` : ""}${userEdits(d).length < d.edits.length ? " · cutouts auto-widened" : ""}</span>
+      ${ui.state.record.candidate ? `<span class="small muted" data-testid="review-candidate" data-candidate="${esc(ui.state.record.candidate)}" title="${esc(`Planner: ${ui.state.record.candidate}`)}"><strong>${esc(candLabel(ui.state.record.candidate))}</strong> · <a href="#" data-action="tab" data-tab="proposal" data-focus="candidates" data-testid="review-to-candidates">Compare candidates</a></span>` : ""}
+      ${acceptBadge()}
+      ${ui.switchNotice?.candidate === ui.state.record.candidate ? `<span class="small ok-text" data-testid="switch-notice">✓ Switched from ${esc(candLabel(ui.switchNotice.previous))}${ui.switchNotice.saved ? " (its review is saved)" : ""}</span>` : ""}
     </div>
     <div class="review-bar-actions">
       ${visibleChange ? `<button class="tool-btn attention tip" data-action="propose-op" data-op='${esc(JSON.stringify({ op: "accept_artwork" }))}' ${dis}
         data-tip="Only for an intended visible change: the current front view becomes the reviewed artwork">Accept front view as artwork…</button>` : ""}
-      ${d.edits.length ? `<button class="tool-btn tip" data-action="undo" ${dis} data-tip="Undo the last layer edit">${ICON.undo}<span>Undo last edit</span></button>` : ""}
+      ${d.edits.length ? `<button class="tool-btn tip" data-action="undo" ${dis} data-tip="${isWiden(d.edits[d.edits.length - 1]) ? "Restore the layers as they were before the widening" : "Undo the last layer edit"}">${ICON.undo}<span>${isWiden(d.edits[d.edits.length - 1]) ? "Undo widening" : "Undo last edit"}</span></button>` : ""}
+      ${editArtworkButton("tool-btn")}
       <span class="divider" aria-hidden="true"></span>
+      ${ui.state.artwork?.differs_from_planned ? `<button class="primary" data-action="art-replan" data-testid="review-replan" ${unsavedArt() ? 'disabled title="Save or discard the artwork changes first"' : dis}>Plan sheets from the edited artwork</button>` : ""}
       <button class="tool-btn ghost" data-action="tab" data-tab="printability">Printability →</button>
-      <button class="primary" data-action="tab" data-tab="kit" ${exportOk ? "" : "disabled"} title="${esc(why)}">Build print kit →</button>
+      <button class="${ui.state.artwork?.differs_from_planned ? "" : "primary"}" data-action="tab" data-tab="kit" ${exportOk ? "" : "disabled"} title="${esc(why)}">Build print kit →</button>
     </div>
     ${verified ? `<div class="review-bar-note">${verified} <span class="muted small">(${esc(v.checked_utc)})</span></div>` : ""}
   </div>`;
+}
+
+// Accepted-plan state where the user works: accepted, or one click to accept (the full section is on Plan).
+function acceptBadge() {
+  const c = ui.state.checkpoint;
+  if (!c?.working_plan) return "";
+  if (c.working_is_accepted) return `<span class="small" data-testid="review-accepted">${badge("ok", "accepted plan")}</span>`;
+  return `<button class="small ghost" data-action="plan-accept" data-testid="review-accept" ${c.accept_blocked || busy() ? "disabled" : ""}
+    title="${esc(c.accept_blocked || "Keep a copy of this plan to come back to (Plan → Accepted plan)")}">Accept this plan</button>`;
 }
 
 function layersPanel() {
@@ -3088,10 +3180,10 @@ function layersPanel() {
     const selected = s.id === ui.sheet;
     return `
     <li class="layer ${selected ? "selected" : ""} ${fails ? "failing" : ""}" data-action="select-sheet" data-sheet="${esc(s.id)}" role="option" aria-selected="${selected}"
-        tabindex="${selected || (!ui.sheet && !i) ? 0 : -1}" data-testid="layer-row" title="${esc(s.export_name)} · ${esc(s.color)}${fails ? " · fails a check" : ""}">
+        tabindex="${selected || (!ui.sheet && !i) ? 0 : -1}" data-testid="layer-row" title="${esc(`File ${s.export_name}`)}${fails ? " · fails a check" : ""}">
       <span class="layer-index">${i + 1}</span>
       ${swatch(s.color, true)}
-      <div class="layer-text"><div class="name">${esc(s.export_name)}</div>
+      <div class="layer-text"><div class="name">Layer ${i + 1} <span class="muted small mono">${esc(s.color)}</span></div>
         <div class="meta">${fmt(s.thickness_mm)} mm${s.rim ? ` · rim ${fmt(s.rim.width_mm)}×${fmt(s.rim.total_height_mm)}` : ""} · ${s.cutout_holes} cutout${s.cutout_holes === 1 ? "" : "s"}${s.islands ? ` · <span class="no">${s.islands} island${s.islands === 1 ? "" : "s"}</span>` : ""}</div></div>
       ${fails ? '<span class="layer-flag" aria-label="fails a check">!</span>' : ""}
     </li>`;
@@ -3180,7 +3272,7 @@ function validationPanel() {
     const c = s.checks;
     const full = v.details_recomputed;
     return `<tr class="${s.id === ui.sheet ? "selected" : ""}">
-      <td>${swatch(s.color)} ${esc(s.export_name)}</td><td>${yesno(c.pass)}</td>
+      <td title="${esc(s.export_name)}">${swatch(s.color)} Layer ${layerNo(s.id)}</td><td>${yesno(c.pass)}</td>
       <td>${full ? yesno(c.four_neighbor) : "✓"}</td><td>${full ? yesno(c.width_status) : "✓"}</td>
       <td>${full ? yesno(c.shared_perimeter_complete) : "✓"}</td><td>${full ? yesno(c.visible_inside_retained) : "✓"}</td>
       <td>${s.islands ? `<span class="no">${s.islands}</span>` : "0"}</td>
@@ -3193,7 +3285,7 @@ function validationPanel() {
     : `${v.failures.length} failure${v.failures.length === 1 ? "" : "s"} · not exportable`;
   // Problems keep the section open; a valid draft collapses to its one-line summary.
   return `<details class="panel tight section" data-testid="validation-panel" data-section="validation" ${openAttr("validation", false, !ok || Boolean(islands))}>
-    <summary><h3>Validation ${badge(ok ? "ok" : "bad", ok ? "REVIEWED_VALID" : "DRAFT_INVALID")}</h3><span class="small muted">${esc(summary)}</span></summary>
+    <summary><h3>Validation ${statusBadge(ok ? "ok" : "bad", ok ? "REVIEWED_VALID" : "DRAFT_INVALID")}</h3><span class="small muted">${esc(summary)}</span></summary>
     <div class="section-body">
       ${hints ? `<ul class="small tight-list">${hints}</ul>` : ""}
       ${islands ? `<h4 style="margin-top:10px">Floating islands</h4><ul class="small tight-list">${islands}</ul>` : ""}
@@ -3247,17 +3339,20 @@ function wideningPanel() {
   // Outcome facts; anything not recorded shows "–" instead of a guess.
   const b = s.before?.risky_cutouts, a = s.after?.risky_cutouts;
   const measured = typeof b === "number" && typeof a === "number";
+  const widened = typeof s.spots === "number" ? s.spots - (s.rejected || 0) : null;
   const drop = measured && b > 0 ? Math.round(((b - a) / b) * 100) : null;
   const frontSame = edit ? edit.visible_changed_px === 0 : null;
   const valid = edit ? edit.validation_status === "PASS" : null;
   const fact = (value, label, cls = "", id = "") => `<div${id ? ` data-testid="${id}"` : ""}><span class="${cls}">${value}</span>${label}</div>`;
   const facts = `<div class="facts widen-facts" data-testid="widen-facts">
       ${fact(measured ? `${fmt(b)} → ${fmt(a)}` : "–", "risky cutouts", "", "widen-risky")}
-      ${fact(drop == null ? "–" : `${drop < 0 ? "+" : drop > 0 ? "−" : ""}${Math.abs(drop)}%`, drop < 0 ? "more" : "fewer", drop > 0 ? "yes" : drop < 0 ? "no" : "", "widen-drop")}
+      ${fact(widened == null ? "–" : fmt(widened), `place${widened === 1 ? "" : "s"} widened`, "", "widen-places")}
       ${fact(fmt(layers.length), `layer${layers.length === 1 ? "" : "s"} changed`, "", "widen-layer-count")}
       ${fact(frontSame == null ? "–" : frontSame ? "Unchanged" : "Changed", "front view", frontSame === false ? "no" : "", "widen-front")}
     </div>`;
-  const headline = measured ? `${fmt(b)} → ${fmt(a)} risky cutouts${drop > 0 ? ` (−${drop}%)` : ""}` : `${layers.length} layer${layers.length === 1 ? "" : "s"} changed`;
+  const done = widened == null ? `${layers.length} layer${layers.length === 1 ? "" : "s"} changed` : `${fmt(widened)} place${widened === 1 ? "" : "s"} widened`;
+  const left = !measured ? "" : a === 0 ? "no risky cutouts left" : a < b ? `risky cutouts ${fmt(b)} → ${fmt(a)}` : `${fmt(a)} risky cutout${a === 1 ? "" : "s"} still narrow`;
+  const headline = left ? `${done} · ${left}` : done;
   // Structural validation and printability are different questions: valid layers can still carry print risks.
   const checks = valid == null ? "" : `<div class="widen-check ${valid ? "ok" : "bad"}" data-testid="widen-validation">
       <strong>${valid ? "✓ Structural checks passed" : "✗ Structural checks failed"}</strong>
@@ -3289,7 +3384,7 @@ function wideningPanel() {
       <td class="mono">${esc(String(edit?.op?.removed?.[l.id] || "–").split("/").pop())}</td></tr>`).join("");
   const process = s.after?.process || s.before?.process;
   return `<details class="panel tight section" data-section="widening" data-testid="widening-panel" ${openAttr("widening", false)}>
-    <summary><h3>Cutout widening</h3><span class="small" data-testid="widen-headline">${badge("ok", "Applied")} <span class="muted">${esc(headline)}</span></span></summary>
+    <summary><h3>Cutout widening</h3><span class="small" data-testid="widen-headline">${badge("ok", w.last.automatic ? "Automatic" : "Applied")} <span class="muted">${esc(headline)}</span></span></summary>
     <div class="section-body stack">
       <p class="small" style="margin:0" data-testid="widen-what">${esc(what)}${w.last.automatic ? " Applied when the review started." : ""}${esc(kept)}</p>
       ${facts}
@@ -3366,8 +3461,8 @@ function sheetPanel(sheet) {
   return `<div class="panel tight inspector" data-testid="sheet-panel">
     <div class="inspector-head">
       ${swatch(sheet.color, true)}
-      <div><h3 style="margin:0">${esc(sheet.export_name)}</h3>
-        <div class="small muted">Layer ${fromFront + 1} of ${sheets.length} · ${esc(sheet.color)}</div></div>
+      <div><h3 style="margin:0">Layer ${fromFront + 1} <span class="muted small">of ${sheets.length}</span></h3>
+        <div class="small muted">${esc(sheet.color)} · <span title="Export file name">${esc(sheet.export_name)}</span></div></div>
       ${fails ? badge("bad", "fails") : badge("ok", "ok")}
     </div>
     <div class="facts">
@@ -3407,17 +3502,22 @@ function sheetPanel(sheet) {
   </div>`;
 }
 
+// Cutout widening is an automatic adjustment, logged in the same edit log (so undo and revert work as before) but
+// not counted or presented as one of the user's edits.
+const isWiden = (e) => e?.op?.op === "widen_openings";
+const userEdits = (d) => d.edits.filter((e) => !isWiden(e));
+
 function historyPanel() {
   const d = ui.state.draft;
   const items = d.edits.slice().reverse().map((e) => {
     const [cls, label] = CHANGE_KINDS[e.kind] || ["neutral", e.kind];
-    const opName = e.op.op === "widen_openings" ? `widen cutouts${e.op.automatic ? " (automatic)" : ""}` : e.op.op;
-    return `<li data-testid="history-item"><span>#${e.index} <strong>${esc(opName)}</strong> ${badge(cls, label)} ${e.validation_status !== "PASS" ? badge("bad", "invalid") : ""}</span>
+    const opName = isWiden(e) ? "cutouts widened" : e.op.op;
+    return `<li data-testid="history-item" class="${isWiden(e) ? "auto" : ""}"><span>#${e.index} <strong>${esc(opName)}</strong> ${isWiden(e) ? badge("neutral", e.op.automatic ? "automatic" : "widening") : badge(cls, label)} ${e.validation_status !== "PASS" ? badge("bad", "invalid") : ""}</span>
       <button class="small ghost" data-action="revert" data-keep="${e.index}" ${busy() || e.index === d.edits.length ? "disabled" : ""} title="Keep edits 1..${e.index}">Revert here</button></li>`;
   }).join("");
   const dis = busy() ? "disabled" : "";
   return `<details class="panel tight section" data-section="history" data-testid="history-panel" ${openAttr("history")}>
-    <summary><h3>Edit history</h3><span class="small muted">${d.edits.length ? `${d.edits.length} edit${d.edits.length === 1 ? "" : "s"}` : "none"}</span></summary>
+    <summary><h3>Edit history</h3><span class="small muted">${userEdits(d).length ? `${userEdits(d).length} edit${userEdits(d).length === 1 ? "" : "s"}` : "no edits"}${userEdits(d).length < d.edits.length ? " · auto-widened" : ""}</span></summary>
     <div class="section-body">
       ${items ? `<ul class="history">${items}</ul>` : '<p class="small muted" style="margin:0">No layer edits.</p>'}
       <div class="row">
@@ -3554,9 +3654,9 @@ function processPayload() {
 function findingsTable(findings, locate = true) {
   if (!findings.length) return '<p class="small">No RISK or UNSUPPORTED features for this process.</p>';
   return `<div class="table-wrap"><table data-testid="findings">
-    <thead><tr><th>Severity</th><th>Sheet file</th><th>Feature</th><th>Width</th><th>Visible area</th><th>At (mm)</th><th>Note</th>${locate ? "<th></th>" : ""}</tr></thead>
+    <thead><tr><th>Severity</th><th>Layer</th><th>Feature</th><th>Width</th><th>Visible area</th><th>At (mm)</th><th>Note</th>${locate ? "<th></th>" : ""}</tr></thead>
     <tbody>${findings.map((f) => `<tr>
-      <td>${badge(f.severity === "UNSUPPORTED" ? "bad" : "warn", f.severity)}</td><td>${esc(f.file)}</td><td>${esc(String(f.kind).replace(/_/g, " "))}</td>
+      <td>${badge(f.severity === "UNSUPPORTED" ? "bad" : "warn", f.severity)}</td><td title="${esc(f.file)}">${layerNo(f.sheet_id) ? `Layer ${layerNo(f.sheet_id)}` : esc(f.file)}</td><td>${esc(String(f.kind).replace(/_/g, " "))}</td>
       <td>${f.width_mm != null ? `${fmt(f.width_mm, 3)} mm` : "–"}</td><td>${f.visible_area_mm2 != null ? `${fmt(f.visible_area_mm2, 3)} mm²` : "–"}</td>
       <td class="mono">${f.at_mm ? esc(f.at_mm.join(", ")) : "–"}</td><td class="small">${esc(f.note)}</td>
       ${locate ? `<td>${f.at_mm ? `<button class="small" data-action="locate" data-sheet="${esc(f.sheet_id)}" data-x="${f.at_mm[0]}" data-y="${f.at_mm[1]}">Locate</button>` : ""}</td>` : ""}</tr>`).join("")}</tbody></table></div>`;
@@ -3568,28 +3668,37 @@ function printabilityView() {
   const findings = est ? est.features.filter((f) => f.severity !== "INFO") : [];
   const info = est ? est.features.filter((f) => f.severity === "INFO") : [];
   return `<div class="panel stack">
-    <div class="spread"><h2>Check printability</h2>${badge("outline", "estimate · not a slicer · not a print")}</div>
-    <p class="muted" style="margin:0">Checks openings, slots and thin material against your printer. ${infoTip("Measures every opening, slot, gap and thin material of the current draft's exact export geometry against the printer parameters, plus build volume and layer quantization. Geometry is never changed: problems are reported for you to decide.")}</p>
+    <div class="spread"><h2>Check printability ${infoTip("Measures every opening, slot, gap and thin material of the current layers' exact export geometry against the printer parameters, plus build volume and layer quantization. Geometry is never changed: problems are reported for you to decide.")}</h2>${badge("outline", "estimate · not a slicer · not a print")}</div>
     <details class="section subtle" data-section="est-process" ${openAttr("est-process")}>
       <summary><h4 style="margin:0">Printer &amp; process</h4><span class="small muted">${esc(ui.process.name)}${String(ui.process.source).startsWith("ASSUMPTION") ? " · generic defaults" : ""}</span></summary>
       <div class="section-body">${processForm("est")}</div></details>
-    <div class="row"><button class="primary" data-action="run-printability" ${busy() ? "disabled" : ""}>Run estimate on the current draft</button>
-      ${valid ? "" : '<span class="small muted">The draft is invalid; the estimate still runs, but the kit export will refuse it.</span>'}</div>
+    <div class="row"><button class="${est && !est.stale ? "" : "primary"}" data-action="run-printability" ${busy() ? "disabled" : ""}>${est ? "Check again" : "Check printability"}</button>
+      ${valid ? "" : '<span class="small muted">The layers are invalid; the check still runs, but the print kit will refuse them.</span>'}</div>
   </div>
   ${est ? `<div class="panel stack" data-testid="printability-result">
-    <div class="spread"><h3 style="margin:0">Result ${badge(est.status === "NO_RISKS_FOUND" ? "ok" : est.status === "RISKS_REPORTED" ? "warn" : "bad", fdmLabel(est.status))} ${est.stale ? badge("warn", "out of date: the draft changed") : ""}</h3>
-      <span class="small muted">${esc(est.process.name)} · ${esc(est.checked_utc)}</span></div>
-    <p class="small">${est.counts.UNSUPPORTED} unsupported · ${est.counts.RISK} risk · ${est.counts.INFO} info. ${esc(est.basis)}.</p>
-    ${findings.length ? `<p class="small"><a href="#" data-action="tab" data-tab="proposal" data-testid="to-resize">Check another sheet size (Physical size) →</a></p>` : ""}
-    <p class="small" style="margin:0">Each finding is shown where it is in <strong>Issues</strong> below.</p>
+    <div class="spread"><h3 style="margin:0">Result ${badge(est.status === "NO_RISKS_FOUND" ? "ok" : est.status === "RISKS_REPORTED" ? "warn" : "bad", fdmLabel(est.status))} ${est.stale ? badge("warn", "out of date: the layers changed") : ""}</h3>
+      <span class="small muted">${esc(est.process.name)} · ${esc(localTime(est.checked_utc))}</span></div>
+    <p class="small">${est.counts.UNSUPPORTED} unsupported · ${est.counts.RISK} risk · ${est.counts.INFO} info ${infoTip(`${est.basis}.`)}</p>
+    ${!est.stale && valid && !ui.state.artwork?.differs_from_planned && !unsavedArt() ? `<div class="row"><button class="primary" data-action="tab" data-tab="kit" data-testid="printability-next">Build print kit →</button>${est.counts.UNSUPPORTED || est.counts.RISK ? '<span class="small muted">or review the findings in Issues below first</span>' : ""}</div>` : ""}
+    ${findings.length ? `<p class="small" style="margin:0"><a href="#" data-action="tab" data-tab="proposal" data-testid="to-resize">Try another sheet size (Physical size) →</a></p>` : ""}
     <details class="small" data-testid="findings-table"><summary>Findings table (${findings.length})</summary>${findingsTable(findings)}</details>
     ${info.length ? `<details><summary>${info.length} informational item(s)</summary>${infoList(info)}</details>` : ""}
     <details class="section subtle" data-section="est-maps" ${openAttr("est-maps", findings.length > 0)}>
       <summary><h4 style="margin:0">Layer maps</h4><span class="small muted">${est.map_urls.length} map${est.map_urls.length === 1 ? "" : "s"} · <span class="legend"><span><i style="background:#ff8c00"></i>risk</span><span><i style="background:#ff0000"></i>unsupported</span></span></span></summary>
-      <div class="section-body"><div class="gallery compact">${est.map_urls.map((u) => `<figure><img class="img" src="${esc(u)}" alt="map" loading="lazy"><figcaption>${esc(u.split("/").pop().split("?")[0])}</figcaption></figure>`).join("")}</div></div></details>
-    <p class="small muted">Physical result: ${badge("outline", "NOT VERIFIED")} — only your test print can confirm these thresholds.</p>
+      <div class="section-body"><div class="gallery compact">${mapsFrontFirst(est.map_urls).map(([u, label, file]) => `<figure><img class="img" src="${esc(u)}" alt="${esc(label)} printability map" loading="lazy" title="${esc(file)}"><figcaption>${esc(label)}</figcaption></figure>`).join("")}</div></div></details>
   </div>` : ""}
   ${est ? issuesPanel() : ""}`;
+}
+
+// Printability maps in Review-layers order (front first), named by layer; the file name stays in the tooltip.
+function mapsFrontFirst(urls) {
+  const sheets = ui.state?.draft?.sheets || [];
+  const rows = urls.map((u) => {
+    const file = u.split("/").pop().split("?")[0];
+    const i = sheets.findIndex((s) => `${s.export_name}.png` === file);
+    return [u, i < 0 ? file : `Layer ${sheets.length - i}`, file, i < 0 ? -1 : sheets.length - i];
+  });
+  return rows.every((r) => r[3] > 0) ? rows.sort((a, b) => a[3] - b[3]) : rows;
 }
 
 function infoList(items) {
@@ -3623,23 +3732,48 @@ function kitNotice() {
   </div>`;
 }
 
+// Readiness before building: only what decides whether to build now, each chip linking to its existing control.
+// Layers and artwork use the same rules that enable Build (unchanged); issues are the located risks / failures still
+// marked "Needs review" (decisions never change a result, so they inform, they do not block).
+function kitReadiness() {
+  const d = ui.state.draft;
+  // A chip with an action is a link to the control that resolves it; the others are plain text.
+  const chip = (cls, text, action = "", testid = "", title = "") => `<${action ? "a href=\"#\"" : "span"} class="ready-chip ${cls}" ${action}${testid ? ` data-testid="${testid}"` : ""}${title ? ` title="${esc(title)}"` : ""}>${text}</${action ? "a" : "span"}>`;
+  const toEditor = `data-action="tab" data-tab="${artworkTab()}" data-focus="artwork"`;
+  const chips = [];
+  chips.push(d.status.printable ? chip("ok", "✓ Layers valid")
+    : chip("bad", "✕ Layers invalid", 'data-action="tab" data-tab="review"', "ready-layers"));
+  chips.push(unsavedArt() ? chip("bad", `✕ ${unsavedArt()} unsaved artwork change${unsavedArt() === 1 ? "" : "s"}`, toEditor, "kit-unsaved-art")
+    : ui.state.artwork?.differs_from_planned ? chip("bad", "✕ Artwork changed, not planned", toEditor, "ready-artwork")
+    : chip("ok", "✓ Artwork planned"));
+  const iss = ui.issues && !ui.issues.error && !inspBasisStale(ui.issues) ? ui.issues : null;
+  if (ui.issues?.error && !ui.issuesDirty) {
+    chips.push(chip("neutral", "Issues unavailable", "", "", ui.issues.error));
+  } else if (!iss) {
+    if ((!ui.issues || ui.issuesDirty) && !ui.issuesLoading && !busy()) queueMicrotask(loadIssues);
+    chips.push(chip("neutral", "Issues: checking…"));
+  } else {
+    const open = iss.issues.filter((i) => ["FAIL", "UNSUPPORTED", "RISK"].includes(i.severity) && (i.review?.state || "needs_review") === "needs_review");
+    const accepted = iss.issues.filter((i) => i.review?.state === "accept_risk").length;
+    chips.push(open.length ? chip("warn", `${open.length} issue${open.length === 1 ? "" : "s"} to review`, 'data-action="tab" data-tab="review" data-focus="issues"', "ready-issues")
+      : chip("ok", `✓ No open issues${accepted ? ` · ${accepted} accepted` : ""}`));
+  }
+  return `<div class="ready-row" data-testid="kit-readiness">${chips.join("")}</div>`;
+}
+
 function kitBuildPanel(latest) {
   const valid = ui.state.draft.status.printable && !ui.state.artwork?.differs_from_planned && !unsavedArt();
   // The build form is the main action until a kit matches the current draft; then it folds away.
   const needed = !latest || latest.stale || latest.status.cad !== "CAD_VALID";
   return `<section class="panel kit-build" data-testid="kit-build">
     <div class="spread"><h3 style="margin:0">${latest ? "Build a new print kit" : "Build the print kit"}</h3>
-      <span class="small muted">${latest ? (latest.stale ? "the draft changed after the latest kit" : "printer/process settings, optional Bambu Studio project") : "export STEP/STL for every sheet"}</span></div>
+      <span class="small muted">${latest ? (latest.stale ? "the layers changed after the latest kit" : "printer/process settings, optional Bambu Studio project") : "STEP + STL for every sheet"} ${infoTip("Exports with the approved CAD pipeline, reopens every file, compares artwork, reviewed stack, exported geometry and reopened CAD, runs the FDM estimate and writes a guide and checksums. No frame, housing or glue is added; the rim stays optional. A new kit never replaces an earlier one.")}</span></div>
     <div class="stack" style="margin-top:12px">
-      <p class="muted small" style="margin:0">One STEP and one STL per sheet, checked by reopening every file. ${infoTip("Exports with the approved CAD pipeline, reopens every file, compares artwork, reviewed stack, exported geometry and reopened CAD, runs the FDM estimate and writes a guide and checksums. No frame, housing or glue is added; the rim stays optional. A new kit never replaces an earlier one.")}</p>
       <details class="section subtle" data-section="kit-process" ${openAttr("kit-process")}>
         <summary><h4 style="margin:0">Printer &amp; process</h4><span class="small muted">${esc(ui.process.name)}${String(ui.process.source).startsWith("ASSUMPTION") ? " · generic defaults" : ""}</span></summary>
         <div class="section-body">${processForm("kit")}</div></details>
       ${bambuOption()}
-      <div class="row"><button class="${needed ? "primary" : ""}" data-action="build-kit" ${valid && !busy() ? "" : "disabled"}>${latest ? "Build new print kit" : "Build print kit"}</button>
-        ${unsavedArt() ? '<span class="small no" data-testid="kit-unsaved-art">The artwork has unsaved changes; save or discard them first (Review layers → Artwork editor).</span>'
-          : ui.state.artwork?.differs_from_planned ? '<span class="small no">The artwork was edited after these sheets were planned; plan from the edited artwork or undo the artwork edits (Review layers → Artwork editor).</span>'
-          : valid ? "" : '<span class="small no">The draft is invalid (see Review layers); invalid drafts are never exported.</span>'}</div>
+      <div class="row">${kitReadiness()}<button class="${needed ? "primary" : ""}" data-action="build-kit" ${valid && !busy() ? "" : "disabled"}>${latest ? "Build new print kit" : "Build print kit"}</button></div>
     </div>
   </section>`;
 }
@@ -3653,8 +3787,8 @@ function bambuOption() {
     : "Bambu Studio is not installed here: its presets are needed to write the project settings, so no project will be written.";
   return `<div class="subpanel stack" data-testid="bambu-option">
     <label class="check"><input type="checkbox" id="kit-bambu" data-testid="bambu-3mf" ${ui.bambu ? "checked" : ""}> Also write a Bambu Studio project (.3mf): one plate per sheet, in stack order</label>
-    <label class="field"><span>Bambu printer</span><select id="kit-bambu-printer" ${ui.bambu ? "" : "disabled"}>${env.printers.map((p) => `<option value="${esc(p.preset)}" ${p.preset === printer ? "selected" : ""}>${esc(p.model)} (${fmt(p.bed_mm[0])} × ${fmt(p.bed_mm[1])} mm)</option>`).join("")}</select></label>
-    <p class="small muted">${found} Sheets that do not fit the printer's printable area are reported and no project is written. No AMS is assumed: each plate uses one filament. STEP/STL files are unchanged.</p>
+    ${ui.bambu ? `<label class="field"><span>Bambu printer</span><select id="kit-bambu-printer" ${ui.bambu ? "" : "disabled"}>${env.printers.map((p) => `<option value="${esc(p.preset)}" ${p.preset === printer ? "selected" : ""}>${esc(p.model)} (${fmt(p.bed_mm[0])} × ${fmt(p.bed_mm[1])} mm)</option>`).join("")}</select></label>` : ""}
+    ${ui.bambu ? `<p class="small muted">${found} Sheets that do not fit the printer's printable area are reported and no project is written. No AMS is assumed: each plate uses one filament. STEP/STL files are unchanged.</p>` : ""}
   </div>`;
 }
 
@@ -3693,7 +3827,7 @@ function kitCard(kit, latest) {
   const [tone, icon, title, lead] = kitHeadline(kit);
   const ready = tone === "ok";
   const created = kit.created_utc ? new Date(kit.created_utc).toLocaleString() : "";
-  const facts = [esc(kit.id), kit.candidate && `candidate ${esc(kit.candidate)}`, created && esc(created), `${kit.assembly.length} sheets`, `${fmt(kit.total_stack_height_mm)} mm stack`, `process ${esc(kit.process_name)}`].filter(Boolean).join(" · ");
+  const facts = [esc(kit.id), kit.candidate && esc(candLabel(kit.candidate)), created && esc(created), `${kit.assembly.length} sheets`, `${fmt(kit.total_stack_height_mm)} mm stack`, `process ${esc(kit.process_name)}`].filter(Boolean).join(" · ");
   const warnings = kitWarnings(kit);
   const b = kit.bambu;
   const confirming = ui.confirmDelete === kit.id;
@@ -3714,9 +3848,9 @@ function kitCard(kit, latest) {
     </div>
     ${warnings.length ? `<ul class="kit-warnings" data-testid="kit-warnings">${warnings.map(([cls, text]) => `<li class="${cls}">${badge(cls, cls === "bad" ? "problem" : "warning")} ${esc(text)}</li>`).join("")}</ul>` : ""}
     <div class="grid3 kit-status">
-      ${statusCard("CAD (reopened files)", kit.status.cad === "CAD_VALID" ? ["ok", "CAD_VALID", "Every STEP is one valid solid, every STL one watertight part; volumes and front view match."] : ["bad", "CAD_INVALID", kit.cad_problems.join("; ")], "kit-cad")}
-      ${statusCard("FDM estimate", [kit.status.fdm_estimate === "NO_RISKS_FOUND" ? "ok" : kit.status.fdm_estimate === "RISKS_REPORTED" ? "warn" : "bad", fdmLabel(kit.status.fdm_estimate), `${kit.printability.counts.UNSUPPORTED} unsupported · ${kit.printability.counts.RISK} risk · process ${kit.printability.process.name}`], "kit-fdm")}
-      <div class="status-card neutral physical" data-testid="kit-physical"><div class="label">Physical</div><div class="value">${badge("outline", kit.status.physical === "NOT_VERIFIED" ? "NOT VERIFIED" : kit.status.physical)}</div><div class="note">Print and stack the kit, then report the result (L-G10).</div></div>
+      ${statusCard("Files (reopened and checked)", kit.status.cad === "CAD_VALID" ? ["ok", statusText("CAD_VALID"), "Every STEP is one valid solid, every STL one watertight part; volumes and front view match."] : ["bad", statusText("CAD_INVALID"), kit.cad_problems.join("; ")], "kit-cad")}
+      ${statusCard("Printability (estimate)", [kit.status.fdm_estimate === "NO_RISKS_FOUND" ? "ok" : kit.status.fdm_estimate === "RISKS_REPORTED" ? "warn" : "bad", fdmLabel(kit.status.fdm_estimate), `${kit.printability.counts.UNSUPPORTED} unsupported · ${kit.printability.counts.RISK} risk · process ${kit.printability.process.name}`], "kit-fdm")}
+      <div class="status-card neutral physical" data-testid="kit-physical"><div class="label">Physical</div><div class="value">${badge("outline", kit.status.physical === "NOT_VERIFIED" ? "NOT VERIFIED" : kit.status.physical)}</div><div class="note">Print and stack the kit to confirm the result.</div></div>
     </div>
     <div class="kit-sections">
       ${kitFilesSection(kit)}
@@ -3787,7 +3921,7 @@ function kitValidationSection(kit) {
   const vol = Object.values(cmp.exported_vs_reopened_cad);
   const maxVol = Math.max(...vol.map((r) => Math.abs(r.step_volume_vs_expected_pct)), ...vol.map((r) => Math.abs(r.stl_volume_vs_expected_pct)));
   const c = kit.printability.counts;
-  const summary = `${esc(kit.status.cad)} · ${c.UNSUPPORTED} unsupported · ${c.RISK} risk · ${fmt(cmp.approved_artwork_vs_reopened_cad_front_view.mismatched_px)} px front-view difference`;
+  const summary = `${esc(statusText(kit.status.cad))} · ${c.UNSUPPORTED} unsupported · ${c.RISK} risk · ${fmt(cmp.approved_artwork_vs_reopened_cad_front_view.mismatched_px)} px front-view difference`;
   return kitSection(kit, "validation", "Validation & Printability", summary, `
     <dl class="kv small">
       <dt>Artwork vs reviewed stack</dt><dd>${fmt(cmp.approved_artwork_vs_reviewed_stack.front_view_mismatched_px)} px differ</dd>
@@ -3873,10 +4007,10 @@ async function deleteProject(name) {
   render();
 }
 
-// "Stop LayerForge" (desktop launcher only): asks first, and again if a step is still running; the server
-// answers before it stops.  The page then says how to start again.
+// Exit (desktop launcher only): asks first, and again if a step is still running; the server answers before
+// it stops.  The page then says how to start again.
 async function stopApp() {
-  if (!confirm("Stop LayerForge?\n\nYour projects are saved. To start it again, double-click LayerForge.exe.")) return;
+  if (!confirm("Exit LayerForge?\n\nYour projects are saved. To start it again, double-click LayerForge.exe.")) return;
   let result;
   try {
     result = await api("POST", "/api/stop", {});
@@ -3887,12 +4021,56 @@ async function stopApp() {
       result = await api("POST", "/api/stop", { force: true });
     } catch (err2) { showError(err2, "Could not stop LayerForge"); return; }
   }
+  showStopped();
+  return result;
+}
+
+// The app is no longer running (Exit here or in another tab, or it closed after its last tab): say so instead of
+// leaving a page whose buttons fail.  Nothing is lost: the server saved everything as it went.
+function showStopped() {
+  if (presence.stopped) return;
+  presence.stopped = true;
   clearTimeout(pollTimer);
+  clearInterval(presence.timer);
   document.body.innerHTML = `<main class="panel stack" style="max-width:560px;margin:48px auto" data-testid="app-stopped">
     <h2 style="margin:0">LayerForge has stopped</h2>
     <p>Your projects are saved in <code>${esc(ui.info?.workspace || "")}</code>.</p>
     <p>To start LayerForge again, double-click <strong>LayerForge.exe</strong>. You can close this tab.</p></main>`;
-  return result;
+}
+
+// Presence (desktop launcher only, see app/lifecycle.py): this tab says it is open every heartbeat_s and that
+// it is leaving when the page is unloaded (closed, reloaded, navigated away).  The app closes by itself once no
+// tab is open and nothing is running; a reload checks in again within its grace period.
+const presence = { tab: (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`).slice(0, 64),
+                   timer: null, misses: 0, stopped: false };
+
+async function heartbeat() {
+  if (presence.stopped) return;
+  try {
+    const response = await fetch("/api/presence", { method: "POST", headers: { "Content-Type": "application/json" },
+                                                    body: JSON.stringify({ tab: presence.tab }) });
+    presence.misses = 0;
+    if (response.status === 503) showStopped();  // closing (Exit in another tab)
+  } catch (err) {
+    if (++presence.misses >= 2) showStopped();  // the local server does not answer at all: it has stopped
+    else setTimeout(heartbeat, 2000);  // one quick retry before concluding
+  }
+}
+
+function startPresence() {
+  if (!ui.info?.can_stop) return;  // only the desktop launcher stops by itself
+  heartbeat();
+  presence.timer = setInterval(heartbeat, (ui.info.heartbeat_s || 15) * 1000);
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") heartbeat(); });
+  window.addEventListener("pagehide", () => {
+    if (!presence.stopped) navigator.sendBeacon("/api/presence", JSON.stringify({ tab: presence.tab, leaving: true }));
+  });
+  window.addEventListener("pageshow", (e) => { if (e.persisted) heartbeat(); });  // back to this page from history
+  // The browser puts this tab to sleep (no timers until it wakes): say so, so the app waits much longer for it.
+  document.addEventListener("freeze", () => {
+    if (!presence.stopped) navigator.sendBeacon("/api/presence", JSON.stringify({ tab: presence.tab, sleeping: true }));
+  });
+  document.addEventListener("resume", heartbeat);
 }
 
 async function deleteKit(kitId) {
@@ -3937,9 +4115,11 @@ async function onClick(event) {
       setTab(el.dataset.tab);
       if (el.dataset.focus === "artwork") ui.sections.artwork = true;
       if (el.dataset.focus === "candidates") ui.sections.candidates = true;
+      if (el.dataset.focus === "issues") ui.sections.issues = true;
       render();
       if (el.dataset.focus === "artwork") $('[data-testid="artwork-panel"]')?.scrollIntoView({ behavior: "smooth", block: "start" });
       if (el.dataset.focus === "candidates") $('[data-testid="candidates-section"]')?.scrollIntoView({ behavior: "smooth", block: "start" });
+      if (el.dataset.focus === "issues") $('[data-testid="issue-inspector"]')?.scrollIntoView({ behavior: "smooth", block: "start" });
       break;
     case "dismiss-error": ui.error = null; render(); break;
     case "create": createProject(); break;
@@ -3973,7 +4153,7 @@ async function onClick(event) {
       break;
     case "start-review": submit(`${project}/review`, { candidate: el.dataset.candidate, widen_openings: widenOn() }); break;
     case "plan-accept":
-      if (confirm(`Accept this plan?\n\nCurrent plan: ${workingStatus().replace(/<[^>]+>/g, "")}.\n\nA copy is kept in this project so you can come back to it without planning again${ui.state.checkpoint?.exists ? "; it replaces the plan accepted " + ui.state.checkpoint.accepted_utc : ""}. Accepting does not check or mean that the plan prints.`)) submit(`${project}/plan/accept`, {});
+      if (confirm(`Accept this plan?\n\nCurrent plan: ${workingStatus().replace(/<[^>]+>/g, "")}.\n\nA copy is kept in this project so you can come back to it without planning again${ui.state.checkpoint?.exists ? "; it replaces the plan accepted " + localTime(ui.state.checkpoint.accepted_utc) : ""}. Accepting does not check or mean that the plan prints.`)) submit(`${project}/plan/accept`, {});
       break;
     case "plan-restore": restorePlan(); break;
     case "widen": submit(`${project}/widen`, {}); break;
@@ -4217,6 +4397,7 @@ async function main() {
   try {
     ui.info = await api("GET", "/api/info");
     ui.process = { ...ui.info.process_presets[0] };
+    startPresence();
     await loadProjects();
   } catch (err) {
     showError(err, "Cannot reach the LayerForge server");

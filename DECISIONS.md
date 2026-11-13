@@ -1417,3 +1417,150 @@ FDM thresholds remain generic assumptions until a print calibrates them).
 - LIMITATION: the checkpoint is a full copy (0.5 MB for the sailboat; a proposal of 5-170 MB in the user's
   projects is copied whole); the failed proposal's diagnostics are no longer kept after Upscale & Retry unless it
   was accepted; re-running intake (no review yet) still replaces the proposal directly, as before.
+
+## D-V3-050 | 2026-11-13 | The desktop app stops when its last tab is closed
+
+- USER_REQUIRED: closing the last LayerForge tab stops the local app when it is safe; closing one of several tabs,
+  a reload or in-app navigation does not; running planning / saving / export is never interrupted; a crashed
+  browser is handled; an explicit Exit remains; no tray, no launcher window.  Replaces D-V3-048's "the server keeps
+  running when the browser closes".
+- DESIGN_CHOICE, presence: each page (tab) posts a heartbeat (`POST /api/presence {"tab"}`, every 15 s, at once
+  when it becomes visible) and a `sendBeacon` "leaving" message on `pagehide` (close, reload, navigating away).
+  Heartbeat-only, no long-lived connection: an EventSource per tab would use one of the browser's six connections
+  per host, so several tabs could starve the page's own requests.
+- DESIGN_CHOICE, rules (`app/lifecycle.py`, pure logic, clock injectable): the launcher closes when no tab is open
+  (all left, or none heard from for 30 min), the last request of any kind is >= 10 s old (a reload checks in well
+  within it), no job is queued or running, and no request is being handled.  After a start, or a second
+  double-click (`GET /api/info?launch=1`), it waits up to 180 s for the first page.  Deciding and refusing new
+  requests (503 "LayerForge is closing") happen under one lock; stopping waits up to 30 s for requests being
+  answered.  A second start while the first copy is closing waits up to 20 s for its lock and then starts normally.
+- DESIGN_CHOICE, sleeping tabs (Phase 0 review, 2026-11-13): hidden tabs keep sending about one heartbeat a minute;
+  only a frozen tab (Edge sleeping tabs, Chrome freezing) goes silent.  Its `freeze` event posts
+  `{"tab", "sleeping": true}` and the tab then counts as open for 8 h; `resume` sends a heartbeat again.  The
+  silent-tab timeout was raised from 150 s to 30 min (it now only matters for a crashed or killed browser), so a
+  tab frozen without notice is not given up early either.  Closing the last tab still stops it within ~10 s.
+- DESIGN_CHOICE, Exit: moved from the footer link "Stop LayerForge" to an "Exit" button in the top bar (same
+  confirmation, same second confirmation when a step is running).  A page whose app has stopped (Exit in another
+  tab, or auto-stop) replaces itself with "LayerForge has stopped" after two failed heartbeats instead of leaving
+  dead buttons.  Only the desktop launcher stops by itself; `python -m layerforge_l1 app` and `--headless` are
+  unchanged.
+- LIMITATION: a crashed browser leaves the app running for 30 min; a browser closed while its only LayerForge tab
+  sleeps (no unload event) leaves it running up to 8 h.  A tab the browser discarded (not just froze) reloads when
+  reopened; if the app has stopped by then the browser shows its own "cannot connect" page.  Navigating the last tab
+  to another site and coming back after more than 10 s finds the app stopped.  Packaged exe not rebuilt yet.
+
+## D-V3-051 | 2026-11-13 | First-time-user wording and visibility (UX Phase 1); Phase 0 fixes
+
+- USER_REQUIRED: approved UX audit, Phase 0 (investigate and fix confirmed issues) then Phase 1 quick wins only:
+  plain labels instead of internal codes, diagnostics behind Technical details, no duplicated status summaries or
+  empty tables, unavailable controls hidden, correct Issues messages, clearer action and navigation labels, easy to
+  find accepted-plan controls, accurate current stage.  No functionality removed, no planning / image-processing
+  change, no new screen, no long text.  Phases 2-4 not started.
+- OBSERVED_IN_FILE (Phase 0): the Artwork editor listed "0 colors · Shown after the first selection" once a review
+  existed (the review's artwork has no edit log until the first click, and only the proposal-stage palette was
+  computed).  Fixed: the review artwork's palette is computed with `artwork.palette_summary` (cached by file stamp),
+  the same rows the log reports after the first selection.
+- OBSERVED_IN_FILE (Phase 0, found in the after-screens): the Issues panel was permanently "out of date" before the
+  first plan because the server wrote the basis `candidate:None` and the page `candidate:null`.  Both now write an
+  empty value.
+- UNVERIFIED_INFERENCE (Phase 0): the single 404 seen in the audit (`draft/previews/sheets/layer_05_1c478d.png`) used
+  the version stamp of the beam_area draft that the following candidate switch moved to `reviews/beam_area`; the
+  page most likely requested an old image while or after the switch moved the folder.  Not reproduced in two
+  targeted replays (Restore -> switch from Review and from Plan); effect a momentary broken image, no data
+  involved.  Not changed.
+- DESIGN_CHOICE, wording (`app.js` only): `statusText` maps status codes to words (Ready for review, Not planned
+  yet, Valid / Invalid, Files verified, Checks pass ...), the code stays in the tooltip; candidates are shown as
+  "Candidate N" (planner name in the tooltip and `data-candidate`); layers as "Layer N" counted from the front
+  (export file name in the tooltip / inspector); times in local time; job progress as a sentence with the raw events
+  under Technical details; note codes under Technical details.
+- DESIGN_CHOICE, visibility: the status row is shown once a review exists or the artwork needs attention, and not
+  on Export while the current kit's own cards say the same; the "before / after 0 artwork edits" table only when
+  artwork edits were planned; the Bambu printer list only when the Bambu project is ticked; printability maps front
+  first and named by layer; a disabled primary button looks disabled.
+- DESIGN_CHOICE, navigation: "Edit artwork" is the current step until a plan exists; "Continue to Review layers →";
+  Printability offers "Build print kit →"; "Previous attempts" is now "Accepted plan" (state in the summary: accepted
+  / not accepted / nothing yet, open by default) and Review layers shows "Accept this plan" or "accepted plan" in its
+  header (same confirmation and API).
+- LIMITATION: issue guidance (what to do about a risk), required vs optional, the long Plan page and candidate
+  thumbnails are Phase 2-4 work.
+
+## D-V3-052 | 2026-11-13 | Plan screen action first; one consistent Artwork-editor place (UX Phase 2)
+
+- USER_REQUIRED: simplify the Plan screen (primary next action near the top, no duplicated artwork previews or
+  primary buttons, advanced controls collapsible, warnings visible); one consistent Artwork-editor location
+  reachable from Plan and Review with the editing context, undo/redo, unsaved edits and history preserved and no
+  automatic re-plan; clear stage and next action.  Launcher / lifecycle / Exit untouched.  No new screen, no
+  algorithm change.
+- USER choice (this session, confirming 2026-11-05): the editor stays directly below the Issues of the current stage
+  (Plan before a review exists, Review layers after); no separate artwork tab, no move.  Made consistent instead:
+  every entry - stepper "Edit artwork", an "Edit artwork" button in the Plan card and in the Review header (with
+  "N unsaved" / "not planned"), the issue card's Edit artwork - opens that one place, unfolded and scrolled to.
+  The editing context is the server's (`artwork_basis`), so it is the same whatever entry is used.
+- DESIGN_CHOICE, Plan card: one next action at the top - "Plan sheets from this artwork" (not planned), "Plan sheets
+  from the edited artwork" (artwork changed after planning; held while changes are unsaved), "Review this
+  candidate", or "Continue to Review layers →" - beside "Edit artwork"; the replace warning shows there.  The
+  editor's own plan buttons stay where editing ends but are secondary; on Plan the replace warning is not repeated
+  in the editor.  The info banner "artwork ready; no sheets planned" is replaced by the next action's line.
+- DESIGN_CHOICE, folding: the editor is open while editing is the task (nothing planned, unsaved or unplanned
+  changes) and folded once the sheets match the artwork; Issues are folded only while the artwork is not planned yet
+  (their image is the same artwork as the editor's; counts stay in the summary) - a failed plan keeps them open.
+  Below the card: Issues, editor (before a review), Accepted plan, then "More options" (Physical size, Upscale,
+  cleanup, details changed by intake, Previews).  The user's own open/closed choices still win.
+- DESIGN_CHOICE, Review: header "Edit artwork"; when the saved artwork differs from the planned sheets the header's
+  primary action is "Plan sheets from the edited artwork" and Build print kit steps back (it is disabled then).
+  761-1180 px: the selected layer's panel sits under the layer list beside the preview instead of below the page.
+- Tests changed for the new defaults (no threshold): recolor (next-action text instead of the banner), artwork
+  stable (a planned project, editor opened by the driver, so Issues still grow above it), rectangular review (opens
+  the folded editor with Edit artwork).  New: tests/test_workflow_ui.py (Chrome).
+
+## D-V3-053 | 2026-11-13 | Compact issues, export readiness row, less prose (UX Phase 3)
+
+- USER_REQUIRED: reduce visual and cognitive clutter (no tutorials, help panels or explanatory paragraphs); issue
+  rows with a short name, measurement, severity and one relevant action, decisions in a compact control, technical
+  details on demand; existing severity / export rules only (nothing called blocking that is not, no fix promised);
+  one compact pre-export readiness row linking to existing controls; redundant text removed from Plan, Issues,
+  Printability and Physical size.  No planner / CAD / validation change, thresholds and risk decisions unchanged.
+- DESIGN_CHOICE, issue card: line 1 number · name · measurement · severity word (code in the tooltip) · the existing
+  actions (Show on layer / Edit artwork, the destination's one primary); line 2 layer · Needs review / Fix later /
+  Accept risk (same buttons, same API) · same-place layers.  Threshold, cause, reveals, the intake evidence image and
+  the technical block are under one collapsed "Details".  Removed lines: "A sheet problem: changing the artwork may
+  or may not remove it", "Show on layer starts the review…" (now the button tooltip), "Click a highlighted area or
+  a row", the accepted-risk sentence (screen-reader text) and the lapsed sentence (tooltip on "review again").  Rows
+  gain the severity word; filters and previous/next share one area; the no-issue line keeps its thresholds.
+- DESIGN_CHOICE, Export: one row of chips beside Build print kit - layers valid, artwork saved and planned (the same
+  rules that enable Build), and located FAIL / UNSUPPORTED / RISK issues still "Needs review" (informative: decisions
+  never block) - each non-ok chip links to its existing control.  The three long messages under the button and the
+  status row on Export are gone (the chips and the kit card say it); the Bambu printer field is rendered only when
+  the Bambu project is ticked (the Phase 1 `hidden` attribute was overridden by CSS).
+- DESIGN_CHOICE, text: Plan next-action explanations and the STEP-check line removed; the replace warning is one
+  sentence (+ Accept); Printability's restated heading and "shown in Issues below" removed; Physical size prose moved
+  into its info tips.  Nothing new was added in their place.
+- Tests changed (wording / folding only): issue drivers read folded fields with textContent + tooltip; severity
+  badge text "risk"; "also L2" instead of "1 other layer"; the recolor test no longer looks for the removed sentence.
+
+## D-V3-054 | 2026-11-13 | Candidate thumbnails, widening as an automatic adjustment, final cleanup (UX Phase 4)
+
+- USER_REQUIRED: compact candidate thumbnails from existing saved previews, easy differences, no unnecessary
+  columns, current and recommended clearly marked, a concise confirmation after switching (review states and
+  switching unchanged); widening shown apart from user edits and not counted as one, an accurate summary instead of
+  "1 → 1 risky cutouts" (undo / redo / widening behaviour unchanged); narrow status cards, Save Changes distinct
+  from the workflow's primary action, issue navigation consolidated, redundant text removed.  No new screen, no
+  planner / CAD / validation change.
+- OBSERVED_IN_FILE: a candidate has no assembled preview of its own (only the selected one), and every valid
+  candidate reproduces the artwork exactly, so a front view would look the same for all.  What differs is how the
+  colors are split into sheets: each candidate saves its sheets' material masks
+  (`proposal/candidates/<c>/stack/layers/*/retained_material_mask.png`).
+- DESIGN_CHOICE, comparison: the proposal view lists those masks front first (`sheet_masks`) and a digest of them;
+  the table shows each candidate's sheets as a strip of thumbnails tinted in the sheet color (CSS luminance mask:
+  no image is rendered or computed), "same sheets as recommended" when the digests match, the sheet count, and the
+  split-colors / front-view columns only when some candidate differs there.  Status is a badge only when not valid.
+  "in review" (accent bar) and "recommended" are badges in the name cell.  After a switch the Review header says
+  "✓ Switched from Candidate N (its review is saved)" until the next job.
+- DESIGN_CHOICE, widening: still one entry in the edit log (undo, revert, replay unchanged), but the review bar and
+  Edit history count only user edits ("cutouts auto-widened" / "auto-widened" when present), the history row reads
+  "cutouts widened · automatic", Undo is labelled "Undo widening" when the widening is the last entry.  Summary:
+  badge "Automatic" (run at review start) or "Applied", then "N places widened · <left>" where left is "no risky
+  cutouts left", "risky cutouts B → A" or "A risky cutouts still narrow"; the "% fewer" fact became "places widened".
+- DESIGN_CHOICE, cleanup: Save Changes is an outlined accent button (filled ring while there are unsaved changes);
+  status-card notes wrap below 1180 px (one column below 760 px); issue filters and previous/next share one grid row.
+- Tests changed: widening headline / facts assertions (same numbers, new wording).

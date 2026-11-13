@@ -4,7 +4,9 @@
 small JSON API on 127.0.0.1.  Long operations are submitted to ``JobRunner``
 and return a job id at once; the page polls ``/api/jobs/<id>`` for progress.
 
-    GET  /api/info                              version, edit ops, presets, physical status
+    GET  /api/info                              version, edit ops, presets, physical status (?launch=1: a new page is coming)
+    POST /api/presence                          {"tab", "leaving"?, "sleeping"?}: an open page's heartbeat / unload / freeze beacon (lifecycle.py)
+    POST /api/stop                              {"force"?}: Exit (desktop launcher only)
     GET  /api/projects                          project list
     POST /api/projects?filename=&scale=&...     body = image bytes -> project + L1 proposal job
     GET  /api/projects/<p>                      project state (+ active or latest job)
@@ -44,6 +46,7 @@ import socket
 import subprocess
 import sys
 import threading
+import time
 import webbrowser
 from functools import partial
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -56,6 +59,7 @@ from ..core.bambu3mf import environment as bambu_environment
 from ..core.editing import EDIT_OPS
 from ..core.model import read_bytes
 from .jobs import JobConflict, JobRunner, describe_error
+from .lifecycle import HEARTBEAT_S, Lifecycle
 from .workspace import (MAX_UPLOAD_BYTES, PHYSICAL_STATUS, SCALES, AppError, Workspace, check_detail_decisions,
                         process_presets)
 
@@ -83,12 +87,29 @@ class App:
         self.jobs = JobRunner()
         # Only an interactive desktop session may open file-manager windows (not headless/tests).
         self.open_folders = open_folders
-        # Set by the desktop launcher (no window): "Stop LayerForge" on the page calls it (POST /api/stop).
+        # Set by the desktop launcher (no window): Exit on the page calls it (POST /api/stop), and the launcher
+        # stops by itself when no LayerForge tab is open any more (``lifecycle``).
         self.on_stop: Callable[[], None] | None = None
+        self.lifecycle = Lifecycle()
 
     def submit(self, kind: str, project: str, work: Callable[[Callable[..., None]], Any]) -> dict[str, Any]:
         self.workspace.path(project)  # unknown project -> AppError before queueing
         return self.jobs.submit(kind, project, work).to_json()
+
+
+def _state_settled(ws: Workspace, name: str) -> dict[str, Any]:
+    """The project state, read again if a running job moved one of its folders while it was being read (a candidate
+    switch or a restore moves ``review/`` aside for a moment): a file that existed a moment ago is then missing.
+    Observed as a 500 on GET /api/projects/<p> during a switch; nothing is changed, the read is only repeated."""
+
+    for attempt in range(4):
+        try:
+            return ws.state(name)
+        except FileNotFoundError:
+            if attempt == 3:
+                raise
+            time.sleep(0.25)
+    raise AssertionError("unreachable")
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -174,6 +195,36 @@ class Handler(BaseHTTPRequestHandler):
     def _dispatch(self, route: Callable[[list[str], dict[str, list[str]]], None]) -> None:
         url = urlparse(self.path)
         parts = [unquote(p) for p in url.path.split("/") if p]
+        if parts == ["api", "presence"] and self.command == "POST":  # not "work": never keeps the app open alone
+            self._presence()
+            return
+        lifecycle = self.app.lifecycle
+        if not lifecycle.request_started():
+            self._error(503, "LayerForge is closing. Double-click LayerForge.exe to start it again.", closing=True)
+            return
+        try:
+            self._route(route, url, parts)
+        finally:
+            lifecycle.request_finished()
+
+    def _presence(self) -> None:
+        try:
+            body = self._json_body()
+        except AppError as error:
+            self._error(400, str(error))
+            return
+        tab = str(body.get("tab") or "")[:64]
+        if not tab:
+            self._error(400, "tab is required")
+        elif body.get("leaving") is True:
+            self.app.lifecycle.left(tab)
+            self._json({"ok": True})
+        elif self.app.lifecycle.seen(tab, sleeping=body.get("sleeping") is True):
+            self._json({"ok": True})
+        else:
+            self._error(503, "LayerForge is closing. Double-click LayerForge.exe to start it again.", closing=True)
+
+    def _route(self, route: Callable[[list[str], dict[str, list[str]]], None], url: Any, parts: list[str]) -> None:
         try:
             try:
                 route(parts, parse_qs(url.query))
@@ -200,14 +251,17 @@ class Handler(BaseHTTPRequestHandler):
         elif parts[0] == "files" and len(parts) >= 3:
             self._file(ws.file(parts[1], "/".join(parts[2:])))
         elif parts == ["api", "info"]:
+            if query.get("launch") == ["1"]:  # LayerForge.exe started again and opens a page on this app
+                self.app.lifecycle.expect_page()
             self._json({"version": __version__, "workspace": ws.root.as_posix(), "edit_ops": list(EDIT_OPS),
                         "scales": list(SCALES), "physical": PHYSICAL_STATUS, "process_presets": process_presets(),
                         "max_upload_mb": MAX_UPLOAD_BYTES // (1024 * 1024), "bambu": bambu_environment(),
-                        "can_open_folders": self.app.open_folders, "can_stop": self.app.on_stop is not None})
+                        "can_open_folders": self.app.open_folders, "can_stop": self.app.on_stop is not None,
+                        "heartbeat_s": HEARTBEAT_S})
         elif parts == ["api", "projects"]:
             self._json({"projects": ws.projects()})
         elif len(parts) == 3 and parts[:2] == ["api", "projects"]:
-            state = ws.state(parts[2])
+            state = _state_settled(ws, parts[2])
             job = self.app.jobs.active(parts[2]) or self.app.jobs.latest(parts[2])
             state["job"] = job.to_json() if job else None
             self._json(state)
@@ -231,7 +285,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _post(self, parts: list[str], query: dict[str, list[str]]) -> None:
         ws, app = self.app.workspace, self.app
-        if parts == ["api", "stop"]:  # the page's "Stop LayerForge" (desktop launcher only)
+        if parts == ["api", "stop"]:  # the page's Exit (desktop launcher only)
             if app.on_stop is None:
                 self._error(404, "stopping is only available when LayerForge was started with LayerForge.exe")
                 return
@@ -240,6 +294,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"error": {"message": "LayerForge is still working on: " + ", ".join(running),
                                       "running": running}}, 409)
                 return
+            app.lifecycle.close_now("Exit on the page")  # later requests are refused, not cut off
             self._json({"stopping": True, "running": running})  # answered before the server stops
             threading.Thread(target=app.on_stop, name="layerforge-stop", daemon=True).start()
             return

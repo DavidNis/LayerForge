@@ -312,7 +312,7 @@ def test_browser_issue_review(app, tmp_path) -> None:
     assert sel["api_colors"] and all(c in sel["reveals"] for c in sel["api_colors"])
     assert sel["pixel_under"] in sel["api_colors"]  # the processed image under the issue is the revealed color
     assert drawn(sel["overlay_in"]) and not drawn(sel["overlay_far"]) and drawn(sel["layer_overlay_in"])
-    assert sel["mates"] == 1 and "1 other layer" in sel["group"] and "L2" in sel["group"]
+    assert sel["mates"] == 1 and "also" in sel["group"] and "L2" in sel["group"]  # compact: "also L2 0.xx"
     assert "0.8" in sel["threshold"] and "Layer 1 (from front)" in sel["where"] and sel["state"] == "needs_review"
     assert sel["offsets_after_shots"]["diff"] < 1.0 and sel["states_after_el"][0] == sel["states_after_el"][1]  # page capture
     for step in ("wheel", "pan", "after_resize"):
@@ -323,11 +323,11 @@ def test_browser_issue_review(app, tmp_path) -> None:
     assert mate["offsets"]["diff"] < 1.0 and "L1" in mate["back_mates"]
     review = result["review"]
     assert "geometry and the warning are unchanged" in review["accepted_note"] and review["group_button"] == 1
-    assert review["badge"] == "RISK" and review["api_states"] == ["accept_risk", "accept_risk"]
+    assert review["badge"] == "risk" and review["api_states"] == ["accept_risk", "accept_risk"]
     assert set(review["api_severities"]) == {"RISK"} and review["tags"] >= 1 and "2 accepted" in review["summary"]
     assert review["filtered_rows"] == 1
     reload = result["reload"]
-    assert reload["state"] == "accept_risk" and reload["badge"] == "RISK" and reload["rows"] == reload["api_rows"]
+    assert reload["state"] == "accept_risk" and reload["badge"] == "risk" and reload["rows"] == reload["api_rows"]
     assert reload["after_reset"] == "needs_review"
     assert result["next"]["title"] and (result["next"]["offsets"] is None or result["next"]["offsets"]["diff"] < 1.0)
     assert result["fit"][0] == result["fit"][1] and result["fit_offsets"]["diff"] < 1.0

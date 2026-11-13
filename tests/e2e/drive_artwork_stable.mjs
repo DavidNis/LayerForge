@@ -213,6 +213,7 @@ try {
   await send("Fetch.enable", { patterns: [{ urlPattern: "*/api/projects/*/issues", requestStage: "Request" }] });
   await send("Page.navigate", { url: `${url}#/${encodeURIComponent(project)}/proposal` });
   await waitFor(`document.querySelector('[data-testid="artwork-panel"]') && ${idle}`, "artwork panel", 300000);
+  await evaluate(`(() => { const p = document.querySelector('[data-testid="artwork-panel"]'); if (!p.open) p.querySelector("summary").click(); })()`);
   await waitFor(`document.querySelector("${img}")?.naturalWidth > 0`, "artwork image");
   const firstIssues = await nextPaused("first Issues load");
   results.loading_placeholder = await evaluate(`document.querySelector('[data-testid="issue-inspector"]')?.innerText || ""`);

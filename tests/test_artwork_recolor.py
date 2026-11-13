@@ -570,7 +570,8 @@ def test_browser_artwork_panel(app):
     result = json.loads(lines[-1])
     assert result["ok"], result.get("error", "") + "\nconsole: " + str(result.get("console_errors")) + "\n" + run.stderr[-3000:]
     assert result["console_errors"] == []
-    assert result["create_label"] == "Import and prepare artwork" and "no sheets are planned" in result["not_planned_banner"]
+    # Not planned yet: the Plan card's next action says so (UX Phase 2 replaced the info banner).
+    assert result["create_label"] == "Import and prepare artwork" and "Plan sheets from this artwork" in result["not_planned_banner"]
     assert "One connected region of 4" in result["selection"]
     # Working session: a color choice recolors at once (no Apply button), unsaved until Save Changes.
     assert result["no_apply_button"] and result["save_disabled_at_start"]

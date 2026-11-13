@@ -740,10 +740,14 @@ def check_widening_summary(r: dict, draft: dict) -> None:
     edit = next(e for e in draft["edits"] if e["index"] == w["last"]["index"])
     before, after = summary["before"]["risky_cutouts"], summary["after"]["risky_cutouts"]
     p = r["panel"]
-    assert r["collapsed"]["headline"].startswith("Applied") and f"{before} → {after} risky cutouts" in r["collapsed"]["headline"]
+    # Headline (UX Phase 4): what was done, then what is left - never "1 → 1" as if it were a result.
+    widened = summary["spots"] - summary["rejected"]
+    head = r["collapsed"]["headline"]
+    assert head.startswith("Automatic" if w["last"]["automatic"] else "Applied") and f"{widened} place" in head
+    assert ("no risky cutouts left" if after == 0 else f"risky cutouts {before} → {after}" if after < before
+            else f"{after} risky cutout") in head and f"{before} → {after} risky cutouts" not in head
     assert p["facts"]["widen-risky"] == f"{before} → {after} risky cutouts"
-    drop = round((before - after) / before * 100) if before else None
-    assert p["facts"]["widen-drop"] == ("– fewer" if drop is None else f"−{drop}% fewer" if drop > 0 else f"{drop}% fewer" if drop == 0 else f"+{-drop}% more")
+    assert p["facts"]["widen-places"] == f"{widened} place{'' if widened == 1 else 's'} widened"
     changed = set(edit["op"]["removed"])
     assert p["facts"]["widen-layer-count"].startswith(f"{len(changed)} layer")
     assert p["facts"]["widen-front"] == ("Unchanged front view" if edit["visible_changed_px"] == 0 else "Changed front view")

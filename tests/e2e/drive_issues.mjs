@@ -92,6 +92,8 @@ async function waitFor(expression, what, timeoutMs = 60000) {
   throw new Error(`timed out waiting for: ${what}`);
 }
 const text = (sel) => evaluate(`document.querySelector(${JSON.stringify(sel)})?.innerText ?? ""`);
+// Full text of a field even when it is folded under Details (innerText is empty there), plus its tooltip.
+const fullText = (sel) => evaluate(`(() => { const e = document.querySelector(${JSON.stringify(sel)}); return e ? (e.title || "") + " " + e.textContent : ""; })()`);
 const count = (sel) => evaluate(`document.querySelectorAll(${JSON.stringify(sel)}).length`);
 const bodyHas = (s) => `document.body.innerText.includes(${JSON.stringify(s)})`;
 const idle = `!document.querySelector('[data-testid="job-banner"]')`;
@@ -223,7 +225,7 @@ try {
   await selectRow("Opening may close");
   results.slot = {
     title: await text('[data-testid="insp-title"]'), measured: await text('[data-testid="insp-measured"]'),
-    threshold: await text('[data-testid="insp-threshold"]'), where: await text('[data-testid="insp-sheet"]'),
+    threshold: await fullText('[data-testid="insp-threshold"]'), where: await fullText('[data-testid="insp-sheet"]'),
     shown: await text('[data-testid="insp-shown"]'), fill: await fillRatio("#insp-image", front, slot.bbox_mm, "#insp-viewport"),
     layer_button: await evaluate(`document.querySelector('[data-testid="insp-edit-layer"]')?.className ?? null`),
     centre_offset_px: dist(await screenOf("#insp-image", front, centreBox(slot.bbox_mm)), await centreOf("#insp-viewport")),
@@ -247,7 +249,7 @@ try {
   // 3. The narrow retained connection: the 1.0 mm bar is highlighted (the disc it holds only dashed).
   const neck = find(layer1, "narrow_connection");
   await selectRow("Material held by a too-narrow connection");
-  results.neck = { measured: await text('[data-testid="insp-measured"]'), threshold: await text('[data-testid="insp-threshold"]'),
+  results.neck = { measured: await text('[data-testid="insp-measured"]'), threshold: await fullText('[data-testid="insp-threshold"]'),
                    fill: await fillRatio("#insp-image", front, neck.bbox_mm, "#insp-viewport"),
                    bar: await overlayAt(front, [33, 175]), disc_centre: await overlayAt(front, [60, 175]) };
   await showInspector();
@@ -285,7 +287,7 @@ try {
   results.layer2 = { shown: await text('[data-testid="insp-shown"]'), rows: await rows(), api: on(layer2).length };
   await selectRow("Opening may close");
   results.layer2.measured = await text('[data-testid="insp-measured"]');
-  results.layer2.where = await text('[data-testid="insp-sheet"]');
+  results.layer2.where = await fullText('[data-testid="insp-sheet"]');
   results.layer2.inside = await overlayAt(front, centreBox(slot2.bbox_mm));
   await showInspector();
   await shot("i4_layer2_opening"); await shotEl("layer2_opening", '[data-testid="issue-inspector"]');
@@ -303,7 +305,7 @@ try {
   const intake = data.issues.filter((i) => i.kind === "intake_detail_changed");
   results.artwork = { rows: await rows(), api: data.issues.filter((i) => !i.sheet && i.destination === "artwork").length, intake: intake.length };
   await selectRow("Detail changed by intake");
-  results.artwork.where = await text('[data-testid="insp-sheet"]');
+  results.artwork.where = await fullText('[data-testid="insp-sheet"]');
   results.artwork.layer_buttons = await count('[data-testid="insp-edit-layer"]');
   results.artwork.artwork_buttons = await count('[data-testid="insp-edit-artwork"]');
   results.artwork.detail_image = await count('[data-testid="insp-detail-image"]');

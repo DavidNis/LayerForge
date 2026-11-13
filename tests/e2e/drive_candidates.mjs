@@ -102,7 +102,7 @@ async function clickSel(selector) {
 }
 
 const project = process.argv[6];
-const row = (name) => `[...document.querySelectorAll('[data-testid="candidates-section"] tbody tr')].find((r) => r.querySelector("td strong")?.innerText === ${JSON.stringify(name)})`;
+const row = (name) => `[...document.querySelectorAll('[data-testid="candidates-section"] tbody tr')].find((r) => r.dataset.candidate === ${JSON.stringify(name)})`;  // the planner's name (the label is "Candidate N")
 const rowInfo = (name) => evaluate(`(() => { const r = ${row(name)}; return r ? { text: r.innerText, button: r.querySelector('[data-testid="candidate-review"]')?.innerText ?? null } : null; })()`);
 async function apiState() {
   return evaluate(`fetch("/api/projects/${encodeURIComponent(project)}").then((r) => r.json()).then((s) => ({ candidate: s.record.candidate, saved: Object.keys(s.proposal.saved_reviews || {}), selected: s.proposal.selected, edits: s.draft ? s.draft.edits.length : null, layers: s.draft ? s.draft.sheets.map((x) => x.id) : null, jobs: (s.record.attempts || []).length }))`);
@@ -111,7 +111,7 @@ async function reviewCandidate(name, step) {
   await waitFor(`${idle} && (${row(name)})?.querySelector('[data-testid="candidate-review"]')`, `button for ${name}`);
   const before = await rowInfo(name);
   await evaluate(`(${row(name)}).querySelector('[data-testid="candidate-review"]').click()`);
-  await waitFor(`${idle} && document.querySelector('[data-testid="review-candidate"]')?.innerText.includes(${JSON.stringify(name)}) && document.querySelectorAll('[data-testid="layer-row"]').length > 1`, `review of ${name}`, 300000);
+  await waitFor(`${idle} && document.querySelector('[data-testid="review-candidate"]')?.dataset.candidate === ${JSON.stringify(name)} && document.querySelectorAll('[data-testid="layer-row"]').length > 1`, `review of ${name}`, 300000);
   await shot(`${step}_review_${name}`);
   results.steps.push({ step, clicked: before, review_bar: await text('[data-testid="review-candidate"]'), state: await apiState() });
 }

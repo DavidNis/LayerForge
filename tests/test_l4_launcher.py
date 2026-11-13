@@ -121,7 +121,7 @@ def _get_json(url: str) -> dict:
 
 def test_windowless_start_opens_the_browser_and_stops_from_the_page(tmp_path, monkeypatch):
     """Normal startup (no window): the server starts, the browser opens on it, and it keeps serving until the
-    page's "Stop LayerForge" (POST /api/stop); then the port is closed and the folder can be started again."""
+    page's Exit (POST /api/stop); then the port is closed and the folder can be started again."""
 
     import threading
 

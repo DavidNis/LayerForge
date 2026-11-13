@@ -432,6 +432,24 @@ No complete UI/server, arbitrary photographic depth estimation, frame design, gl
   startup failure; launcher tests and real-process checks (source and packaged exe); exe/zip rebuilt.
 - [x] Committed together with D-V3-049.
 
+## App stops when its last tab is closed (2026-11-13, D-V3-050)
+
+- [x] Presence heartbeat + unload beacon, safe-to-stop rules (`app/lifecycle.py`), in-flight request tracking,
+  Exit in the top bar, "LayerForge has stopped" page, second start while closing.
+- [x] Tests: tests/test_app_lifecycle.py 16 (rules with a fake clock, server endpoint, launcher, real browser:
+  tabs/reload/running job, killed browser, Exit with a second tab); launcher + app regression 25 PASS.
+- [ ] Rebuild exe/zip and run the packaged tests (not done: user asked not to rebuild yet).
+- [ ] Commit (not done: user asked not to commit yet).
+- [x] UX Phase 0 (2026-11-13): palette on Review, Issues basis mismatch, 404 investigated (not reproduced),
+  shutdown timeouts (30 min silent, 8 h sleeping, freeze/resume events) with tests.
+- [x] UX Phase 1 quick wins (D-V3-051) with before/after screens and updated test expectations.
+- [x] UX Phase 2 (D-V3-052): Plan action first, one editor place, Review header, narrow layout; Chrome flow test.
+- [x] UX Phase 3 (D-V3-053): compact issues, export readiness row, prose removed.
+- [x] UX Phase 4 (D-V3-054): candidate thumbnails, widening as automatic adjustment, final cleanup.
+- [ ] Full regression on the final code; then rebuild exe/zip, packaged tests, commit (after review).
+- [ ] Re-run tests/test_windows_build.py after the rebuild; watch test_browser_workflow's status-strip check (one
+  failure under full-suite load, not reproduced).
+
 ## Accepted plan: one rollback checkpoint (2026-11-12, D-V3-049)
 
 - [x] Accept / Restore (`attempts/accepted`, verified copies, journal, crash recovery); re-plans discard the

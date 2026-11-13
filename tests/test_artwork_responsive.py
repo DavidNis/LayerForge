@@ -265,7 +265,9 @@ def test_browser_canvas_stays_put_while_issues_load_and_refresh(app):
     if not _node_ok() or browser is None:
         pytest.skip("needs Node >= 22 and Edge/Chrome to drive the UI in a real browser")
     client, workspace, _ = app
-    name = _import(client, "&plan=0")
+    # Planned (not reviewed): the Issues panel is open there and grows when the check arrives (before planning it
+    # is folded since UX Phase 2, D-V3-052); the editor below it is opened by the driver as a user would.
+    name = _import(client, "")
     shots = ROOT / "artifacts" / "artwork_stable_v1"
     run = subprocess.run(["node", str(ROOT / "tests" / "e2e" / "drive_artwork_stable.mjs"), client.base + "/", str(browser), "-",
                           str(shots), name], capture_output=True, text=True, encoding="utf-8", timeout=900)

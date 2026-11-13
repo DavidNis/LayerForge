@@ -285,20 +285,23 @@ def test_browser_workflow(app):
     assert result["ok"], result.get("error", "") + "\n" + run.stderr[-3000:]
     assert run.returncode == 0
     assert result["console_errors"] == []
-    assert "NOT VERIFIED" in result["physical_after_proposal"] and "NOT VERIFIED" in result["physical_at_end"]
+    # Status cards appear once a review exists; on Export the current kit's own cards replace them (D-V3-051).
+    assert result["physical_after_proposal"] == "", result["physical_after_proposal"]
+    assert result["physical_at_end"] == "", result["physical_at_end"]
+    assert "NOT VERIFIED" in result["kit"]["physical"]
     assert result["review_tools"] == 0  # Review Layers is read-only: no sheet-geometry tools
     assert "no cutout to fill" in result["error_banner"]  # earlier-style geometry edits: still checked by the edit API
-    assert "DRAFT_INVALID" in result["after_slot"]["validation"]
+    assert result["after_slot"]["validation"].split()[-1] == "Invalid"  # was DRAFT_INVALID (code kept in the tooltip)
     assert "Visible change" in result["after_slot"]["change"]
-    assert "REVIEWED_VALID" in result["after_accept"]
+    assert result["after_accept"].split()[-1] == "Valid"  # was REVIEWED_VALID
     assert "rim 6" in result["rim_layer"] and "rim" not in result["after_undo_layer"]
     assert result["rim_all_default"] is True and result["rim_single_rows"] == 1
     assert result["rim_all_rows"] == result["layer_rows"] > 1
     assert result["history_after_reload"] == 3 and result["rim_after_reload"] is True
     assert "Risks reported" in result["printability"] and any("RISK" in row for row in result["findings"])
     assert "Risks reported (estimate)" in result["fdm_card"]
-    assert "CAD_VALID" in result["kit"]["cad"] and "NOT VERIFIED" in result["kit"]["physical"]
-    assert "CAD verified by reopening" in result["kit"]["geometry_card"]
+    assert "Files verified" in result["kit"]["cad"] and "NOT VERIFIED" in result["kit"]["physical"]  # was CAD_VALID
+    assert result["kit"]["geometry_card"] == ""  # the kit card says it; no second status row on Export
     assert result["kit"]["zip"].endswith("/zip")
     state = result["state_before_delete"]  # the project is deleted at the end of the drive
     assert state["kits"][0]["status"]["physical"] == "NOT_VERIFIED"
@@ -1114,3 +1117,54 @@ def test_a_refused_request_with_an_unread_body_still_gets_its_reply(app):
         assert status == 403 and "cross-origin" in error["error"]["message"]
         status, error = client.call("POST", "/api/projects/missing/review", {"candidate": "x" * (i * 97)})
         assert status == 404 and "no " in error["error"]["message"]
+
+
+def test_artwork_palette_is_shown_on_plan_and_review_alike(tmp_path):
+    """Regression: once a review existed, the artwork editor showed "0 colors · Shown after the first selection"
+    until the first click, while the Plan tab listed every color.  The review's artwork palette is listed at once
+    and matches what the edit log reports after the first selection."""
+
+    server, client = start(tmp_path / "workspace")
+    try:
+        name, state = _propose(client)
+        before = {c["hex"] for c in state["artwork"]["palette"]}
+        client.run(name, "review", {"candidate": state["proposal"]["selected"]})
+        review = client.state(name)["artwork"]
+        assert review["stage"] == "review" and review["palette"], review
+        assert {c["hex"] for c in review["palette"]} == before
+        assert all(c["area_mm2"] > 0 and c["regions_4"] >= 1 for c in review["palette"])
+        from layerforge_l1.core import artwork as art
+
+        rows = art.palette_summary(art.load_rgb(server.app.workspace.path(name) / "review" / "target.png"),
+                                   client.state(name)["artwork"]["frame_color"],
+                                   review["mm_per_pixel"])
+        assert review["palette"] == [{k: r[k] for k in ("hex", "area_mm2", "regions_4")} for r in rows]
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_state_is_read_again_when_a_job_moves_a_folder_meanwhile(monkeypatch):
+    """Regression (UX Phase 4 tour): GET /api/projects/<p> answered 500 when a candidate switch moved ``review/``
+    aside while the state was being read.  A missing file is read again; a lasting one is still an error."""
+
+    from layerforge_l1.app import server as server_module
+
+    calls = []
+
+    class FakeWorkspace:
+        def __init__(self, failures):
+            self.failures = failures
+
+        def state(self, name):
+            calls.append(name)
+            if len(calls) <= self.failures:
+                raise FileNotFoundError("review/target.png")
+            return {"name": name}
+
+    monkeypatch.setattr(server_module.time, "sleep", lambda s: None)
+    assert server_module._state_settled(FakeWorkspace(1), "p") == {"name": "p"} and len(calls) == 2
+    calls.clear()
+    with pytest.raises(FileNotFoundError):
+        server_module._state_settled(FakeWorkspace(10), "p")
+    assert len(calls) == 4

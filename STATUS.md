@@ -1283,3 +1283,36 @@ follow the light-blue body). Not user approved; no CAD exported.
   Timing on scratch copies of user projects (originals only read): turtle_on_leaf 170.5 MB accept 15.1 s, restore
   8.4 s; Oscariko 29.6 MB 5.9 s / 3.3 s; chupa 7.3 MB 2.5 s / 1.7 s (mostly per-file open cost of the hash checks).
   README_FIRST.txt and the (local) Hebrew GUI guide explain it. Physical print test: PENDING.
+
+- 2026-11-13 - App stops when its last tab is closed (D-V3-050). State: READY_FOR_USER_TEST (source only; exe/zip
+  NOT rebuilt, NOT committed, as requested). tests/test_app_lifecycle.py 16 PASS (incl. 3 real headless-Edge runs:
+  close one of two tabs and reload keep it running; last tab closed during a running step: stopped 0.5 s after
+  the step finished; killed browser: stopped after 11.5 s with a 12 s test timeout; Exit stops it and a second tab
+  shows "LayerForge has stopped"); test_l4_launcher + test_l4_app 25 PASS.  Real default timings with
+  packaging/layerforge_launcher.py from source: second start while running returned at once; last tab closed ->
+  stopped within 15 s; started again after; killed browser -> stopped after the 150 s heartbeat timeout.
+  UX/UI first-time-user review delivered as findings only (no UI redesign implemented).
+
+- 2026-11-13 - UX Phase 0 + Phase 1 (D-V3-051; D-V3-050 timeouts revised). State: READY_FOR_USER_TEST (source only;
+  NOT committed, exe NOT rebuilt, as requested).  Phase 0: Review palette fixed; Issues basis spelling fixed
+  (permanent "out of date" before planning); 404 not reproduced (cause traced, unchanged); shutdown: silent-tab
+  timeout 30 min, sleeping tabs (freeze event) 8 h, last-tab close still ~10 s.  Phase 1: wording / visibility /
+  navigation in app.js + one CSS rule; before/after screens artifacts/ux_phase1/{before,after} (same tour driver,
+  tests/e2e/drive_ux_tour.mjs; no console errors, no 404s).  Full suite: 412 PASS / 3 FAIL - fox_simple_input.png
+  missing from the working tree (deleted before this session, unrelated), packaged exe test (old build vs new
+  expectations: needs the rebuild), test_browser_workflow status-strip assertion failed once under full-suite load
+  (passed 3/3 alone after the label-assertion fix; assertion split to name the value next time).
+
+- 2026-11-13 - UX Phase 2 (D-V3-052). State: READY_FOR_USER_TEST (source only; NOT committed, exe NOT rebuilt).
+  Plan screen action first; Artwork editor below Issues of the current stage with one set of entries; folding
+  defaults; Review header Edit artwork / re-plan; 761-1180 px Review layout.  Chrome flow test (import -> edit ->
+  plan -> review -> edit from Review and Plan -> reload -> save -> reload -> undo) PASS; before/after screens
+  artifacts/ux_phase2/{before,after}_{1440,900} and artifacts/ux_phase2/flow.
+
+- 2026-11-13 - UX Phase 3 (D-V3-053). State: READY_FOR_USER_TEST (source only; NOT committed, exe NOT rebuilt).
+  Compact issue card / rows, export readiness row, prose removed; Chrome before/after 1440 + 900 px in
+  artifacts/ux_phase3; issue decisions, navigation and export eligibility re-tested.
+
+- 2026-11-13 - UX Phase 4 (D-V3-054). State: READY_FOR_USER_TEST (source only; NOT committed, exe NOT rebuilt).
+  Candidate sheet thumbnails and "same sheets" from saved masks; switch confirmation; widening presented as an
+  automatic adjustment; Save Changes outlined; status notes wrap; issue navigation on the filter row.

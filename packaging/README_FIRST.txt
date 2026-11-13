@@ -5,8 +5,11 @@ Start:  double-click LayerForge.exe in this folder. LayerForge starts in the
         background (no window) and opens in your web browser. If the browser does
         not open, double-click LayerForge.exe again.
 
-Stop:   click "Stop LayerForge" at the bottom of the LayerForge page. Closing the
-        browser leaves LayerForge running (double-click LayerForge.exe to reopen it).
+Stop:   close the LayerForge browser tab. LayerForge stops by itself about 10 seconds
+        after its last tab is closed, once nothing is running (planning or a print kit
+        being built finishes first; a reload or a second tab keeps it running). If the
+        browser crashes, it stops after 30 minutes (a sleeping tab keeps it running).  "Exit" at the top right of
+        the page stops it at once.  Your projects are always saved.
 
 Your files:
   Projects, previews and print kits:  Documents\LayerForge
@@ -14,7 +17,7 @@ Your files:
 Nothing is saved inside this application folder, so it can be replaced by a newer
 build or deleted without losing projects.
 
-Accepted plan (Plan tab -> Previous attempts):
+Accepted plan (Plan tab -> Accepted plan; also "Accept this plan" in Review layers):
   - "Accept this plan" keeps one copy of the current plan: artwork, candidates,
     reviews with their edits, issue decisions, sheet size and scale.
   - "Restore accepted plan" brings that copy back exactly, without planning again.

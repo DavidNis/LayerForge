@@ -92,6 +92,8 @@ async function waitFor(expression, what, timeoutMs = 60000) {
   throw new Error(`timed out waiting for: ${what}`);
 }
 const text = (sel) => evaluate(`document.querySelector(${JSON.stringify(sel)})?.innerText ?? ""`);
+// Full text of a field even when it is folded under Details (innerText is empty there), plus its tooltip.
+const fullText = (sel) => evaluate(`(() => { const e = document.querySelector(${JSON.stringify(sel)}); return e ? (e.title || "") + " " + e.textContent : ""; })()`);
 const count = (sel) => evaluate(`document.querySelectorAll(${JSON.stringify(sel)}).length`);
 const bodyHas = (s) => `document.body.innerText.includes(${JSON.stringify(s)})`;
 const idle = `!document.querySelector('[data-testid="job-banner"]')`;
@@ -274,14 +276,14 @@ try {
   results.select = {
     offsets: await viewOffsets(centre, outer),
     cause: await evaluate(`document.querySelector('[data-testid="insp-cause"]')?.dataset.cause ?? null`), api_cause: slot.feature?.cause,
-    cause_text: await text('[data-testid="insp-cause"]'), reveals: await text('[data-testid="insp-reveals"]'),
+    cause_text: await fullText('[data-testid="insp-cause"]'), reveals: await fullText('[data-testid="insp-reveals"]'),
     api_colors: (slot.feature?.regions || []).map((r) => r.color),
     pixel_under: await artPixel(outer, inSlot),
     overlay_in: await artOverlayAt(outer, inSlot), overlay_far: await artOverlayAt(outer, [70, 52]),
     layer_overlay_in: await overlayAt(outer, inSlot),
     group: await text('[data-testid="insp-group"]'), mates: await count('[data-testid="insp-mate"]'),
-    measured: await text('[data-testid="insp-measured"]'), threshold: await text('[data-testid="insp-threshold"]'),
-    where: await text('[data-testid="insp-sheet"]'), state: await cardState(),
+    measured: await text('[data-testid="insp-measured"]'), threshold: await fullText('[data-testid="insp-threshold"]'),
+    where: await fullText('[data-testid="insp-sheet"]'), state: await cardState(),
   };
   results.select.states_before = await viewStates();
   await showInspector();

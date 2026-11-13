@@ -240,7 +240,8 @@ try {
   step("selected by a click", results.from_click);
 
   // 3. The artwork editor's Fill tool, by a real click on an artwork pixel, then Save.
-  await waitFor(`document.querySelector('[data-testid="artwork-panel"]') && document.querySelector("#art-image")?.naturalWidth > 0`, "artwork editor");
+  await clickSel('.review-bar [data-testid="edit-artwork"]');  // folded in Review until opened (UX Phase 2)
+  await waitFor(`document.querySelector('[data-testid="artwork-panel"]')?.open && document.querySelector("#art-image")?.naturalWidth > 0`, "artwork editor");
   results.art_image = await evaluate(`[document.querySelector("#art-image").naturalWidth, document.querySelector("#art-image").naturalHeight]`);
   await clickSel('[data-testid="art-mode-fill"]');
   await clickSel('[data-testid="art-eyedropper"]');  // the color: sampled by a real click on the hull

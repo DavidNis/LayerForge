@@ -166,7 +166,7 @@ try {
   results.create_label = await text('[data-action="create"]');
   await clickSel('[data-action="create"]');
   await waitFor(`${bodyHas("Artwork prepared")} && ${idle} && document.querySelector('[data-testid="artwork-panel"]')`, "artwork prepared", 120000);
-  results.not_planned_banner = await text(".banner.info");
+  results.not_planned_banner = await text('[data-testid="plan-next"]');  // was the info banner (UX Phase 2)
   await waitFor(`document.querySelector("#art-image")?.naturalWidth > 0`, "artwork image");
   step("artwork prepared, not planned");
 

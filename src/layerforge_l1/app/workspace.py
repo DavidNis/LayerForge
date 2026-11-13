@@ -25,6 +25,7 @@ review project itself is the save format, so a project reloads after a restart.
 from __future__ import annotations
 
 import copy
+import hashlib
 import io
 import json
 import os
@@ -319,6 +320,7 @@ class Workspace:
         # when it is the same op on the same pixels (checked by hash), instead of computing it again.
         self._artwork_planned: dict[str, dict[str, Any]] = {}
         self._basis_sha: dict[tuple[str, int, int], str] = {}  # artwork file stamp -> pixel hash
+        self._basis_palette: dict[tuple[str, int, int], list[dict[str, Any]]] = {}  # file stamp -> palette rows
         self._issue_cache: dict[str, tuple[Any, dict[str, Any]]] = {}  # project -> (input stamps, issues)
         # A check in progress per (project, input stamps): a second request for the same inputs (the page's
         # Issues panel and Simplify tiny tips on opening a project) waits for it instead of computing again.
@@ -1446,6 +1448,21 @@ class Workspace:
             cache.pop(name, None)
         prefix = str(self.root / name)
         self._basis_sha = {k: v for k, v in self._basis_sha.items() if not k[0].startswith(prefix)}
+        self._basis_palette = {k: v for k, v in self._basis_palette.items() if not k[0].startswith(prefix)}
+
+    def _basis_palette_rows(self, path: Path, origin: dict[str, Any], proposal: dict[str, Any]) -> list[dict[str, Any]]:
+        """Palette of the reviewed artwork before its edit log exists (what the log shows once it starts)."""
+
+        from ..core import artwork as art
+
+        file = path / origin["file"]
+        info = file.stat()
+        key = (str(file), info.st_mtime_ns, info.st_size)
+        if key not in self._basis_palette:
+            rows = art.palette_summary(art.load_rgb(file), proposal["frame_color"],
+                                       proposal["intake"]["artwork_mm_per_pixel"])
+            self._basis_palette[key] = [{k: r[k] for k in ("hex", "area_mm2", "regions_4")} for r in rows]
+        return self._basis_palette[key]
 
     def _start_review(self, name: str, candidate: str, progress: Callable[..., None],
                       widen_openings: bool | None = None) -> dict[str, Any]:
@@ -2396,7 +2413,7 @@ class Workspace:
         else:
             current_sha = origin["sha256"]
             palette = [{"hex": c["hex"], "area_mm2": c["area_mm2"], "regions_4": c["source_regions_4"]}
-                       for c in proposal["intake"]["colors"]] if origin["stage"] == "proposal" else None
+                       for c in proposal["intake"]["colors"]] if origin["stage"] == "proposal"                 else self._basis_palette_rows(path, origin, proposal)
             image = self.url(name, origin["file"], current_sha[:12])
         edits = (log or {}).get("edits", [])
         differs = bool(edits) and planned_sha is not None and current_sha != planned_sha
@@ -2690,7 +2707,7 @@ class Workspace:
                 "issues": issues, "groups": groups, "unlocalized": unlocalized, "sources": sources,
                 "images": images, "sheets": sheets, "notice": notice, "computed_utc": _now(),
                 "has_review": review_manifest.is_file(), "checks": checks,
-                "basis": f"draft:{draft_state['updated_utc']}" if reviewed else f"candidate:{proposal.get('selected')}",
+                "basis": f"draft:{draft_state['updated_utc']}" if reviewed else f"candidate:{proposal.get('selected') or ''}",
                 "sheet_source": None if stack is None else "review" if reviewed else "candidate"}
 
     # -- state for the UI --------------------------------------------------------------
@@ -2770,9 +2787,27 @@ class Workspace:
         for image in ("assembled_front", "exploded", "source_comparison"):
             if (selected / f"{image}.png").is_file():
                 view["images"][image] = self.url(name, f"proposal/selected/previews/{image}.png", stamp)
+        digests: dict[str, str] = {}
         for row in view["candidates"]:
             if row.get("obstruction_map"):
                 row["obstruction_url"] = self.url(name, f"proposal/candidates/{row['name']}/obstruction.png", stamp)
+            # The candidate's own planned sheets (saved masks, front first) for the comparison thumbnails, and a digest
+            # of them to tell candidates whose sheets are identical.  Nothing is computed beyond reading the files.
+            layers = path / "proposal" / "candidates" / row["name"] / "stack" / "layers"
+            masks = sorted((d for d in layers.iterdir() if (d / "retained_material_mask.png").is_file()),
+                           key=lambda d: d.name, reverse=True) if layers.is_dir() else []
+            if masks:
+                colors = row.get("front_to_back_colors") or []
+                row["sheet_masks"] = [{"color": colors[i] if len(colors) == len(masks) else "#" + d.name.rsplit("_", 1)[-1].upper(),
+                                       "url": self.url(name, f"proposal/candidates/{row['name']}/stack/layers/{d.name}/retained_material_mask.png", stamp)}
+                                      for i, d in enumerate(masks)]
+                digest = hashlib.sha256()
+                for d in masks:
+                    digest.update(d.name.encode() + (d / "retained_material_mask.png").read_bytes())
+                digests[row["name"]] = digest.hexdigest()
+        chosen = digests.get(view.get("selected"))
+        for row in view["candidates"]:
+            row["same_sheets_as_selected"] = bool(chosen and row["name"] != view.get("selected") and digests.get(row["name"]) == chosen)
         return view
 
     def _upscale_view(self, name: str, path: Path, record: dict[str, Any], proposal: dict[str, Any]) -> dict[str, Any]:

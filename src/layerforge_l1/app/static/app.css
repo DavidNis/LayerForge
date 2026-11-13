@@ -106,6 +106,7 @@ button.danger { color: var(--bad); }
 button.ghost, .button.ghost { background: transparent; }
 button.small, .button.small { padding: 3px 8px; min-height: 26px; font-size: 12.5px; }
 button:disabled { opacity: .5; cursor: not-allowed; }
+button.primary:disabled { background: var(--panel-2); color: var(--muted); border-color: var(--line); opacity: 1; }
 button.active { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
 input, select, textarea {
   font: inherit; color: var(--text); background: var(--panel); border: 1px solid var(--line);
@@ -201,8 +202,17 @@ figcaption { font-size: 12px; color: var(--muted); margin-top: 4px; }
 .review { display: grid; grid-template-columns: 236px minmax(0, 1fr) 272px; gap: 14px; align-items: start; }
 .review-main, .review-side { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 .review-side { position: sticky; top: 64px; }
-@media (max-width: 1180px) { .review { grid-template-columns: 220px minmax(0, 1fr); } .review > .review-side:last-child { grid-column: 1 / -1; position: static; } }
-@media (max-width: 760px) { .review { grid-template-columns: 1fr; } .review-side { position: static; } }
+@media (max-width: 1180px) { .review { grid-template-columns: 220px minmax(0, 1fr); grid-template-rows: auto 1fr; }
+  /* the selected layer's facts stay beside the preview, under the layer list (not below the whole page) */
+  .review > .review-main { grid-column: 2; grid-row: 1 / span 2; }
+  .review > .review-side:first-child { grid-column: 1; grid-row: 1; position: static; }
+  .review > .review-side:last-child { grid-column: 1; grid-row: 2; position: static; }
+  .review > .review-side:last-child .facts { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 760px) { .review { grid-template-columns: 1fr; } .review-side { position: static; }
+  .review { grid-template-rows: none; }
+  .review > .review-main, .review > .review-side:first-child, .review > .review-side:last-child { grid-column: 1; grid-row: auto; } }
+.next-action { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.group-label { margin: 18px 2px 6px; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
 .review .panel + .panel { margin-top: 0; }
 .zoom-viewport.review-viewport { max-width: min(100%, max(560px, calc(100vh - 200px))); }
 .stage-title { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; margin-right: auto; }
@@ -330,14 +340,7 @@ section.kit-card { padding: 0; overflow: hidden; }
   .kit-footer > button { width: 100%; justify-content: center; }
 }
 .section .gallery figure img[alt="exploded"] { max-width: 320px; }
-@media (max-width: 1180px) and (min-width: 761px) {
-  /* The inspector spans the full width below the editor: thumbnail left, controls right. */
-  .inspector { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 12px 24px; align-items: start; }
-  .inspector > * + * { margin-top: 0; }
-  .inspector-head { grid-column: 1 / -1; }
-  .inspector .thumb { grid-column: 1; grid-row: 2 / span 6; }
-  .inspector > :not(.inspector-head):not(.thumb) { grid-column: 2; }
-}
+/* 761-1180 px: the inspector sits under the layer list (UX Phase 2), so it keeps its one-column layout there. */
 .field-row { max-width: 380px; }
 .history li { align-items: center; }
 .history li > span { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
@@ -537,7 +540,7 @@ button.link { border: none; background: none; padding: 0; color: var(--accent); 
 .insp-tag.accept { background: var(--ok-bg); color: var(--ok); }
 .insp-tag.later { background: var(--warn-bg); color: var(--warn); }
 .insp-tag.lapsed { background: var(--bad-bg); color: var(--bad); }
-.insp-filters { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; }
+.insp-filters { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)) auto; gap: 6px; align-items: center; }
 .insp-filters select { width: 100%; font-size: 13px; }
 .insp-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .insp-chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 999px;
@@ -588,3 +591,42 @@ button.link { border: none; background: none; padding: 0; color: var(--accent); 
 .widen-layer.active { background: var(--panel); color: var(--text); border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 25%, transparent); font-weight: 600; }
 .widen-layer .swatch { width: 10px; height: 10px; }
 .widen-tech table { font-size: 12px; }
+
+/* Issues, compact (UX Phase 3): one header line, one control line, details on demand */
+.insp-card { display: flex; flex-direction: column; gap: 6px; }
+.insp-card-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.insp-card-head .insp-measure { font-weight: 600; font-variant-numeric: tabular-nums; }
+.insp-card-actions { margin-left: auto; display: inline-flex; gap: 6px; }
+.insp-card-line { display: flex; align-items: center; gap: 8px 12px; flex-wrap: wrap; }
+.insp-review-row { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.insp-more > summary { cursor: pointer; color: var(--muted); }
+.insp-more[open] > * + * { margin-top: 6px; }
+.insp-filters { flex-wrap: wrap; gap: 6px; }
+.insp-nav { display: inline-flex; align-items: center; gap: 4px; }
+.insp-sev { font-size: 11px; margin-left: 6px; white-space: nowrap; }
+.insp-sev.sev-bad { color: var(--bad); } .insp-sev.sev-warn { color: var(--warn); } .insp-sev.sev-neutral { color: var(--muted); }
+
+/* Export readiness (UX Phase 3): one row of chips before Build print kit */
+.ready-row { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-right: 6px; }
+.ready-chip { font-size: 12.5px; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel-2); color: var(--text); text-decoration: none; white-space: nowrap; }
+.ready-chip.ok { color: var(--ok); }
+.ready-chip.warn { border-color: var(--warn); background: var(--warn-bg); color: var(--warn); }
+.ready-chip.bad { border-color: var(--bad); background: var(--bad-bg); color: var(--bad); }
+a.ready-chip:hover { text-decoration: underline; }
+
+/* Candidate comparison (UX Phase 4): each candidate's own sheets, front first, in their filament colors */
+.cand-name { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.sheet-strip { display: flex; gap: 3px; margin-top: 6px; flex-wrap: wrap; }
+.sheet-thumb { width: 34px; height: 34px; border-radius: 3px; outline: 1px solid var(--line); outline-offset: 0;
+  -webkit-mask-size: contain; mask-size: contain; -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;
+  -webkit-mask-position: center; mask-position: center; mask-mode: luminance; }
+tr.reviewing td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+/* Cutout widening is listed with the edits but marked as automatic */
+.history li.auto strong { font-weight: 500; color: var(--muted); }
+/* Save Changes: the editor's own action, outlined, so the workflow's next step stays the one filled button */
+button.save { border-color: var(--accent); color: var(--accent); font-weight: 600; background: var(--panel); }
+.art-savebar.dirty button.save:not(:disabled) { box-shadow: 0 0 0 2px var(--accent) inset; }
+button.save:disabled { border-color: var(--line); color: var(--muted); }
+/* Status cards: wrap their note instead of cutting it off when the strip gets narrow */
+@media (max-width: 1180px) { .status-card .note { white-space: normal; overflow: visible; text-overflow: clip; } }
+@media (max-width: 760px) { .status-strip { grid-template-columns: 1fr; } }
