@@ -20,6 +20,7 @@ are not called here.
 
 from __future__ import annotations
 
+from .cancel import check as check_cancelled
 import time
 from dataclasses import asdict, dataclass
 from typing import Any
@@ -105,10 +106,13 @@ def plan_stack(
     if not grid.square and (analysis % width or rows * width != analysis * height):
         raise StackError(f"target must divide the {analysis} x {rows} px artwork grid by the same factor in both "
                          f"axes, got {width}x{height}")
+    check_cancelled()  # Stop in the app (no effect otherwise)
     if len(np.unique(target_rgb.reshape(-1, 3), axis=0)) > 255:
         raise StackError("target has more than 255 exact colors; flatten it to a palette first")
 
+    check_cancelled()
     labels, palette = exact_index(target_rgb)
+    check_cancelled()
     hexes = [hex_color(color) for color in palette]
     frame_label = None
     if config.frame_color:
@@ -119,6 +123,7 @@ def plan_stack(
     reveal_config = config.reveal_config(frame_label)
     started = time.perf_counter()
     planner = RevealPlanner(labels, reveal_config)
+    check_cancelled()
     report: dict[str, Any] = {
         "planner": PLANNER_ID,
         # (the height only for a rectangular sheet: square reports are unchanged)

@@ -24,6 +24,7 @@ review project itself is the save format, so a project reloads after a restart.
 
 from __future__ import annotations
 
+import contextlib
 import copy
 import hashlib
 import io
@@ -46,6 +47,7 @@ from PIL import Image
 from .. import PROJECT_ROOT
 from ..core import review
 from ..core.editing import EDIT_OPS, write_change_image
+from ..core import cancel
 from ..core.model import MANIFEST_NAME, StackError, file_sha256, replace_path
 from ..core.validation import validate_stack
 
@@ -502,16 +504,27 @@ class Workspace:
                 record["detail_decisions"] = {k: v for k, v in record["detail_decisions"].items() if k in ids}
                 if dropped:
                     progress("INTAKE_DETAIL_CHOICES_DROPPED", details=dropped)
+        s = record["proposal_settings"]
+        planning = PlanningConfig(outer_sheet_mm=self.sheet_outer_mm(record), scale=self.processing_scale(record),
+                                  thickness_mm=s["thickness_mm"], outer_sheet_height_mm=self.sheet_height_mm(record))
+        # Planned beside the current proposal and swapped in only when it finished (as the re-plans do), so a
+        # stopped or failed run leaves the previous proposal and its settings as they were.
+        staging = path / "proposal.next"
+        shutil.rmtree(staging, ignore_errors=True)
+        try:
+            with cancel.interruptible():
+                result = propose(path / record["source"]["file"], staging, self.intake_config(record),
+                                 ProposalConfig(planning=planning, plan=plan), progress,
+                                 record.get("detail_decisions") or None)
+        except BaseException:
+            shutil.rmtree(staging, ignore_errors=True)
+            raise
         if decisions is not None or clean_speckles is not None:
             self._save_record(name, record)
         shutil.rmtree(path / "proposal", ignore_errors=True)
         shutil.rmtree(path / "upscale", ignore_errors=True)  # previews of the replaced proposal
-        s = record["proposal_settings"]
-        planning = PlanningConfig(outer_sheet_mm=self.sheet_outer_mm(record), scale=self.processing_scale(record),
-                                  thickness_mm=s["thickness_mm"], outer_sheet_height_mm=self.sheet_height_mm(record))
         shutil.rmtree(path / "artwork", ignore_errors=True)  # an empty log on the replaced artwork
-        result = propose(path / record["source"]["file"], path / "proposal", self.intake_config(record),
-                         ProposalConfig(planning=planning, plan=plan), progress, record.get("detail_decisions") or None)
+        staging.replace(path / "proposal")
         return {"status": result["status"], "selected": result["selected"]}
 
     # -- 1b. Upscale & Retry of a failed proposal ----------------------------------------------
@@ -628,8 +641,9 @@ class Workspace:
                                   thickness_mm=s["thickness_mm"], outer_sheet_height_mm=self.sheet_height_mm(record))
         progress("UPSCALE_RETRY_STARTING", scale=saved["to_scale"], factor=saved["factor"])
         try:
-            result = propose(path / record["source"]["file"], staging, self.intake_config(record),
-                             ProposalConfig(planning=planning), progress, saved["decisions"] or None)
+            with cancel.interruptible():
+                result = propose(path / record["source"]["file"], staging, self.intake_config(record),
+                                 ProposalConfig(planning=planning), progress, saved["decisions"] or None)
         except MemoryError:
             shutil.rmtree(staging, ignore_errors=True)
             raise AppError(f"ran out of memory at processing scale {saved['to_scale']}; the previous proposal is "
@@ -751,8 +765,9 @@ class Workspace:
             return resize.trial_plan(source, previous, size, intake, decisions, edited,
                                      None if width is None else round(size * height / width, 1))
 
-        found = resize.search_plannable_size(plan, analysis["basis"]["sheet_mm"], analysis["limit"]["max_sheet_mm"],
-                                             progress=progress)
+        with cancel.interruptible():
+            found = resize.search_plannable_size(plan, analysis["basis"]["sheet_mm"], analysis["limit"]["max_sheet_mm"],
+                                                 progress=progress)
         analysis["trial_search"].update(found, searched_utc=_now())
         if found["smallest_plannable_mm"] is not None:
             size = found["smallest_plannable_mm"]
@@ -893,8 +908,9 @@ class Workspace:
                 artwork.update(target_rgb=np.asarray(Image.open(path / "resize" / "preview" / "target.png").convert("RGB")),
                                frame_color=saved["frame_color"], composition_ops=None)
         try:
-            result = propose(path / record["source"]["file"], staging, self.intake_config(record),
-                             ProposalConfig(planning=planning), progress, saved["decisions"] or None, artwork=artwork)
+            with cancel.interruptible():
+                result = propose(path / record["source"]["file"], staging, self.intake_config(record),
+                                 ProposalConfig(planning=planning), progress, saved["decisions"] or None, artwork=artwork)
         except StackError as error:
             shutil.rmtree(staging, ignore_errors=True)
             raise AppError(f"could not plan the edited artwork at {saved['to_mm']:g} mm: {error}") from None
@@ -1351,9 +1367,19 @@ class Workspace:
             raise AppError(f"unknown candidate {candidate!r}; candidates are {sorted(rows)}")
         if rows[candidate]["status"] == "PLANNING_FAILED":
             raise AppError(f"{candidate} failed planning and has no stack to review")
-        if (path / "review").exists():
-            return self.switch_review(name, candidate, progress, widen_openings)
-        return self._start_review(name, candidate, progress, widen_openings)
+        # Stop (D-V3-056): switching puts both reviews back through its own rollback; a review started from
+        # the plan is removed again and project.json is written back as it was (candidate, widening choice).
+        with cancel.interruptible():
+            if (path / "review").exists():
+                return self.switch_review(name, candidate, progress, widen_openings)
+            try:
+                return self._start_review(name, candidate, progress, widen_openings)
+            except cancel.JobCancelled:
+                self._forget_caches(name)
+                for part in ("review", "draft"):
+                    shutil.rmtree(path / part, ignore_errors=True)
+                self._save_record(name, record)
+                raise
 
     # Everything that belongs to one candidate's review.  Switching candidates parks these under
     # reviews/<candidate>/ and restores the other candidate's (nothing is recomputed or discarded).
@@ -1424,6 +1450,8 @@ class Workspace:
             self._move_review(parked, path)
             (parked / "parked.json").unlink()
             parked.rmdir()
+            with contextlib.suppress(OSError):
+                parked.parent.rmdir()  # reviews/ only if this left it empty
             record["candidate"] = current
             self._save_record(name, record)
             self._forget_caches(name)
@@ -2354,11 +2382,12 @@ class Workspace:
                       "log": "artwork_edits/edits.json" if edits else None}
         progress("ARTWORK_REPLAN_STARTING", edits=len(edits))
         try:
-            result = propose(path / record["source"]["file"], staging, self.intake_config(record),
-                             ProposalConfig(planning=planning), progress, record.get("detail_decisions") or None,
-                             artwork={"target_rgb": edited, "provenance": provenance,
-                                      "frame_color": log["base"]["frame_color"],
-                                      "composition_ops": self._composition_chain(proposal, log)} if edits else None)
+            with cancel.interruptible():
+                result = propose(path / record["source"]["file"], staging, self.intake_config(record),
+                                 ProposalConfig(planning=planning), progress, record.get("detail_decisions") or None,
+                                 artwork={"target_rgb": edited, "provenance": provenance,
+                                          "frame_color": log["base"]["frame_color"],
+                                          "composition_ops": self._composition_chain(proposal, log)} if edits else None)
         except StackError as error:
             shutil.rmtree(staging, ignore_errors=True)
             raise AppError(f"could not plan from the edited artwork: {error}") from None

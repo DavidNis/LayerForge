@@ -1,11 +1,11 @@
 """Desktop launcher for the L4 application (the packaged ``LayerForge.exe``).
 
-Double-clicking the executable starts the same local server ``python -m layerforge_l1 app``
-runs, in the background (no window), and opens the UI in the default browser.  It stops by
-itself when the last LayerForge tab has been closed, once nothing is running (``lifecycle.py``:
-reloads, a second tab and running jobs keep it open; a crashed browser is noticed when its
-heartbeats stop).  Exit in the page's top bar stops it at once (``POST /api/stop``).  Only a
-startup failure shows a window (an error message).
+Double-clicking the executable opens a small control window, starts the same local server
+``python -m layerforge_l1 app`` runs, and opens the UI in the default browser.  The window shows the
+address and the projects folder; the server keeps running when browser tabs are closed.  "Stop LayerForge"
+(or closing the window) stops it cleanly: a running planning step is stopped first (its result is not
+kept, the project is unchanged), other running steps are named and need a confirmation, and requests
+being answered (saves, downloads) finish before the server closes.
 
 Where files go (never inside the application folder):
 
@@ -138,13 +138,12 @@ class InstanceLock:
         self.handle = handle
         return True
 
-    def running_url(self, announce: bool = False) -> str | None:
-        """The running app's URL if it answers; ``announce``: a page is about to be opened on it, so it
-        waits for that page instead of stopping for lack of open tabs."""
+    def running_url(self) -> str | None:
+        """The running app's URL if it answers."""
 
         try:
             url = json.loads(self.record_path.read_text(encoding="utf-8"))["url"]
-            with urllib.request.urlopen(url + "api/info" + ("?launch=1" if announce else ""), timeout=3) as response:
+            with urllib.request.urlopen(url + "api/info", timeout=3) as response:
                 return url if response.status == 200 else None
         except (OSError, ValueError, KeyError):
             return None
@@ -203,6 +202,21 @@ class Runner:
         print(f"[launcher] serving {self.url} workspace {self.workspace}", flush=True)
         return self.url
 
+    def cancel_planning(self, timeout: float = 20.0) -> list[str]:
+        """Stop running planning steps the same way the page's Stop does and wait until they have cleaned up;
+        returns the steps still running (not cancellable, or not stopped in time)."""
+
+        if self.server is None:
+            return []
+        jobs = self.server.app.jobs
+        for job in jobs.running():
+            if job.cancellable:
+                jobs.cancel(job.id)
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline and any(j.cancellable for j in jobs.running()):
+            time.sleep(0.1)
+        return self.busy()
+
     def busy(self) -> list[str]:
         if self.server is None:
             return []
@@ -223,30 +237,76 @@ class Runner:
             print("[launcher] server stopped", flush=True)
 
 
-def run_background(runner: Runner, lock: InstanceLock, open_browser: bool) -> int:
-    """No window: start the server, open the browser, serve until the last LayerForge tab is closed (and
-    nothing is running) or Exit on the page.
+def open_folder(path: Path) -> None:
+    if sys.platform == "win32":
+        os.startfile(path)  # noqa: S606 - the user's own projects folder
+    else:
+        webbrowser.open(path.as_uri())
 
-    A startup failure raises (``main`` shows it in a message box).  Launching again while it runs only
-    reopens the browser on it (``InstanceLock``)."""
 
-    stop = threading.Event()
-    url = runner.start()
-    app = runner.server.app
-    app.on_stop = stop.set
-    lock.publish(url)
-    if open_browser:
-        webbrowser.open(url)
-    try:
-        while not stop.wait(1.0):
-            reason = app.lifecycle.try_close(jobs_running=bool(app.jobs.running()))
-            if reason:
-                print(f"[launcher] {reason}; stopping", flush=True)
-                break
-    except KeyboardInterrupt:
-        pass
-    finally:
-        runner.stop()
+def run_window(runner: Runner, lock: InstanceLock, log: Path, open_browser: bool) -> int:
+    import tkinter as tk
+    from tkinter import messagebox, ttk
+
+    root = tk.Tk()
+    root.title(APP_NAME)
+    root.resizable(False, False)
+    frame = ttk.Frame(root, padding=16)
+    frame.grid()
+    ttk.Label(frame, text=APP_NAME, font=("Segoe UI", 14, "bold")).grid(row=0, column=0, columnspan=3, sticky="w")
+    status = tk.StringVar(value="Starting the local server…")
+    ttk.Label(frame, textvariable=status, wraplength=460).grid(row=1, column=0, columnspan=3, sticky="w", pady=(6, 2))
+    ttk.Label(frame, text=f"Projects folder: {runner.workspace}", wraplength=460,
+              foreground="#555").grid(row=2, column=0, columnspan=3, sticky="w")
+    ttk.Label(frame, text="Closing this window stops LayerForge.", foreground="#555").grid(
+        row=3, column=0, columnspan=3, sticky="w", pady=(0, 10))
+    open_button = ttk.Button(frame, text="Open LayerForge", state="disabled", command=lambda: webbrowser.open(runner.url))
+    open_button.grid(row=4, column=0, sticky="w")
+    ttk.Button(frame, text="Projects folder", command=lambda: open_folder(runner.workspace)).grid(row=4, column=1, padx=8)
+    outcome: dict[str, Any] = {}
+
+    def stop_app() -> None:
+        running = runner.busy()
+        if running and not messagebox.askyesno(
+                APP_NAME, "LayerForge is still working on:\n  " + "\n  ".join(running)
+                + "\n\nStopping ends it; that step's result is not saved (your project and earlier "
+                  "steps are kept). Stop LayerForge anyway?", icon="warning"):
+            return
+        status.set("Stopping…")
+        root.update_idletasks()
+        runner.cancel_planning()  # planning steps stop through their own cancellation (staging removed)
+        root.destroy()
+
+    ttk.Button(frame, text="Stop LayerForge", command=stop_app).grid(row=4, column=2, sticky="e")
+    root.protocol("WM_DELETE_WINDOW", stop_app)
+
+    def start_in_background() -> None:
+        try:
+            outcome["url"] = runner.start()
+        except BaseException as error:  # noqa: BLE001 - reported in the window
+            traceback.print_exc()
+            outcome["error"] = error
+
+    def poll() -> None:
+        if "url" in outcome:
+            lock.publish(outcome["url"])
+            status.set(f"Running at {outcome['url']}")
+            open_button.configure(state="normal")
+            if open_browser:
+                webbrowser.open(outcome["url"])
+        elif "error" in outcome:
+            outcome["failed"] = True
+            root.destroy()  # the error is shown once the window has closed (one message box, as before)
+        else:
+            root.after(150, poll)
+
+    threading.Thread(target=start_in_background, name="layerforge-start", daemon=True).start()
+    root.after(150, poll)
+    root.mainloop()
+    runner.stop()
+    if outcome.get("failed"):
+        _show_error(f"LayerForge could not start.\n\n{_message(outcome['error'])}\n\nLog: {log}", False)
+        return EXIT_STARTUP_ERROR
     return 0
 
 
@@ -335,14 +395,14 @@ def main(argv: list[str] | None = None) -> int:
         workspace = check_workspace(args.workspace or documents_folder() / APP_NAME)
         lock = InstanceLock(workspace)
         if not lock.acquire():
-            url = lock.running_url(announce=not args.headless and not args.no_browser)
+            url = lock.running_url()
             if url is None and not args.headless:
-                # The running copy may be closing right now (its last tab was just closed): wait for it.
+                # The running copy may be stopping right now (its window was just closed): wait for it.
                 for _ in range(40):
                     time.sleep(0.5)
                     if lock.acquire():
                         break
-                    url = lock.running_url(announce=not args.no_browser)
+                    url = lock.running_url()
                     if url:
                         break
             if lock.handle is not None:
@@ -361,7 +421,7 @@ def main(argv: list[str] | None = None) -> int:
         runner = Runner(workspace, args.port, open_folders=not args.headless)
         if args.headless:
             return run_headless(runner, lock)
-        return run_background(runner, lock, not args.no_browser)
+        return run_window(runner, lock, log, not args.no_browser)
     except BaseException as error:  # noqa: BLE001 - every startup failure is shown, not swallowed
         if isinstance(error, (KeyboardInterrupt, SystemExit)):
             raise

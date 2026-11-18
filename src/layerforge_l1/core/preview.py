@@ -11,6 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from .cancel import check as check_cancelled
 import cv2
 import numpy as np
 from PIL import Image
@@ -104,6 +105,7 @@ def generate_previews(
         raise ValueError(f"{len(masks)} masks for {len(stack.sheets)} sheets")
     files = []
     for sheet, name, mask in zip(stack.sheets, stack.export_names(), masks):
+        check_cancelled()  # Stop in the app (no effect otherwise)
         path = output / "sheets" / f"{name}.png"
         Image.fromarray(sheet_image(mask, sheet.color)).resize(
             _fit(mask.shape, SHEET_PREVIEW_PIXELS), Image.NEAREST

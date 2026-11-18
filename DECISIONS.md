@@ -1564,3 +1564,49 @@ FDM thresholds remain generic assumptions until a print calibrates them).
 - DESIGN_CHOICE, cleanup: Save Changes is an outlined accent button (filled ring while there are unsaved changes);
   status-card notes wrap below 1180 px (one column below 760 px); issue filters and previous/next share one grid row.
 - Tests changed: widening headline / facts assertions (same numbers, new wording).
+
+## D-V3-055 | 2026-11-14 | Stop for planning jobs; the visible launcher window again (replaces D-V3-050)
+
+- USER_REQUIRED: a real Stop for long planning (first plan, re-plan from edited artwork, physical-resize re-plan),
+  cooperative, reusing the job runner; never publish partial results; previous plan, artwork, reviews and accepted
+  checkpoint unchanged; staging cleaned; planning again possible at once; report what cannot be interrupted.  And:
+  restore the original visible launcher window, keep the server running when tabs close, remove the tab-heartbeat /
+  inactivity / sleep stop, a clear "Stop LayerForge", safe with running jobs and unfinished saves, no duplicate
+  instance, no tray.  Cancellation kept separate from shutdown.  No planner / geometry / validation / CAD change.
+- OBSERVED_IN_FILE: jobs run one at a time on one worker thread; planning has no subprocess or process pool.  The
+  re-plans (artwork, resize, Upscale & Retry) already plan into `proposal.next` and remove it on any exception; the
+  first plan (`propose`) deleted the current proposal before planning.
+- DESIGN_CHOICE, cancellation (`core/cancel.py`, `app/jobs.py`): each cancellable job has an event bound to the
+  worker thread; work that may stop runs inside `cancel.interruptible()` (only the planning call itself), where
+  `check()` raises `JobCancelled` (a BaseException, so no `except Exception` turns it into a failure).  Checks: every
+  progress event, the start of every planner evaluation (`maximal_reveal`), and step boundaries in intake, cell
+  building, sheet materialization, per-sheet validation, candidate saving, previews and the CAD export.  Outside
+  `interruptible()` (publishing a finished plan) a check does nothing.  The callers' existing `except BaseException`
+  clean-up removes the staging folder; the job is reported "cancelled" only after that.  A queued job never starts.
+  `propose` now plans into `proposal.next` too and replaces the proposal, upscale previews, artwork log and record
+  settings only after success.  Cancellable kinds: propose, artwork_replan, resize_retry, upscale_retry,
+  resize_search; others (review start, widening, kits, accept/restore, previews, analyses) run to the end.
+  API `POST /api/jobs/<id>/cancel`; the progress bar shows Stop ("Stopping…"), then "…: stopped. Nothing was changed."
+- DESIGN_CHOICE, launcher: `run_window` restored from 5f5171e (Open LayerForge, Projects folder, the Quit button now
+  "Stop LayerForge", closing the window stops).  With steps running it names them and asks; planning steps are then
+  stopped through their cancellation (up to 20 s) before the server closes; requests being answered finish (30 s);
+  a non-cancellable step is still abandoned at exit as before.  Startup failures close the window and show the
+  existing error box.  Removed: tab heartbeats, leaving / sleeping beacons, the automatic stop, `?launch=1`, the
+  page's Exit and `POST /api/stop`.  Kept: one instance per projects folder, the wait for a copy that is stopping.
+- LIMITATION: a few steps are single library calls that cannot be interrupted from Python (at scale 2 on the
+  sailboat: the exact color index of the target ~4 s each, the stack reconstruction comparison ~4.5 s, the end of
+  intake ~4 s, one CAD sheet export); a Stop takes effect right after such a call.  Measured stop times in the app
+  0.03-0.46 s at six points of a scale-2 plan.
+
+## D-V3-056 - "Review this candidate" can be stopped (2026-11-14)
+
+- USER_REQUIRED: the Stop button also for opening a review ("i need to have the chance to stop it").
+- DESIGN_CHOICE: `start_review` joins the cancellable job kinds (same runner, same Stop button).  The whole review
+  start runs inside `cancel.interruptible()`.  A review started from the plan: on a stop, `review/` and `draft/`
+  are removed and `project.json` is written back as read before the job (candidate, widening choice).  Switching
+  candidates: the existing switch rollback puts the parked review back (now also removing an empty `reviews/`).
+  Check points are the existing ones (job progress events, validation and preview loops); nothing new in review,
+  widening or geometry code.  Other review-side jobs (Widen, edits, verify, printability, kits) are not stoppable.
+- LIMITATION: inside the automatic widening (scale 2 sailboat ~3.7 s) and the geometry check there is no check
+  point; a Stop takes effect at the next step (validation / previews).
+

@@ -1316,3 +1316,21 @@ follow the light-blue body). Not user approved; no CAD exported.
 - 2026-11-13 - UX Phase 4 (D-V3-054). State: READY_FOR_USER_TEST (source only; NOT committed, exe NOT rebuilt).
   Candidate sheet thumbnails and "same sheets" from saved masks; switch confirmation; widening presented as an
   automatic adjustment; Save Changes outlined; status notes wrap; issue navigation on the filter row.
+
+- 2026-11-14 - Stop for planning jobs; visible launcher window restored (D-V3-055). Source only: NOT committed, exe
+  NOT rebuilt.  Focused tests so far 77 PASS / 0 FAIL (run stopped by low memory inside test_l4_app; the rest not
+  run yet); launcher window tested from source with Chrome; packaged-exe test not done (needs a build).
+  Rebuilt on request (still NOT committed): dist\LayerForge\LayerForge.exe and dist\LayerForge-0.1.0-win64.zip
+  (2026-11-14 17:35, 225 MB, SHA-256 c282e4fceb490b5dc709850d50be538161fff8d6126a3c9b6fa888af0a086b8c; Tk and
+  core.cancel bundled).  Packaged launcher window test (window, Chrome closed -> still running, no second copy,
+  WM_CLOSE stops, folder free again; LAYERFORGE_TEST_EXE) 1 PASS.  Not run (0.7 GB RAM free): packaged
+  stop-with-planning window test, tests/test_windows_build.py, the rest of the focused tests.
+
+- 2026-11-14 - "Review this candidate" can be stopped (D-V3-056). Source + rebuilt exe; NOT committed.  Tests:
+  test_job_cancel review / switch / only-planning selection 6 PASS (x2, plus 3x3 PASS for the review stops),
+  Chrome Stop drive incl. the review stop 1 PASS (artifacts/job_cancel_v1/c4, c5).
+  Rebuilt after the user stopped the running exe: dist\LayerForge\LayerForge.exe + dist\LayerForge-0.1.0-win64.zip
+  (2026-11-14 18:45, SHA-256 932bea1df3bc0ab42af71f7c5bad68ba157eaaf9500751026a36061ff5a71dbd, 1770 files).
+  Packaged checks: launcher window test 1 PASS; review start stopped during widening in the exe -> cancelled,
+  project byte-identical, review again done, exe exit 0.
+

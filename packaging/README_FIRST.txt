@@ -1,15 +1,17 @@
 LayerForge (portable Windows build)
 ===================================
 
-Start:  double-click LayerForge.exe in this folder. LayerForge starts in the
-        background (no window) and opens in your web browser. If the browser does
-        not open, double-click LayerForge.exe again.
+Start:  double-click LayerForge.exe in this folder.
+        A small "LayerForge" window opens and the app opens in your web browser.
+        If the browser does not open, click "Open LayerForge" in the window.
 
-Stop:   close the LayerForge browser tab. LayerForge stops by itself about 10 seconds
-        after its last tab is closed, once nothing is running (planning or a print kit
-        being built finishes first; a reload or a second tab keeps it running). If the
-        browser crashes, it stops after 30 minutes (a sleeping tab keeps it running).  "Exit" at the top right of
-        the page stops it at once.  Your projects are always saved.
+Stop:   click "Stop LayerForge" in the window (or close the window). Closing the
+        browser tab leaves LayerForge running. A planning step that is still running
+        is stopped first; your projects are always kept.
+
+Stop planning: while sheets are being planned or a review is being opened ("Review
+        this candidate"), "Stop" in the progress bar of the page stops that step; the
+        project stays as it was before.
 
 Your files:
   Projects, previews and print kits:  Documents\LayerForge
@@ -30,7 +32,7 @@ Accepted plan (Plan tab -> Accepted plan; also "Accept this plan" in Review laye
 Notes:
   - Keep this folder together: LayerForge.exe needs the _internal folder next to it.
   - Runs locally only (http://127.0.0.1); no Python installation is needed.
-  - If port 8765 is in use, the next free port is used (the browser opens on it).
+  - If port 8765 is in use, the next free port is used; the window shows the address.
   - Starting LayerForge a second time just reopens the browser on the running copy.
   - Physical printability is NOT VERIFIED by the app; only a real print can verify it.
   - Advanced: LayerForge.exe --workspace "D:\My LayerForge projects" uses another

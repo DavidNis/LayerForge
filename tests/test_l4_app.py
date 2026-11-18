@@ -65,7 +65,7 @@ class Client:
         end = time.time() + timeout
         while time.time() < end:
             current = self.ok("GET", f"/api/jobs/{job['id']}")
-            if current["status"] in ("done", "failed"):
+            if current["status"] in ("done", "failed", "cancelled"):
                 return current
             time.sleep(0.3)
         raise AssertionError(f"job {job} did not finish in {timeout} s")

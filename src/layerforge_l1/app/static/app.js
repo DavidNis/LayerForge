@@ -181,6 +181,7 @@ async function loadState() {
 async function submit(path, body, label) {
   if (busy()) return;
   ui.error = null;
+  ui.jobNotice = null;
   try {
     const data = await api("POST", path, body);
     ui.pending = null;
@@ -199,7 +200,8 @@ function pollJob(job, label) {
     try {
       const fresh = await api("GET", `/api/jobs/${job.id}`);
       ui.job = { ...fresh, label: ui.job?.label };
-      if (fresh.status === "done" || fresh.status === "failed") {
+      if (fresh.status === "done" || fresh.status === "failed" || fresh.status === "cancelled") {
+        ui.jobNotice = fresh.status === "cancelled" ? `${jobLabel(fresh)}: stopped. Nothing was changed.` : null;
         if (fresh.status === "failed") {
           ui.error = { title: `${jobLabel(fresh)} failed`, ...fresh.error };
         }
@@ -451,7 +453,6 @@ function renderProjectSelect() {
     ui.projects.map((p) => `<option value="${esc(p.name)}" ${p.name === ui.name ? "selected" : ""}>${esc(p.name)} · ${esc(stageText(p.stage))}</option>`));
   select.innerHTML = options.join("");
   $("#footer").innerHTML = ui.info ? `LayerForge ${esc(ui.info.version)} · workspace <code>${esc(ui.info.workspace)}</code> · local only` : "";
-  $("#app-exit").hidden = !ui.info?.can_stop;
 }
 
 const stageText = (stage) => ({ new: "imported", proposal: "planned", review: "in review", kit: "print kit built" }[stage] || stage);
@@ -501,16 +502,21 @@ function errorBanner() {
 
 function jobBanner() {
   const job = ui.job;
-  if (!job || !(job.status === "queued" || job.status === "running")) return "";
+  if (!job || !(job.status === "queued" || job.status === "running")) {
+    return ui.jobNotice ? `<div class="banner info small spread" data-testid="job-notice"><span>${esc(ui.jobNotice)}</span>
+      <button class="small ghost" data-action="dismiss-job-notice">Dismiss</button></div>` : "";
+  }
   const last = job.last_event;
   const events = (job.events || []).slice(-8).reverse().map((e) => {
     const extra = Object.entries(e).filter(([k]) => !["stage", "elapsed_s"].includes(k)).map(([k, v]) => `${k}=${typeof v === "object" ? JSON.stringify(v) : v}`).join(" ");
     return `<div class="mono small muted">${esc(e.elapsed_s)} s · ${esc(e.stage)} ${esc(extra.slice(0, 160))}</div>`;
   }).join("");
+  const stop = job.cancellable ? `<button class="small" data-action="cancel-job" data-job="${esc(job.id)}" data-testid="job-cancel"
+      ${job.cancel_requested || ui.cancelling === job.id ? "disabled" : ""}>${job.cancel_requested || ui.cancelling === job.id ? "Stopping…" : "Stop"}</button>` : "";
   return `<div class="banner info job" role="status" data-testid="job-banner">
     <div class="spinner" aria-hidden="true"></div>
     <div style="flex:1">
-      <div class="spread"><strong>${esc(jobLabel(job))}</strong><span class="muted coords">${job.status === "queued" ? "queued" : `${fmt(job.elapsed_s, 1)} s`}</span></div>
+      <div class="spread"><strong>${esc(jobLabel(job))}</strong><span class="row"><span class="muted coords">${job.status === "queued" ? "queued" : `${fmt(job.elapsed_s, 1)} s`}</span>${stop}</span></div>
       <div class="small">${last ? esc(humanize(last.stage)) : "Waiting to start…"} <span class="muted">· you can keep working; results appear when it finishes.</span></div>
       <details class="small" data-section="job-events"${ui.sections["job-events"] ? " open" : ""}><summary>Technical details</summary><div class="events">${events}</div></details>
     </div>
@@ -4007,72 +4013,6 @@ async function deleteProject(name) {
   render();
 }
 
-// Exit (desktop launcher only): asks first, and again if a step is still running; the server answers before
-// it stops.  The page then says how to start again.
-async function stopApp() {
-  if (!confirm("Exit LayerForge?\n\nYour projects are saved. To start it again, double-click LayerForge.exe.")) return;
-  let result;
-  try {
-    result = await api("POST", "/api/stop", {});
-  } catch (err) {
-    if (err.status !== 409) { showError(err, "Could not stop LayerForge"); return; }
-    if (!confirm(`${err.message}.\n\nStopping now ends that step; its result is not saved (your project and earlier steps are kept). Stop anyway?`)) return;
-    try {
-      result = await api("POST", "/api/stop", { force: true });
-    } catch (err2) { showError(err2, "Could not stop LayerForge"); return; }
-  }
-  showStopped();
-  return result;
-}
-
-// The app is no longer running (Exit here or in another tab, or it closed after its last tab): say so instead of
-// leaving a page whose buttons fail.  Nothing is lost: the server saved everything as it went.
-function showStopped() {
-  if (presence.stopped) return;
-  presence.stopped = true;
-  clearTimeout(pollTimer);
-  clearInterval(presence.timer);
-  document.body.innerHTML = `<main class="panel stack" style="max-width:560px;margin:48px auto" data-testid="app-stopped">
-    <h2 style="margin:0">LayerForge has stopped</h2>
-    <p>Your projects are saved in <code>${esc(ui.info?.workspace || "")}</code>.</p>
-    <p>To start LayerForge again, double-click <strong>LayerForge.exe</strong>. You can close this tab.</p></main>`;
-}
-
-// Presence (desktop launcher only, see app/lifecycle.py): this tab says it is open every heartbeat_s and that
-// it is leaving when the page is unloaded (closed, reloaded, navigated away).  The app closes by itself once no
-// tab is open and nothing is running; a reload checks in again within its grace period.
-const presence = { tab: (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`).slice(0, 64),
-                   timer: null, misses: 0, stopped: false };
-
-async function heartbeat() {
-  if (presence.stopped) return;
-  try {
-    const response = await fetch("/api/presence", { method: "POST", headers: { "Content-Type": "application/json" },
-                                                    body: JSON.stringify({ tab: presence.tab }) });
-    presence.misses = 0;
-    if (response.status === 503) showStopped();  // closing (Exit in another tab)
-  } catch (err) {
-    if (++presence.misses >= 2) showStopped();  // the local server does not answer at all: it has stopped
-    else setTimeout(heartbeat, 2000);  // one quick retry before concluding
-  }
-}
-
-function startPresence() {
-  if (!ui.info?.can_stop) return;  // only the desktop launcher stops by itself
-  heartbeat();
-  presence.timer = setInterval(heartbeat, (ui.info.heartbeat_s || 15) * 1000);
-  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") heartbeat(); });
-  window.addEventListener("pagehide", () => {
-    if (!presence.stopped) navigator.sendBeacon("/api/presence", JSON.stringify({ tab: presence.tab, leaving: true }));
-  });
-  window.addEventListener("pageshow", (e) => { if (e.persisted) heartbeat(); });  // back to this page from history
-  // The browser puts this tab to sleep (no timers until it wakes): say so, so the app waits much longer for it.
-  document.addEventListener("freeze", () => {
-    if (!presence.stopped) navigator.sendBeacon("/api/presence", JSON.stringify({ tab: presence.tab, sleeping: true }));
-  });
-  document.addEventListener("resume", heartbeat);
-}
-
 async function deleteKit(kitId) {
   ui.confirmDelete = null;
   try {
@@ -4106,10 +4046,6 @@ async function onClick(event) {
   const project = `/api/projects/${encodeURIComponent(ui.name)}`;
   const sheet = ui.sheet;
   switch (a) {
-    case "app-stop":
-      event.preventDefault();
-      stopApp();
-      break;
     case "tab":
       event.preventDefault();
       setTab(el.dataset.tab);
@@ -4122,6 +4058,13 @@ async function onClick(event) {
       if (el.dataset.focus === "issues") $('[data-testid="issue-inspector"]')?.scrollIntoView({ behavior: "smooth", block: "start" });
       break;
     case "dismiss-error": ui.error = null; render(); break;
+    case "dismiss-job-notice": ui.jobNotice = null; renderJob(); break;
+    case "cancel-job":  // Stop a planning job: it stops at its next check and is reported once cleaned up
+      ui.cancelling = el.dataset.job;
+      renderJob();
+      try { await api("POST", `/api/jobs/${encodeURIComponent(el.dataset.job)}/cancel`, {}); }
+      catch (err) { ui.cancelling = null; showError(err, "Could not stop"); }
+      break;
     case "create": createProject(); break;
     case "propose": submit(`${project}/propose`, {}); break;
     case "apply-details": {
@@ -4397,7 +4340,6 @@ async function main() {
   try {
     ui.info = await api("GET", "/api/info");
     ui.process = { ...ui.info.process_presets[0] };
-    startPresence();
     await loadProjects();
   } catch (err) {
     showError(err, "Cannot reach the LayerForge server");

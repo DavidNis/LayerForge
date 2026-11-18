@@ -16,9 +16,10 @@ import traceback
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
+from ..core import cancel
 from ..core.model import StackError
 
-QUEUED, RUNNING, DONE, FAILED = "queued", "running", "done", "failed"
+QUEUED, RUNNING, DONE, FAILED, CANCELLED = "queued", "running", "done", "failed", "cancelled"
 MAX_EVENTS = 400
 
 
@@ -38,11 +39,15 @@ class Job:
     created: float = field(default_factory=time.time)
     started: float | None = None
     finished: float | None = None
+    # Planning jobs can be stopped (``core/cancel.py``): the event is checked between steps of the work.
+    cancellable: bool = False
+    cancel_event: threading.Event = field(default_factory=threading.Event)
 
     def progress(self, stage: str, **details: Any) -> None:
         elapsed = round(time.time() - (self.started or self.created), 1)
         self.events.append({"stage": stage, "elapsed_s": elapsed, **_plain(details)})
         del self.events[:-MAX_EVENTS]
+        cancel.check()  # every progress event is a point where an interruptible step may stop
 
     def to_json(self) -> dict[str, Any]:
         end = self.finished or time.time()
@@ -51,6 +56,7 @@ class Job:
             "events": self.events, "last_event": self.events[-1] if self.events else None,
             "result": self.result, "error": self.error,
             "elapsed_s": round(end - self.started, 1) if self.started else 0.0,
+            "cancellable": self.cancellable, "cancel_requested": self.cancel_event.is_set(),
         }
 
 
@@ -90,14 +96,30 @@ class JobRunner:
         self._worker = threading.Thread(target=self._run, name="layerforge-jobs", daemon=True)
         self._worker.start()
 
-    def submit(self, kind: str, project: str, work: Callable[[Callable[..., None]], Any]) -> Job:
+    def submit(self, kind: str, project: str, work: Callable[[Callable[..., None]], Any],
+               cancellable: bool = False) -> Job:
         with self._lock:
             active = self.active(project)
             if active is not None:
                 raise JobConflict(f"'{active.kind}' is still {active.status} for this project; wait for it to finish")
-            job = Job(id=f"job{next(self._ids)}", kind=kind, project=project)
+            job = Job(id=f"job{next(self._ids)}", kind=kind, project=project, cancellable=cancellable)
             self._jobs[job.id] = job
         self._queue.put((job, work))
+        return job
+
+    def cancel(self, job_id: str) -> Job:
+        """Ask a queued or running cancellable job to stop.  A queued job never starts; a running one stops at
+        its next check and is reported "cancelled" once its clean-up has finished (never before)."""
+
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if job is None:
+                raise KeyError(job_id)
+            if job.status not in (QUEUED, RUNNING):
+                raise JobConflict(f"'{job.kind}' has already {job.status}")
+            if not job.cancellable:
+                raise JobConflict(f"'{job.kind}' cannot be stopped; wait for it to finish")
+            job.cancel_event.set()
         return job
 
     def get(self, job_id: str) -> Job | None:
@@ -122,11 +144,19 @@ class JobRunner:
         while True:
             job, work = self._queue.get()
             job.status, job.started = RUNNING, time.time()
+            if job.cancel_event.is_set():  # stopped while queued: nothing ran
+                job.status, job.finished = CANCELLED, time.time()
+                job.events.append({"stage": "CANCELLED", "elapsed_s": 0.0, "while": "queued"})
+                continue
             job.progress("STARTED", kind=job.kind)
             try:
-                job.result = _plain(work(job.progress))
+                with cancel.bound(job.cancel_event if job.cancellable else None):
+                    job.result = _plain(work(job.progress))
                 job.status = DONE
                 job.progress("FINISHED")
+            except cancel.JobCancelled:
+                job.status = CANCELLED  # the work's own clean-up (staging folders) has already run
+                job.events.append({"stage": "CANCELLED", "elapsed_s": round(time.time() - job.started, 1)})
             except BaseException as error:  # noqa: BLE001 - every failure is reported to the UI
                 job.error = describe_error(error)
                 job.status = FAILED

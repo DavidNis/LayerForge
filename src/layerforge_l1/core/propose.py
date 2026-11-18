@@ -16,6 +16,7 @@ color changes.  Every sheet is provenance ``auto-proposed``.
 
 from __future__ import annotations
 
+from .cancel import check as check_cancelled
 import json
 import time
 from dataclasses import asdict, dataclass, replace
@@ -166,6 +167,7 @@ def propose(
     progress("L1_INTAKE_DONE", palette=m["palette_size"], details=len(prepared["details"]),
              seconds=round(time.perf_counter() - started, 1))
 
+    check_cancelled()
     _save_image(prepared["target_rgb"], output / "intake" / "target.png")
     if prepared.get("target_before_cleanup_rgb") is not None:
         _save_image(prepared["target_before_cleanup_rgb"], output / "intake" / "target_before_cleanup.png")
@@ -236,7 +238,9 @@ def propose(
                 break
             continue
         stack.provenance.update(source=source, provenance="auto-proposed", manual_corrections=[])
+        check_cancelled()  # Stop in the app (no effect otherwise)
         validation = validate_stack(stack)
+        check_cancelled()
         save_stack(stack, output / "candidates" / name / "stack")
         _write(output / "candidates" / name / "validation.json", validation)
         row.update(
@@ -321,6 +325,7 @@ def propose(
             from .preview import generate_previews
 
             cad_dir = output / "selected" / "cad"
+            check_cancelled()  # Stop in the app (no effect otherwise)
             manifest = export_stack(stack, cad_dir, progress=progress, step=config.export_step)
             check, stl_masks = revalidate_cad(stack, cad_dir, progress=progress)
             _write(cad_dir / "cad_revalidation.json", check)

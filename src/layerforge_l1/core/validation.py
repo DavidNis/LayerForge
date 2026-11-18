@@ -20,6 +20,7 @@ openings under 0.8 mm are counted as a diagnostic only, as before.
 
 from __future__ import annotations
 
+from .cancel import check as check_cancelled
 import copy
 import hashlib
 import threading
@@ -232,6 +233,7 @@ def _validate_stack(stack: SheetStack) -> dict[str, Any]:
     grid = stack.grid
     sheets = []
     for order, sheet in enumerate(stack.sheets):
+        check_cancelled()  # Stop in the app (no effect otherwise)
         row = {"id": sheet.id, "order_back_to_front": order, "color": sheet.color}
         row.update(validate_sheet_mask(stack, sheet.retained, sheet.visible))
         if sheet.geometry is not None:
@@ -240,6 +242,7 @@ def _validate_stack(stack: SheetStack) -> dict[str, Any]:
             row["vector_checks"] = vector_sheet_checks(stack, sheet.geometry)
             row["pass"] = row["pass"] and row["vector_checks"]["pass"]
         sheets.append(row)
+    check_cancelled()
     recon = reconstruction(stack)
     frame = stack.frame_mask()
     artwork = ~grid.perimeter_mask() & ~frame

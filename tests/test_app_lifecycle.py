@@ -1,165 +1,47 @@
-"""The desktop app stops by itself when its last tab is closed, when that is safe (D-V3-050).
+"""The launcher window owns the app's lifetime (D-V3-055, replacing the tab-based stop of D-V3-050).
 
-``lifecycle.Lifecycle`` holds the rules (unit-tested with a fake clock); the server feeds it heartbeats,
-unload beacons and every request it handles; the launcher asks it once a second.  The browser tests run the
-real launcher (in this process, with shorter timings) and a real headless Edge/Chrome:
-``tests/e2e/drive_lifecycle.mjs``.
+Request tracking (``app/lifecycle.py``): requests being answered finish before the server closes, later ones are
+refused.  The real launcher (``packaging/layerforge_launcher.py``, the exe's entry point, run from source) in a
+real window: it stays running when the browser (Chrome) closes, a second start does not open a second copy,
+"Stop LayerForge" / closing the window stops it cleanly, and with a planning step running it asks first and
+stops that step through its own cancellation (nothing half-written is left).  The window is driven through the
+Win32 API (WM_CLOSE, the confirmation dialog's Yes) - the same messages a user's clicks send.
 """
 
 from __future__ import annotations
 
 import json
+import os
+import socket
 import subprocess
+import sys
 import threading
 import time
 import urllib.error
 import urllib.request
+from pathlib import Path
 
 import pytest
 
-from layerforge_l1.app import launcher, lifecycle, make_server
+from layerforge_l1.app import lifecycle, make_server
 from layerforge_l1.app import server as server_module
 
-
-class Clock:
-    def __init__(self) -> None:
-        self.now = 1000.0
-
-    def __call__(self) -> float:
-        return self.now
+ROOT = Path(__file__).resolve().parents[1]
+CHROME = Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe")
+# The launcher under test: the source entry point, or the packaged exe when LAYERFORGE_TEST_EXE names it.
+_EXE = os.environ.get("LAYERFORGE_TEST_EXE")
+LAUNCH = [_EXE] if _EXE else [sys.executable, str(ROOT / "packaging" / "layerforge_launcher.py")]
 
 
-def rules(**timings: float) -> tuple[lifecycle.Lifecycle, Clock]:
-    clock = Clock()
-    return lifecycle.Lifecycle(clock, **{"stale_s": 1800, "grace_s": 10, "await_s": 180, "sleep_s": 8 * 3600,
-                                         **timings}), clock
-
-
-def test_defaults_stop_quickly_on_close_but_wait_long_for_silent_tabs():
-    assert lifecycle.GRACE_S <= 10  # closing the last tab: stopped within seconds
-    assert lifecycle.STALE_S >= 30 * 60  # a tab silent for minutes (throttled, briefly frozen) is not given up
-    assert lifecycle.SLEEP_S >= 8 * 3600
-
-
-def test_waits_for_the_first_page_after_a_start():
-    life, clock = rules()
-    clock.now += 179
-    assert life.try_close(False) is None  # the browser may be slow to open
-    clock.now += 2
-    assert life.try_close(False) == "no LayerForge tab is open"  # it never came: do not run forever
-    assert life.closing
-
-
-def test_an_open_tab_keeps_it_running_and_the_last_one_leaving_stops_it_after_the_grace_period():
-    life, clock = rules()
-    assert life.seen("a") and life.seen("b")
-    clock.now += 100
-    life.seen("a"), life.seen("b")
-    life.left("a")  # one of two tabs closed
-    clock.now += 60
-    assert life.try_close(False) is None
-    life.left("b")  # the last one
-    clock.now += 9
-    assert life.try_close(False) is None
-    clock.now += 2
-    assert life.try_close(False)
-
-
-def test_a_reload_checks_in_again_within_the_grace_period():
-    life, clock = rules()
-    life.seen("a")
-    life.left("a")  # pagehide of the reload
-    clock.now += 1.5
-    assert life.request_started()  # the new page loads
-    life.request_finished()
-    life.seen("a2")
-    clock.now += 60
-    assert life.try_close(False) is None and life.open_tabs() == 1
-
-
-def test_a_crashed_browser_is_noticed_when_heartbeats_stop():
-    life, clock = rules()
-    life.seen("a")
-    clock.now += 1799
-    assert life.try_close(False) is None
-    clock.now += 2
-    assert life.open_tabs() == 0 and life.try_close(False)
-
-
-def test_a_sleeping_tab_keeps_it_running_until_it_wakes():
-    life, clock = rules()
-    life.seen("a")
-    life.seen("a", sleeping=True)  # the page's freeze event: no heartbeats until it wakes
-    clock.now += 7 * 3600
-    assert life.try_close(False) is None and life.open_tabs() == 1
-    life.seen("a")  # woke up: heartbeats again, normal rules
-    clock.now += 1801
-    assert life.try_close(False)
-
-
-def test_a_sleeping_tab_is_given_up_after_the_sleep_limit():
-    life, clock = rules()
-    life.seen("a", sleeping=True)
-    clock.now += 8 * 3600 + 1  # e.g. the browser was closed while the tab slept (no unload event)
-    assert life.try_close(False)
-
-
-def test_running_jobs_and_requests_being_answered_keep_it_running():
-    life, clock = rules()
-    life.seen("a")
-    life.left("a")
-    clock.now += 600
-    assert life.try_close(True) is None  # planning / export still running
-    assert life.request_started()  # a save or download being answered
-    clock.now += 600
-    assert life.try_close(False) is None
-    life.request_finished()
-    clock.now += 11
-    assert life.try_close(False)
-
-
-def test_closing_refuses_new_requests_and_heartbeats():
-    life, clock = rules()
-    life.seen("a")
-    life.left("a")
-    clock.now += 11
-    assert life.try_close(False)
-    assert not life.request_started() and not life.seen("b")
-    assert life.try_close(False) is None  # decided once
-    assert life.wait_idle(0.1)
-
-
-def test_a_second_start_waits_for_its_page():
-    life, clock = rules()
-    life.seen("a")
-    life.left("a")
-    clock.now += 5
-    life.expect_page()  # LayerForge.exe double-clicked again: a browser page is coming
-    clock.now += 100
-    assert life.try_close(False) is None
-    life.seen("b")  # it arrived: back to the normal rules
-    life.left("b")
-    clock.now += 11
-    assert life.try_close(False)
-
-
+# -- requests in progress -----------------------------------------------------------------------------------
 def test_wait_idle_returns_when_the_last_request_is_answered():
-    life, _ = rules()
+    life = lifecycle.Lifecycle()
     assert life.request_started()
     threading.Timer(0.3, life.request_finished).start()
     assert not life.wait_idle(0.05)
     assert life.wait_idle(5)
-
-
-# -- the server --------------------------------------------------------------------------------------------
-def _post(url: str, body: object, origin: str | None = None, content_type: str = "application/json"):
-    request = urllib.request.Request(url, data=json.dumps(body).encode(), method="POST",
-                                     headers={"Content-Type": content_type, **({"Origin": origin} if origin else {})})
-    try:
-        with urllib.request.urlopen(request, timeout=10) as response:
-            return response.status, json.loads(response.read())
-    except urllib.error.HTTPError as error:
-        return error.code, json.loads(error.read() or b"{}")
+    life.close_now("test")
+    assert not life.request_started()
 
 
 def _get(url: str):
@@ -170,37 +52,12 @@ def _get(url: str):
         return error.code, json.loads(error.read() or b"{}")
 
 
-@pytest.fixture
-def served(tmp_path):
+def test_requests_in_progress_finish_and_later_ones_are_refused_once_closing(tmp_path):
     server = make_server(tmp_path / "ws", port=0)
     threading.Thread(target=server.serve_forever, daemon=True).start()
-    yield server, f"http://127.0.0.1:{server.server_address[1]}/"
-    server.shutdown()
-    server.server_close()
-
-
-def test_presence_endpoint(served):
-    server, url = served
+    url = f"http://127.0.0.1:{server.server_address[1]}/"
     life = server.app.lifecycle
-    assert _get(url + "api/info")[1]["heartbeat_s"] == lifecycle.HEARTBEAT_S
-    # sendBeacon posts text/plain from the page's own origin
-    assert _post(url + "api/presence", {"tab": "t1"}, origin=url.rstrip("/"), content_type="text/plain")[0] == 200
-    assert life.open_tabs() == 1
-    assert _post(url + "api/presence", {"tab": "t1", "leaving": True}, content_type="text/plain")[0] == 200
-    assert life.open_tabs() == 0
-    assert _post(url + "api/presence", {"tab": "t2", "sleeping": True}, content_type="text/plain")[0] == 200
-    assert life._tabs["t2"][1] is True and life.open_tabs() == 1
-    assert _post(url + "api/presence", {"tab": "t2", "leaving": True})[0] == 200
-    assert _post(url + "api/presence", {"tab": "x"}, origin="http://elsewhere.example")[0] == 403
-    assert _post(url + "api/presence", {})[0] == 400
-    assert life.open_tabs() == 0
-
-
-def test_requests_are_counted_and_refused_once_closing(served):
-    server, url = served
-    life = server.app.lifecycle
-    started = threading.Event()
-    release = threading.Event()
+    started, release = threading.Event(), threading.Event()
     original = server_module.Handler._get
 
     def slow_get(self, parts, query):
@@ -215,233 +72,241 @@ def test_requests_are_counted_and_refused_once_closing(served):
         thread = threading.Thread(target=lambda: replies.append(_get(url + "api/projects")))
         thread.start()
         assert started.wait(5)
-        assert life.try_close(False) is None  # a request is being answered
         life.close_now("test")
         status, body = _get(url + "api/info")
         assert status == 503 and body["error"]["closing"] is True
-        assert _post(url + "api/presence", {"tab": "late"})[0] == 503
         assert not life.wait_idle(0.1)
         release.set()
         thread.join(10)
-        assert replies[0][0] == 200  # the request in progress was answered, not cut off
-        assert life.wait_idle(1)
+        assert replies[0][0] == 200 and life.wait_idle(1)  # answered, not cut off
     finally:
         server_module.Handler._get = original
         release.set()
+        server.shutdown()
+        server.server_close()
 
 
-def test_launch_announcement_extends_the_wait(served):
-    server, url = served
-    life = server.app.lifecycle
-    life.grace_s, life._await_until, life.await_s = 0.0, 0.0, 60.0  # would close now if nothing were coming
-    assert _get(url + "api/info")[0] == 200
-    time.sleep(0.05)
-    assert life._await_until == 0.0  # a plain request announces nothing
-    assert _get(url + "api/info?launch=1")[0] == 200  # LayerForge.exe started again: a page is coming
-    time.sleep(0.05)
-    assert life.try_close(False) is None
+def test_no_page_stop_and_no_heartbeat_endpoints(tmp_path):
+    server = make_server(tmp_path / "ws", port=0)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{server.server_address[1]}/"
+    try:
+        info = _get(url + "api/info")[1]
+        assert "can_stop" not in info and "heartbeat_s" not in info
+        for path in ("api/stop", "api/presence"):
+            request = urllib.request.Request(url + path, data=b"{}", method="POST", headers={"Content-Type": "application/json"})
+            with pytest.raises(urllib.error.HTTPError) as error:
+                urllib.request.urlopen(request, timeout=10)
+            assert error.value.code == 404
+    finally:
+        server.shutdown()
+        server.server_close()
 
 
-# -- the launcher ------------------------------------------------------------------------------------------
+# -- the real launcher window ---------------------------------------------------------------------------------
+windows_only = pytest.mark.skipif(sys.platform != "win32", reason="the launcher window is tested on Windows")
+
+
+def _user32():
+    import ctypes
+    from ctypes import wintypes
+
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+    user32.FindWindowW.restype = wintypes.HWND
+    user32.FindWindowW.argtypes = [wintypes.LPCWSTR, wintypes.LPCWSTR]
+    user32.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
+    user32.IsWindowVisible.argtypes = [wintypes.HWND]
+    user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
+    return user32
+
+
+def _process_tree(pid: int) -> set[int]:
+    """The process and its descendants (a venv's python.exe starts the real interpreter as a child)."""
+
+    import ctypes
+    from ctypes import wintypes
+
+    class Entry(ctypes.Structure):
+        _fields_ = [("dwSize", wintypes.DWORD), ("cntUsage", wintypes.DWORD), ("th32ProcessID", wintypes.DWORD),
+                    ("th32DefaultHeapID", ctypes.c_size_t), ("th32ModuleID", wintypes.DWORD),
+                    ("cntThreads", wintypes.DWORD), ("th32ParentProcessID", wintypes.DWORD),
+                    ("pcPriClassBase", ctypes.c_long), ("dwFlags", wintypes.DWORD), ("szExeFile", ctypes.c_wchar * 260)]
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
+    snap = kernel32.CreateToolhelp32Snapshot(0x2, 0)  # TH32CS_SNAPPROCESS
+    parents: dict[int, int] = {}
+    entry = Entry()
+    entry.dwSize = ctypes.sizeof(Entry)
+    ok = kernel32.Process32FirstW(snap, ctypes.byref(entry))
+    while ok:
+        parents[entry.th32ProcessID] = entry.th32ParentProcessID
+        ok = kernel32.Process32NextW(snap, ctypes.byref(entry))
+    kernel32.CloseHandle(snap)
+    tree, grew = {pid}, True
+    while grew:
+        grew = False
+        for child, parent in parents.items():
+            if parent in tree and child not in tree:
+                tree.add(child)
+                grew = True
+    return tree
+
+
+def _windows_of(pid: int, title: str, class_name: str | None = None) -> list[int]:
+    """Visible top-level windows of a process (or its children) with this title (and class)."""
+
+    import ctypes
+    from ctypes import wintypes
+
+    user32 = _user32()
+    found: list[int] = []
+    pids = _process_tree(pid)
+    proc = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+
+    def visit(hwnd, _):
+        owner = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(owner))
+        if owner.value in pids and user32.IsWindowVisible(hwnd):
+            text = ctypes.create_unicode_buffer(256)
+            user32.GetWindowTextW(hwnd, text, 256)
+            cls = ctypes.create_unicode_buffer(256)
+            user32.GetClassNameW(hwnd, cls, 256)
+            if text.value == title and (class_name is None or cls.value == class_name):
+                found.append(hwnd)
+        return True
+
+    user32.EnumWindows(proc(visit), 0)
+    return found
+
+
+class Launcher:
+    """``packaging/layerforge_launcher.py`` in a subprocess with its own projects folder and local data."""
+
+    def __init__(self, tmp: Path, *extra: str) -> None:
+        self.env = {**os.environ, "LOCALAPPDATA": str(tmp / "localappdata"), "PYTHONPATH": str(ROOT / "src")}
+        self.workspace = tmp / "ws"
+        self.proc = subprocess.Popen([*LAUNCH, "--workspace", str(self.workspace), "--port", "0", "--no-browser", *extra],
+                                     env=self.env, cwd=ROOT)
+        self.url = self._published_url()
+
+    def _published_url(self) -> str:
+        folder = Path(self.env["LOCALAPPDATA"]) / "LayerForge" / "instances"
+        end = time.time() + 90
+        while time.time() < end:
+            for record in folder.glob("*.json"):
+                try:
+                    url = json.loads(record.read_text(encoding="utf-8"))["url"]
+                    if _get(url + "api/info")[0] == 200:
+                        return url
+                except (OSError, ValueError, KeyError):
+                    pass
+            if self.proc.poll() is not None:
+                raise AssertionError(f"launcher exited with {self.proc.returncode}")
+            time.sleep(0.3)
+        raise AssertionError("launcher did not start")
+
+    def window(self) -> int:
+        end = time.time() + 20
+        while time.time() < end:
+            found = _windows_of(self.proc.pid, "LayerForge", "TkTopLevel")
+            if found:
+                return found[0]
+            time.sleep(0.2)
+        raise AssertionError("no LayerForge window")
+
+    def close_window(self) -> None:
+        """What the window's close box and "Stop LayerForge" do (WM_CLOSE runs the same stop routine)."""
+
+        assert _user32().PostMessageW(self.window(), 0x0010, 0, 0)  # WM_CLOSE
+
+    def answer_yes(self, timeout: float = 20) -> str:
+        """Press Yes in the launcher's confirmation dialog; returns once it was found."""
+
+        end = time.time() + timeout
+        while time.time() < end:
+            dialogs = _windows_of(self.proc.pid, "LayerForge", "#32770")
+            if dialogs:
+                assert _user32().PostMessageW(dialogs[0], 0x0111, 6, 0)  # WM_COMMAND IDYES
+                return "yes"
+            time.sleep(0.2)
+        raise AssertionError("no confirmation dialog")
+
+    def alive(self) -> bool:
+        port = int(self.url.rsplit(":", 1)[1].strip("/"))
+        try:
+            socket.create_connection(("127.0.0.1", port), timeout=2).close()
+            return True
+        except OSError:
+            return False
+
+    def kill(self) -> None:
+        if self.proc.poll() is None:
+            for pid in sorted(_process_tree(self.proc.pid) - {self.proc.pid}):
+                subprocess.run(["taskkill", "/F", "/PID", str(pid)], capture_output=True)
+            self.proc.kill()
+            self.proc.wait(10)
+
+
 @pytest.fixture
-def local_appdata(tmp_path, monkeypatch):
-    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "localappdata"))
-    monkeypatch.setattr("sys.stdout", None)  # as in the windowed executable; restored after the test
-    monkeypatch.setattr("sys.stderr", None)
-    monkeypatch.setattr(launcher.webbrowser, "open", lambda url: None)
-    return tmp_path / "localappdata"
+def launched(tmp_path):
+    started: list[Launcher] = []
+
+    def start(*extra: str) -> Launcher:
+        launcher = Launcher(tmp_path, *extra)
+        started.append(launcher)
+        return launcher
+
+    yield start
+    for launcher in started:
+        launcher.kill()
 
 
-def _start(workspace, runners=None):
-    """The real launcher (no window) in a thread; returns (thread, result, url)."""
-
-    result: dict = {}
-    thread = threading.Thread(target=lambda: result.setdefault(
-        "code", launcher.main(["--workspace", str(workspace), "--port", "0"])), daemon=True)
-    thread.start()
-    lock = launcher.InstanceLock(workspace)
-    for _ in range(150):
-        url = lock.running_url()
-        if url:
-            return thread, result, url
-        thread.join(0.2)
-    raise AssertionError("launcher did not start")
-
-
-def test_never_opened_page_stops_after_the_wait_and_the_folder_can_start_again(tmp_path, local_appdata, monkeypatch):
-    monkeypatch.setattr(lifecycle, "AWAIT_S", 2.0)
-    monkeypatch.setattr(lifecycle, "GRACE_S", 0.5)
-    workspace = launcher.check_workspace(tmp_path / "ws")
-    thread, result, url = _start(workspace)
-    thread.join(20)
-    assert not thread.is_alive() and result["code"] == 0
-    log = (local_appdata / "LayerForge" / "logs" / "layerforge.log").read_text(encoding="utf-8")
-    assert "no LayerForge tab is open; stopping" in log and "server stopped" in log
-    thread, result, url2 = _start(workspace)  # starting again (the EXE double-clicked again)
-    assert _get(url2 + "api/info")[0] == 200
-    assert _post(url2 + "api/stop", {})[0] == 200
-    thread.join(20)
-    assert not thread.is_alive() and result["code"] == 0
+@windows_only
+def test_window_keeps_the_app_running_after_the_browser_closes_and_stops_it_cleanly(launched, tmp_path):
+    app = launched()
+    assert app.window()  # the visible launcher window
+    if CHROME.is_file():  # open LayerForge in Chrome, then close the browser
+        profile = tmp_path / "chrome"
+        chrome = subprocess.Popen([str(CHROME), "--headless=new", f"--user-data-dir={profile}", "--no-first-run",
+                                   "--disable-sync", app.url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        time.sleep(6)
+        chrome.terminate()
+        chrome.wait(20)
+    time.sleep(15)  # well past the old automatic stop's grace period
+    assert app.alive() and app.proc.poll() is None
+    # A second start opens no second copy: it returns at once and the one window stays.
+    second = subprocess.run([*LAUNCH, "--workspace", str(app.workspace), "--no-browser"], env=app.env, cwd=ROOT, timeout=60)
+    assert second.returncode == 0 and len(_windows_of(app.proc.pid, "LayerForge", "TkTopLevel")) == 1
+    app.close_window()  # no step running: stops without asking
+    assert app.proc.wait(60) == 0 and not app.alive()
+    log = (Path(app.env["LOCALAPPDATA"]) / "LayerForge" / "logs" / "layerforge.log").read_text(encoding="utf-8")
+    assert "server stopped" in log
+    again = launched()  # the projects folder is free again
+    assert again.alive()
+    again.close_window()
+    assert again.proc.wait(60) == 0
 
 
-def test_second_start_while_the_first_is_closing_waits_and_starts(tmp_path, local_appdata):
-    workspace = launcher.check_workspace(tmp_path / "ws")
-    closing = launcher.InstanceLock(workspace)
-    assert closing.acquire()  # held by a copy that no longer answers (it is shutting down)
-    threading.Timer(2.0, closing.release).start()
-    thread, result, url = _start(workspace)  # waits for the lock instead of reporting "does not answer"
-    assert _get(url + "api/info")[0] == 200
-    assert _post(url + "api/stop", {})[0] == 200
-    thread.join(20)
-    assert result["code"] == 0
+@windows_only
+def test_stopping_with_a_planning_step_running_asks_and_stops_that_step_cleanly(launched):
+    from test_l4_app import SAILBOAT
 
-
-# -- real browser ------------------------------------------------------------------------------------------
-def _browser_or_skip():
-    from test_l4_app import BROWSERS, _node_ok
-
-    browser = next((b for b in BROWSERS if b.is_file()), None)
-    if not _node_ok() or browser is None:
-        pytest.skip("needs Node >= 22 and Edge/Chrome to drive the UI in a real browser")
-    return browser
-
-
-def _drive(url, browser, scenario, on_checkpoint=lambda name: None):
-    from test_l4_app import ROOT
-
-    shots = ROOT / "artifacts" / "app_lifecycle_v1"
-    driver = subprocess.Popen(["node", str(ROOT / "tests" / "e2e" / "drive_lifecycle.mjs"), url, str(browser), scenario,
-                               str(shots)], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                              text=True, encoding="utf-8")
-    stderr: list[str] = []
-    threading.Thread(target=lambda: stderr.extend(driver.stderr), daemon=True).start()
-    last = ""
-    for line in driver.stdout:
-        if line.startswith("@@"):
-            on_checkpoint(line[2:].strip())
-            driver.stdin.write("go\n")
-            driver.stdin.flush()
-        elif line.startswith("{"):
-            last = line
-    driver.wait(120)
-    assert last, "".join(stderr)[-3000:]
-    r = json.loads(last)
-    (shots / f"drive_{scenario}.json").write_text(json.dumps(r, indent=1), encoding="utf-8")
-    assert r["ok"], r.get("error", "") + "\n" + "".join(stderr)[-3000:]
-    assert r["console_errors"] == []
-    return {step["name"]: step for step in r["steps"]}
-
-
-def test_browser_tabs_reload_and_running_job(tmp_path, local_appdata, monkeypatch):
-    """Two tabs, close one: still running; reload: still running; close the last one while a step runs:
-    still running until it finishes, then it stops within the grace period (the unload beacon, not the
-    much longer heartbeat timeout)."""
-
-    browser = _browser_or_skip()
-    monkeypatch.setattr(lifecycle, "GRACE_S", 3.0)
-    monkeypatch.setattr(lifecycle, "STALE_S", 60.0)
-    monkeypatch.setattr(server_module, "HEARTBEAT_S", 2.0)
-    captured = {}
-    original_start = launcher.Runner.start
-
-    def start(self):
-        captured["runner"] = self
-        return original_start(self)
-
-    monkeypatch.setattr(launcher.Runner, "start", start)
-    workspace = launcher.check_workspace(tmp_path / "ws")
-    thread, result, url = _start(workspace)
-    app = captured["runner"].server.app
-    from test_l4_launcher import _png
-
-    name = app.workspace.create("job.png", _png(), {})
-    release = threading.Event()
-    finished = threading.Event()
-
-    def checkpoint(step):
-        if step == "job":
-            app.submit("test_step", name, lambda progress: (release.wait(60), finished.set()))
-        elif step == "release":
-            release.set()
-
-    try:
-        steps = _drive(url, browser, "tabs", checkpoint)
-        assert steps["two_tabs_open"]["exit_label"] == "Exit"
-        assert steps["closed_one_of_two"]["alive"] is True
-        assert steps["after_reload"]["alive"] is True
-        assert steps["last_tab_closed_while_job_runs"]["alive"] is True
-        assert finished.is_set()
-        stopped = steps["after_job_finished"]["stopped_after_s"]
-        assert stopped is not None and stopped < 10  # grace 3 s + the 1 s check, far below the 60 s timeout
-        thread.join(20)
-        assert not thread.is_alive() and result["code"] == 0
-        assert captured["runner"].abandoned == []  # nothing was cut off
-    finally:
-        release.set()
-        if thread.is_alive():
-            _post(url + "api/stop", {"force": True})
-            thread.join(20)
-
-
-def test_browser_crash_is_noticed(tmp_path, local_appdata, monkeypatch):
-    browser = _browser_or_skip()
-    monkeypatch.setattr(lifecycle, "GRACE_S", 2.0)
-    monkeypatch.setattr(lifecycle, "STALE_S", 12.0)
-    monkeypatch.setattr(server_module, "HEARTBEAT_S", 2.0)
-    thread, result, url = _start(launcher.check_workspace(tmp_path / "ws"))
-    try:
-        steps = _drive(url, browser, "crash")
-        assert steps["five_s_after_crash"]["alive"] is True  # no premature stop
-        assert steps["after_crash"]["crash_to_stop_s"] is not None and steps["after_crash"]["crash_to_stop_s"] < 25
-        thread.join(20)
-        assert result["code"] == 0
-    finally:
-        if thread.is_alive():
-            _post(url + "api/stop", {"force": True})
-            thread.join(20)
-
-
-def test_browser_exit_stops_and_other_tabs_say_so(tmp_path, local_appdata, monkeypatch):
-    browser = _browser_or_skip()
-    monkeypatch.setattr(server_module, "HEARTBEAT_S", 2.0)
-    thread, result, url = _start(launcher.check_workspace(tmp_path / "ws"))
-    try:
-        steps = _drive(url, browser, "exit")
-        assert steps["exit_clicked"]["dialogs"] == ["Exit LayerForge?"]
-        assert steps["exit_clicked"]["stopped_after_s"] is not None
-        assert steps["other_tab"]["shows_stopped"] is True
-        thread.join(20)
-        assert result["code"] == 0
-    finally:
-        if thread.is_alive():
-            _post(url + "api/stop", {"force": True})
-            thread.join(20)
-
-
-def test_browser_sleeping_tab_keeps_it_running(tmp_path, local_appdata, monkeypatch):
-    """The browser freezes the only tab (as Edge sleeping tabs do): the page's freeze event says so, and the app
-    keeps running well past the heartbeat timeout; when the tab wakes, it checks in again."""
-
-    browser = _browser_or_skip()
-    monkeypatch.setattr(lifecycle, "GRACE_S", 2.0)
-    monkeypatch.setattr(lifecycle, "STALE_S", 6.0)
-    monkeypatch.setattr(lifecycle, "SLEEP_S", 600.0)
-    monkeypatch.setattr(server_module, "HEARTBEAT_S", 2.0)
-    captured = {}
-    original_start = launcher.Runner.start
-
-    def start(self):
-        captured["runner"] = self
-        return original_start(self)
-
-    monkeypatch.setattr(launcher.Runner, "start", start)
-    thread, result, url = _start(launcher.check_workspace(tmp_path / "ws"))
-    try:
-        steps = _drive(url, browser, "sleep")
-        assert steps["frozen_beyond_stale"]["alive"] is True  # 15 s frozen > 6 s heartbeat timeout
-        assert steps["woken"]["alive"] is True and steps["woken"]["stopped_page"] is False
-        assert captured["runner"].server.app.lifecycle.open_tabs() == 0  # the driver closed its tab at the end
-    finally:
-        if thread.is_alive():
-            _post(url + "api/stop", {"force": True})
-            thread.join(20)
+    app = launched()
+    request = urllib.request.Request(app.url + "api/projects?filename=sailboat_512.png&scale=2&name=busy",
+                                     data=SAILBOAT.read_bytes(), method="POST")
+    with urllib.request.urlopen(request, timeout=60) as response:
+        job = json.loads(response.read())["job"]
+    end = time.time() + 120
+    while time.time() < end:  # inside the planner's search
+        current = _get(app.url + f"api/jobs/{job['id']}")[1]
+        if any(e["stage"] == "L1_INTAKE_DONE" for e in current["events"]):
+            break
+        time.sleep(0.05)
+    app.close_window()
+    assert app.answer_yes() == "yes"  # "LayerForge is still working on: propose (busy) ... Stop anyway?"
+    assert app.proc.wait(90) == 0 and not app.alive()
+    project = app.workspace / "busy"
+    assert not (project / "proposal.next").exists() and not (project / "proposal").exists()  # nothing half-written
+    log = (Path(app.env["LOCALAPPDATA"]) / "LayerForge" / "logs" / "layerforge.log").read_text(encoding="utf-8")
+    assert "stopping while running" not in log  # the step was cancelled before the server stopped

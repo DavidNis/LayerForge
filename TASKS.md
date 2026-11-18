@@ -460,3 +460,13 @@ No complete UI/server, arbitrary photographic depth estimation, frame design, gl
   artwork tests; real-browser Accept / Restore / warnings (scratch drive).
 - [x] User guide (Hebrew GUI guide, local) and README_FIRST.txt explain Accept / Restore / retention.
 - [x] Committed (with D-V3-048); exe/zip rebuilt after the commit, packaged tests in the session report.
+
+## Stop for planning jobs; visible launcher window (2026-11-14, D-V3-055)
+
+- [x] Cooperative cancel (core/cancel.py, JobRunner, POST /api/jobs/<id>/cancel, Stop in the progress bar); first
+  plan staged in proposal.next; tests/test_job_cancel.py (10).
+- [x] Launcher window restored; heartbeats / automatic stop / page Exit removed; window tests (source + exe).
+- [x] Exe/zip rebuilt (2026-11-14 17:35).
+- [ ] Remaining focused tests and tests/test_windows_build.py (need free memory); packaged stop-with-planning test.
+- [x] "Review this candidate" stoppable (D-V3-056); tests and Chrome drive.
+- [ ] Commit (after review).

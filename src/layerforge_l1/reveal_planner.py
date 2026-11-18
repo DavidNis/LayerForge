@@ -21,6 +21,7 @@ existing validator is reused unchanged to check the planner's output.
 
 from __future__ import annotations
 
+from .core.cancel import check as check_cancelled
 import hashlib
 import time
 from contextlib import contextmanager
@@ -143,6 +144,7 @@ def build_cells(
     region_map = np.full(labels.shape, -1, dtype=np.int32)
     region_color: list[int] = []
     for color in np.unique(labels):
+        check_cancelled()  # Stop in the app (no effect otherwise)
         components, count = ndimage.label(labels == color)
         region_map[components > 0] = components[components > 0] - 1 + len(region_color)
         region_color.extend([int(color)] * count)
@@ -468,6 +470,8 @@ class RevealPlanner:
         the one the computation returned.
         """
 
+        check_cancelled()  # Stop in the app: between two evaluations, never inside one (no effect otherwise)
+
         shared = _shared_reveals.get() if SHARE_EVALUATIONS else None
         if shared is None:
             return self._maximal_reveal(covered_cells, color)
@@ -689,6 +693,7 @@ class RevealPlanner:
         covered = self.start_covered.copy()
         sheets = []
         for reveal in reveals:
+            check_cancelled()  # Stop in the app (no effect otherwise)
             physical = self.sheet_mask(covered, reveal)
             sheets.append(
                 {

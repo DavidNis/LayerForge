@@ -16,6 +16,7 @@ findings become flags for the user; see ``propose.py``.
 
 from __future__ import annotations
 
+from .cancel import check as check_cancelled
 import hashlib
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
@@ -562,6 +563,7 @@ def prepare_target(
     fragment_px = max(1, round(config.min_fragment_mm2 / mm_per_pixel**2))
     flatten = replace(FlattenConfig(), min_fragment_pixels=fragment_px)
     default_labels = snap_to_palette(canvas, palette, flatten)
+    check_cancelled()  # Stop in the app (no effect otherwise)
 
     # The same smoothing and nearest-color step as ``snap_to_palette``, before its cleanup filters.
     smooth = cv2.bilateralFilter(canvas, flatten.bilateral_diameter, flatten.bilateral_sigma_color, flatten.bilateral_sigma_space)
@@ -572,8 +574,10 @@ def prepare_target(
     if config.clean_speckles:
         default_labels, cleaned = merge_undrawn_boundaries(default_labels, inside, smooth_lab.reshape(*shape, 3),
                                                            palette, config)
+    check_cancelled()  # Stop in the app (no effect otherwise)
     details = detect_details(canvas, inside, palette, smooth_labels, default_labels, smooth, mm_per_pixel, config,
                              cleaned)
+    check_cancelled()
     default_palette = palette
     labels, palette = apply_detail_decisions(default_labels, smooth, palette, details, decisions, config.merge_delta)
     frame_rgb = choose_frame_color(palette)
@@ -588,6 +592,7 @@ def prepare_target(
         before_cleanup[:] = choose_frame_color(plain_palette)
         before_cleanup[inside] = plain_palette[plain_labels[inside]]
 
+    check_cancelled()
     # Measurements on the artwork area only (never on the frame padding).
     canvas_lab = _lab(canvas[inside])
     palette_lab = _lab(palette)
